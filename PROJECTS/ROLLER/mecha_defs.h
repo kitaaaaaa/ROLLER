@@ -48,6 +48,59 @@
 /* Beyond this the lock breaks; the reticle goes cold and homing stops. */
 #define MECHA_LOCK_RANGE       MECHA_M(260.0f)
 
+/*
+ * The lock is breakable.
+ *
+ * Weapons aim themselves at whatever is locked, so a lock that can never be
+ * lost means the fight is decided entirely by the feet. Holding it is a
+ * skill instead: it survives while the target is inside a generous cone of
+ * the mech's own heading, and once it has been outside for the grace period
+ * it drops -- the auto-turn stops following, shots fire straight down the
+ * barrel with no lead, and missiles launch unguided.
+ *
+ * Getting it back is deliberately harder than keeping it. On its own it
+ * returns only when the target is well inside the much narrower reacquire
+ * cone. The quick way back is to boost or jump, either of which snaps it on
+ * from any angle -- which is what makes those two worth spending gauge on
+ * beyond the distance they cover.
+ */
+#define MECHA_LOCK_CONE          MECHA_DEG(32)
+#define MECHA_LOCK_REACQUIRE_CONE MECHA_DEG(12)
+#define MECHA_LOCK_BREAK_TICKS   MECHA_SEC(0.35f)
+
+/*
+ * Guard.
+ *
+ * It was a crouch, and it still refills the gauge fastest and still selects
+ * its own row of weapons. What it adds is a hard answer to being closed on:
+ * a guarding mech takes 15% of a melee hit. Only melee -- guard is a stance,
+ * not a shield, and standing in it against gunfire has to lose, or the fast
+ * refill it already grants would make it the only thing anyone does.
+ *
+ * Stagger is cut by half rather than by the same 85%, so a guarded blade
+ * still rocks the machine it lands on. Reading the swing should win the
+ * exchange outright; it should not make the swing feel like nothing
+ * happened, and leaving some stagger on is what keeps a blade rush worth
+ * committing to even against someone who saw it coming.
+ */
+#define MECHA_GUARD_MELEE_DAMAGE  0.15f
+#define MECHA_GUARD_MELEE_STAGGER 0.50f
+
+/*
+ * Jump cancel.
+ *
+ * A jump snaps the lock on, which makes going up the reliable way to find an
+ * opponent who has got behind you. Guard in the air then drops the mech
+ * straight down instead of riding the arc out, and the landing leaves the
+ * turn rate off its leash for a moment -- long enough to come down facing
+ * the other way. That pair is the whole move: up to find them, down to face
+ * them.
+ */
+#define MECHA_CANCEL_FALL_SPEED  MECHA_MPS(46.0f)
+#define MECHA_CANCEL_LAND_TICKS  MECHA_SEC(0.12f)
+#define MECHA_CANCEL_TURN_TICKS  MECHA_SEC(0.45f)
+#define MECHA_CANCEL_TURN_SCALE  7
+
 /* Mechs push each other apart rather than overlapping. */
 #define MECHA_PUSH_PER_TICK    MECHA_M(0.9f)
 

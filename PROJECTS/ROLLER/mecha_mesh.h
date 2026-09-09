@@ -74,7 +74,7 @@ bool mecha_quads_add(tMechaQuadList *pList,
 
 void mecha_mesh_arena(tMechaQuadList *pList, const tMechaArena *pArena);
 
-/* One posed mech. The walk cycle, the dash lean, the crouch and the
+/* One posed mech. The walk cycle, the dash lean, the guard crouch and the
  * knockdown all come out of the mech's own simulated state. */
 void mecha_mesh_mech(tMechaQuadList *pList, const tMechaWorld *pWorld,
                      int iMechIdx);

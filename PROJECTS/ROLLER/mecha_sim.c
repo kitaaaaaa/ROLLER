@@ -41,9 +41,10 @@ eMechaStance mecha_mech_stance(const tMechaMech *pMech)
     return MECHA_STANCE_STAND;
 
   switch (pMech->byMove) {
-  case MECHA_MOVE_CROUCH: return MECHA_STANCE_CROUCH;
+  case MECHA_MOVE_GUARD:  return MECHA_STANCE_GUARD;
   case MECHA_MOVE_DASH:   return MECHA_STANCE_DASH;
-  case MECHA_MOVE_JUMP:   return MECHA_STANCE_JUMP;
+  case MECHA_MOVE_JUMP:
+  case MECHA_MOVE_CANCEL: return MECHA_STANCE_JUMP;
   default:                return MECHA_STANCE_STAND;
   }
 }
@@ -63,6 +64,9 @@ static bool mecha_can_act(const tMechaMech *pMech)
   case MECHA_MOVE_DOWN:
   case MECHA_MOVE_RISE:
   case MECHA_MOVE_LAND:
+  /* The drop is committed once it starts, the same as the landing it ends
+   * in. Cancelling is a decision, not a free reposition. */
+  case MECHA_MOVE_CANCEL:
     return false;
   default:
     return true;
@@ -258,6 +262,32 @@ void mecha_sim_spawn_effect(tMechaWorld *pWorld, uint8_t byKind,
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * How much of a hit a guarding mech keeps out.
+ *
+ * Only melee, and only while actually in the stance. Guard is a posture for
+ * answering something that has closed the distance, not a shield -- standing
+ * in it against gunfire has to lose, or the fast boost refill it already
+ * grants would make it the only thing anyone ever does. Returns 1.0 for
+ * every case that is not a guarded melee hit, so callers can multiply
+ * unconditionally.
+ */
+static void mecha_guard_mitigation(const tMechaMech *pVictim, uint8_t byKind,
+                                   float *pfDamageScale,
+                                   float *pfStaggerScale)
+{
+  *pfDamageScale = 1.0f;
+  *pfStaggerScale = 1.0f;
+  if (!pVictim || byKind != MECHA_PROJ_MELEE)
+    return;
+  if (pVictim->byMove != MECHA_MOVE_GUARD)
+    return;
+  *pfDamageScale = MECHA_GUARD_MELEE_DAMAGE;
+  *pfStaggerScale = MECHA_GUARD_MELEE_STAGGER;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 void mecha_sim_damage(tMechaWorld *pWorld, int iVictimIdx, int iAttackerIdx,
                       float fDamage, float fStagger,
                       float fPushX, float fPushZ)
@@ -422,6 +452,77 @@ static void mecha_update_target(tMechaWorld *pWorld, int iMechIdx,
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * Whether the mech is actually tracking whoever the reticle is on.
+ *
+ * mecha_update_target picks who; this decides whether the lock is live. It
+ * holds while the target sits inside a generous cone of the mech's own
+ * heading and drops once it has been outside for the grace period, at which
+ * point the auto-turn stops following and every weapon fires straight down
+ * the barrel. Boosting or jumping snaps it back on from any angle, which is
+ * what makes those worth spending gauge on for reasons other than distance.
+ *
+ * Reads byMove as movement left it last tick. One tick of lag on a dash that
+ * lasts dozens does not matter, and running before movement is what lets the
+ * facing update downstream act on a fresh lock.
+ */
+static void mecha_update_lock(tMechaWorld *pWorld, int iMechIdx)
+{
+  tMechaMech *pMech = &pWorld->aMechs[iMechIdx];
+  const tMechaMech *pTarget;
+  int iBearing;
+  int iOff;
+
+  if (!mecha_mech_alive(pMech)
+      || pMech->iTargetIdx < 0 || pMech->iTargetIdx >= MECHA_MAX_MECHS) {
+    pMech->byLock = MECHA_LOCK_NONE;
+    pMech->iLockSlipTicks = 0;
+    return;
+  }
+  pTarget = &pWorld->aMechs[pMech->iTargetIdx];
+  if (!mecha_mech_alive(pTarget)) {
+    pMech->byLock = MECHA_LOCK_NONE;
+    pMech->iLockSlipTicks = 0;
+    return;
+  }
+
+  /* Off the ground or riding a boost, the lock comes on from any angle. */
+  if (pMech->byMove == MECHA_MOVE_DASH || pMech->byMove == MECHA_MOVE_JUMP
+      || pMech->byMove == MECHA_MOVE_CANCEL) {
+    pMech->byLock = MECHA_LOCK_HELD;
+    pMech->iLockSlipTicks = 0;
+    return;
+  }
+
+  iBearing = mecha_atan2_angle(pTarget->fX - pMech->fX,
+                               pTarget->fZ - pMech->fZ);
+  iOff = mecha_angle_delta(pMech->iFacing, iBearing);
+  if (iOff < 0)
+    iOff = -iOff;
+
+  if (pMech->byLock == MECHA_LOCK_NONE) {
+    /* Broken locks do not drift back on. Line the machine up, or boost. */
+    if (iOff <= MECHA_LOCK_REACQUIRE_CONE) {
+      pMech->byLock = MECHA_LOCK_HELD;
+      pMech->iLockSlipTicks = 0;
+    }
+    return;
+  }
+
+  if (iOff <= MECHA_LOCK_CONE) {
+    pMech->byLock = MECHA_LOCK_HELD;
+    pMech->iLockSlipTicks = 0;
+    return;
+  }
+
+  /* The grace period stops a lock dying to one frame of overshoot. */
+  pMech->iLockSlipTicks++;
+  pMech->byLock = pMech->iLockSlipTicks >= MECHA_LOCK_BREAK_TICKS
+                    ? MECHA_LOCK_NONE : MECHA_LOCK_SLIPPING;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 /* Bearing and elevation from this mech to its lock. Returns false when there
  * is nothing locked, leaving the outputs untouched. */
 static bool mecha_aim_at_target(const tMechaWorld *pWorld, int iMechIdx,
@@ -538,11 +639,22 @@ static void mecha_update_facing(tMechaWorld *pWorld, int iMechIdx,
   int iMaxStep = (int)(pDef->fTurnRate * MECHA_DT);
   int iBearing;
   int iElevation;
+  bool bFreeTurn = pMech->iFreeTurnTicks > 0;
 
   if (iMaxStep < 1)
     iMaxStep = 1;
 
-  if (mecha_aim_at_target(pWorld, iMechIdx, &iBearing, &iElevation)) {
+  /* The window a jump cancel's landing opens. It lifts the turn rate off
+   * both the lock and the sticks, and it works through the landing recovery
+   * that otherwise refuses input -- coming down facing the other way is the
+   * entire reason to have cancelled. */
+  if (bFreeTurn) {
+    iMaxStep *= MECHA_CANCEL_TURN_SCALE;
+    pMech->iFreeTurnTicks--;
+  }
+
+  if (pMech->byLock == MECHA_LOCK_HELD
+      && mecha_aim_at_target(pWorld, iMechIdx, &iBearing, &iElevation)) {
     /* The lock does the aiming. This is the whole reason the mode plays with
      * two sticks and no mouse: the mech keeps its shoulders square to the
      * enemy while the sticks decide where the feet go. */
@@ -556,11 +668,14 @@ static void mecha_update_facing(tMechaWorld *pWorld, int iMechIdx,
     pMech->iAimPitch = 0;
   }
 
-  /* Manual turn rides on top, for shaking a lock loose or for lining up a
-   * shot when nothing is locked at all. */
-  if (bCanAct && pInput->iTurn != 0) {
+  /* Manual turn rides on top, for shaking a lock loose or for lining one up
+   * again once it has gone. */
+  if ((bCanAct || bFreeTurn) && pInput->iTurn != 0) {
     int iManual = (int)(pDef->fTurnRate * MECHA_DT
                         * (float)pInput->iTurn / 100.0f);
+
+    if (bFreeTurn)
+      iManual *= MECHA_CANCEL_TURN_SCALE;
     pMech->iFacing = mecha_angle_wrap(pMech->iFacing + iManual);
   }
 }
@@ -630,7 +745,14 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
       pMech->iStateTicks = 0;
     }
   } else if (bAirborne) {
-    if (pMech->byMove != MECHA_MOVE_JUMP) {
+    if (pMech->byMove == MECHA_MOVE_JUMP && bCanAct
+        && pInput->bGuard && !pMech->bGuardHeld) {
+      /* The cancel. Guard in the air throws the rest of the arc away and
+       * drops the mech; the landing is what pays for it. */
+      pMech->byMove = MECHA_MOVE_CANCEL;
+      pMech->iStateTicks = 0;
+    } else if (pMech->byMove != MECHA_MOVE_JUMP
+               && pMech->byMove != MECHA_MOVE_CANCEL) {
       /* Walked off a ledge. */
       pMech->byMove = MECHA_MOVE_JUMP;
       pMech->iStateTicks = 0;
@@ -656,8 +778,8 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
        * the gauge runs out. */
     } else if (bDashPressed && mecha_boost_available(pMech)) {
       mecha_start_dash(pMech, pInput);
-    } else if (pInput->bCrouch) {
-      pMech->byMove = MECHA_MOVE_CROUCH;
+    } else if (pInput->bGuard) {
+      pMech->byMove = MECHA_MOVE_GUARD;
     } else if (fStick > 0.0f) {
       pMech->byMove = MECHA_MOVE_WALK;
     } else {
@@ -707,7 +829,16 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
       mecha_spend_boost(pMech, pDef->iBoostJumpDrain);
       bBoosting = true;
     }
-  } else if (pMech->byMove == MECHA_MOVE_CROUCH) {
+  } else if (pMech->byMove == MECHA_MOVE_CANCEL) {
+    /* Straight down, with the carried speed killed off fast. The drop is
+     * meant to put the mech on the ground where it already is, not to be a
+     * dive that covers distance. */
+    pMech->fVelX = mecha_approachf(pMech->fVelX, 0.0f,
+                                   pDef->fAirSpeed * 6.0f * MECHA_DT);
+    pMech->fVelZ = mecha_approachf(pMech->fVelZ, 0.0f,
+                                   pDef->fAirSpeed * 6.0f * MECHA_DT);
+    pMech->fVelY = -MECHA_CANCEL_FALL_SPEED;
+  } else if (pMech->byMove == MECHA_MOVE_GUARD) {
     pMech->fVelX = 0.0f;
     pMech->fVelZ = 0.0f;
   } else if (pMech->byMove == MECHA_MOVE_WALK) {
@@ -731,15 +862,16 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
   /* --- boost recovery --------------------------------------------------- */
 
   if (pMech->byMove != MECHA_MOVE_DASH && !bBoosting) {
-    if (pMech->byMove == MECHA_MOVE_CROUCH)
-      mecha_regain_boost(pMech, pDef->iBoostCrouchRegen);
+    if (pMech->byMove == MECHA_MOVE_GUARD)
+      mecha_regain_boost(pMech, pDef->iBoostGuardRegen);
     else if (pMech->byMove != MECHA_MOVE_JUMP)
       mecha_regain_boost(pMech, pDef->iBoostRegen);
   }
 
   /* --- integration ------------------------------------------------------ */
 
-  if (bAirborne || pMech->byMove == MECHA_MOVE_JUMP) {
+  if (bAirborne || pMech->byMove == MECHA_MOVE_JUMP
+      || pMech->byMove == MECHA_MOVE_CANCEL) {
     float fGravity = MECHA_GRAVITY;
 
     if (bBoosting)
@@ -763,11 +895,23 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
 
     pMech->fY = fGround;
     pMech->fVelY = 0.0f;
-    if (pMech->byMove == MECHA_MOVE_JUMP && bWasFalling) {
+    if ((pMech->byMove == MECHA_MOVE_JUMP
+         || pMech->byMove == MECHA_MOVE_CANCEL) && bWasFalling) {
+      bool bCancelled = pMech->byMove == MECHA_MOVE_CANCEL;
+
       pMech->byMove = MECHA_MOVE_LAND;
-      pMech->iStateTicks = 0;
+      /* A cancelled touchdown is the short one. Rather than carry a second
+       * recovery length on every machine, start its clock partway through
+       * the one they already have. */
+      pMech->iStateTicks = bCancelled
+        ? mecha_clampi(pDef->iLandTicks - MECHA_CANCEL_LAND_TICKS,
+                       0, pDef->iLandTicks)
+        : 0;
+      if (bCancelled)
+        pMech->iFreeTurnTicks = MECHA_CANCEL_TURN_TICKS;
       mecha_sim_spawn_effect(pWorld, MECHA_FX_DUST, pMech->fX, fGround,
-                             pMech->fZ, pDef->fRadius * 2.4f,
+                             pMech->fZ,
+                             pDef->fRadius * (bCancelled ? 3.0f : 2.4f),
                              pDef->abyPalette[2], MECHA_SEC(0.45f));
     }
   }
@@ -800,6 +944,7 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
 
   pMech->bJumpHeld = pInput->bJump;
   pMech->bDashHeld = pInput->bDash;
+  pMech->bGuardHeld = pInput->bGuard;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -903,7 +1048,15 @@ static void mecha_fire_weapon(tMechaWorld *pWorld, int iMechIdx, int iSlot)
            + fFwdZ * pDef->fRadius * 0.7f;
   fOriginY = pMech->fY + pDef->fHeight * pWeapon->fMuzzleHeight;
 
-  if (pMech->iTargetIdx >= 0 && pMech->iTargetIdx < MECHA_MAX_MECHS
+  /*
+   * Only a live lock aims the shot. With the lock broken the reticle is
+   * still on someone, but the weapon knows nothing about them: it fires
+   * straight down the barrel at whatever heading the mech is holding, with
+   * no lead and no guidance. That is the whole point of the lock being
+   * breakable -- losing it has to cost accuracy, not just the reticle.
+   */
+  if (pMech->byLock == MECHA_LOCK_HELD
+      && pMech->iTargetIdx >= 0 && pMech->iTargetIdx < MECHA_MAX_MECHS
       && mecha_mech_alive(&pWorld->aMechs[pMech->iTargetIdx]))
     pTarget = &pWorld->aMechs[pMech->iTargetIdx];
 
@@ -1004,7 +1157,9 @@ static void mecha_fire_weapon(tMechaWorld *pWorld, int iMechIdx, int iSlot)
     pShot->fArcGravity = pWeapon->fArcGravity;
     pShot->iLife = pWeapon->iLifeTicks;
     pShot->iHomingRate = pWeapon->iHomingRate;
-    pShot->iTarget = pMech->iTargetIdx;
+    /* A missile launched off a broken lock has nothing to home on. It is
+     * still a missile; it just flies where it was pointed. */
+    pShot->iTarget = pTarget ? pMech->iTargetIdx : -1;
     pShot->iArmTicks = pWeapon->byKind == MECHA_PROJ_MINE
                        ? MECHA_MINE_ARM_TICKS : 0;
   }
@@ -1137,8 +1292,17 @@ static void mecha_projectile_detonate(tMechaWorld *pWorld,
       fPushX = pShot->fVelX / fLen * fPush;
       fPushZ = pShot->fVelZ / fLen * fPush;
     }
-    mecha_sim_damage(pWorld, iDirectVictim, (int)pShot->byOwner,
-                     pShot->fDamage, pShot->fStagger, fPushX, fPushZ);
+    {
+      float fDamageScale;
+      float fStaggerScale;
+
+      mecha_guard_mitigation(&pWorld->aMechs[iDirectVictim], pShot->byKind,
+                             &fDamageScale, &fStaggerScale);
+      mecha_sim_damage(pWorld, iDirectVictim, (int)pShot->byOwner,
+                       pShot->fDamage * fDamageScale,
+                       pShot->fStagger * fStaggerScale,
+                       fPushX * fDamageScale, fPushZ * fDamageScale);
+    }
     mecha_sim_spawn_effect(pWorld, MECHA_FX_IMPACT, pShot->fX, pShot->fY,
                            pShot->fZ, pShot->fRadius * 3.0f, pShot->byPalette,
                            MECHA_SEC(0.25f));
@@ -1485,6 +1649,9 @@ static void mecha_reset_mech_for_round(tMechaWorld *pWorld, int iMechIdx,
   pMech->iLastFiredSlot = -1;
   pMech->iLastFiredStance = MECHA_STANCE_STAND;
   pMech->iTargetIdx = -1;
+  pMech->byLock = MECHA_LOCK_NONE;
+  pMech->iLockSlipTicks = 0;
+  pMech->iFreeTurnTicks = 0;
 
   for (i = 0; i < MECHA_WEAPON_SLOTS; i++) {
     /* Magazines are per slot, not per stance: the standing loadout is what a
@@ -1496,6 +1663,7 @@ static void mecha_reset_mech_for_round(tMechaWorld *pWorld, int iMechIdx,
   }
   pMech->bJumpHeld = false;
   pMech->bDashHeld = false;
+  pMech->bGuardHeld = false;
   pMech->bCycleHeld = false;
 
   pMech->fLeanRoll = 0.0f;
@@ -1770,6 +1938,9 @@ int mecha_sim_add_mech(tMechaWorld *pWorld, int iDefIdx,
     pMech->byController = byController;
     pMech->byTeam = byTeam;
     pMech->iTargetIdx = -1;
+  pMech->byLock = MECHA_LOCK_NONE;
+  pMech->iLockSlipTicks = 0;
+  pMech->iFreeTurnTicks = 0;
     pMech->iLastFiredSlot = -1;
     pMech->fArmour = mecha_def_get(pMech->byDefIdx)->fArmour;
     pWorld->iMechCount++;
@@ -1836,6 +2007,7 @@ void mecha_sim_tick(tMechaWorld *pWorld, const tMechaInput *paInputs,
 
     mecha_update_target(pWorld, i, input.bCycleTarget && !pMech->bCycleHeld);
     pMech->bCycleHeld = input.bCycleTarget;
+    mecha_update_lock(pWorld, i);
 
     mecha_update_facing(pWorld, i, &input, bCanAct);
     mecha_update_movement(pWorld, i, &input, bCanAct);

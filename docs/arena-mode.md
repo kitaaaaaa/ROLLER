@@ -61,7 +61,8 @@ each, and the pad mapping keeps that shape.
 | Turn                  | `Q` `E`            | Right stick X      |
 | Dash                  | `Left Shift`       | B / left shoulder  |
 | Jump (hold to thrust) | `Space`            | A                  |
-| Crouch                | `Left Ctrl` or `C` | X                  |
+| Guard                 | `Left Ctrl` or `C` | X                  |
+| Jump cancel           | Guard while airborne | Guard while airborne |
 | Left weapon           | `J`                | Left trigger       |
 | Centre weapon         | `K`                | Both triggers      |
 | Right weapon          | `L`                | Right trigger      |
@@ -72,21 +73,50 @@ Both are read every frame, so either works at any time.
 
 ## How it plays
 
-- **The lock does the aiming.** Your mech keeps its shoulders square to the
-  target on its own; the sticks decide where the feet go. Manual turn rides on
-  top for shaking a lock or lining up with nothing locked.
+- **The lock does the aiming, while you have it.** Your mech keeps its
+  shoulders square to the target on its own; the sticks decide where the feet
+  go. Manual turn rides on top for shaking a lock or lining one up again.
+- **The lock is breakable, and that is the central rule.** It holds while the
+  target is inside a 32-degree cone of your own heading and drops once it has
+  been outside for a third of a second. With it gone the mech stops turning
+  itself, weapons fire straight down the barrel with no lead, and missiles
+  launch unguided -- so losing it costs accuracy, not just the reticle. The
+  brackets close up and go orange when it is live, open and go amber as it
+  slips, and sit wide and grey once it has gone.
+- **Getting a lock back is harder than keeping one.** On its own it returns
+  only when the target is well inside a 12-degree cone. Boosting or jumping
+  snaps it on from any angle, which is the fast way back and the reason to
+  spend gauge on a dash you did not need for the distance.
+- **A boost is a committed line.** The direction is latched when it starts and
+  runs until the burst or the gauge does. You can fire the whole way through
+  without cutting it short, and the lock is live for all of it.
 - **Every trigger is four attacks.** Each of the three weapons has a separate
   definition for standing, crouching, dashing and airborne, so the same button
   is a different attack depending on how you are moving. That is the central
   rule of the mode, and it is why weapons are a 3x4 table.
 - **Boost is the resource.** Dashing and jump thrust drain it; standing refills
-  it slowly and crouching refills it fast. Empty it and the thrusters lock out
+  it slowly and guarding refills it fast. Empty it and the thrusters lock out
   until it climbs back past 30%.
+- **Guard answers a blade.** It is the old crouch: fastest refill, its own row
+  of weapons. On top of that a guarding mech takes 15% of a melee hit and half
+  the stagger that comes with it. Only melee -- standing in guard against
+  gunfire loses, which is what stops it being the only thing anyone does.
+- **Jump, then cancel.** Leaving the ground snaps the lock on whatever you
+  were pointed at, so going up is the reliable way to find someone who has got
+  behind you. Guard in the air then throws the rest of the arc away and drops
+  the mech straight down; the landing is shortened and leaves the turn rate
+  off its leash for about half a second, long enough to come down facing the
+  other way. Up to find them, down to face them.
 - **Stagger is separate from damage.** Hits accumulate stagger, which bleeds off
   over time; crossing the threshold floors the mech. Getting up is covered by
   invulnerability, so a knockdown cannot be chained.
 - **Rounds.** Best of whatever `--arena-rounds` asks for, 90 seconds each,
   decided on remaining armour if the clock runs out.
+- **The computer pilot plays by the same lock rules.** It loses tracking on
+  the same cone you do, reaches for the manual stick when the auto-turn stops
+  following, and boosts to snap a lost lock back on. Across the roster it
+  spends between eight and twenty per cent of a fight without a lock, and the
+  test suite asserts both that it loses one and that it mostly holds one.
 - **The opponent's skill is mostly its aim.** Every weapon aims itself at
   whatever is locked, so the computer pilot fires a perfect solution unless it
   is given an angular error to miss by. That error is what the three levels

@@ -40,14 +40,14 @@
 /*
  * How the mech is moving when the trigger goes down. Every weapon has a
  * separate definition per stance, so the same trigger is a different attack
- * standing, crouching, dashing or airborne. That one rule is what gives the
+ * standing, guarding, dashing or airborne. That one rule is what gives the
  * genre its depth, and it is the reason weapons are a 3 x 4 table rather
  * than a flat list of three.
  */
 typedef enum
 {
   MECHA_STANCE_STAND  = 0,
-  MECHA_STANCE_CROUCH = 1,
+  MECHA_STANCE_GUARD = 1,
   MECHA_STANCE_DASH   = 2,
   MECHA_STANCE_JUMP   = 3,
   MECHA_STANCE_COUNT  = 4
@@ -55,20 +55,40 @@ typedef enum
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * What the reticle is actually doing. iTargetIdx says who it is pointed at;
+ * this says whether the mech is tracking them. Only MECHA_LOCK_HELD makes
+ * the weapons lead their shots and the mech turn itself.
+ */
+typedef enum
+{
+  MECHA_LOCK_NONE     = 0,  /* broken: no auto-turn, no lead, no guidance */
+  MECHA_LOCK_SLIPPING = 1,  /* outside the cone, inside the grace period */
+  MECHA_LOCK_HELD     = 2
+} eMechaLockState;
+
+//-------------------------------------------------------------------------------------------------
+
 typedef enum
 {
   MECHA_MOVE_STAND    = 0,
   MECHA_MOVE_WALK     = 1,
-  MECHA_MOVE_CROUCH   = 2,
+  MECHA_MOVE_GUARD    = 2,
   MECHA_MOVE_DASH     = 3,
   MECHA_MOVE_JUMP     = 4,
+  /* Guard pressed in the air: the arc is abandoned and the mech drops. It
+   * still counts as airborne, and it still poses as a jump, but nothing
+   * about it is under the player's control except that it ends sooner. */
+  MECHA_MOVE_CANCEL   = 5,
   /* Touchdown recovery. Nothing can be cancelled out of it, which is what
-   * makes a jump attack a commitment rather than a free reposition. */
-  MECHA_MOVE_LAND     = 5,
-  MECHA_MOVE_STAGGER  = 6,
-  MECHA_MOVE_DOWN     = 7,
-  MECHA_MOVE_RISE     = 8,
-  MECHA_MOVE_DESTROYED = 9
+   * makes a jump attack a commitment rather than a free reposition -- the
+   * one exception being a cancelled landing, which is shortened and leaves
+   * the turn rate off its leash so the mech can come down facing away. */
+  MECHA_MOVE_LAND     = 6,
+  MECHA_MOVE_STAGGER  = 7,
+  MECHA_MOVE_DOWN     = 8,
+  MECHA_MOVE_RISE     = 9,
+  MECHA_MOVE_DESTROYED = 10
 } eMechaMoveState;
 
 //-------------------------------------------------------------------------------------------------
@@ -186,7 +206,7 @@ typedef struct
   int   iBoostJumpCost;     /* one-off, charged at takeoff */
   int   iBoostJumpDrain;    /* per second while thrusting upward */
   int   iBoostRegen;        /* per second standing or walking */
-  int   iBoostCrouchRegen;  /* per second crouching -- the fast refill */
+  int   iBoostGuardRegen;  /* per second guarding -- the fast refill */
 
   int   iDashTicks;         /* how long one dash burst lasts */
   int   iLandTicks;         /* touchdown recovery */
@@ -210,7 +230,7 @@ typedef struct
   int  iTurn;         /* -100..100, explicit turn on top of the lock */
   bool bDash;
   bool bJump;
-  bool bCrouch;
+  bool bGuard;
   bool bFireLeft;
   bool bFireCenter;
   bool bFireRight;
@@ -276,9 +296,17 @@ typedef struct
   bool  abFireHeld[MECHA_WEAPON_SLOTS];
   bool  bJumpHeld;
   bool  bDashHeld;
+  bool  bGuardHeld;
   bool  bCycleHeld;
 
-  int   iTargetIdx;         /* -1 when nothing is locked */
+  int   iTargetIdx;         /* who the reticle is on; -1 for nobody */
+  uint8_t byLock;           /* eMechaLockState: whether it is tracking them */
+  int   iLockSlipTicks;     /* ticks the target has been outside the cone */
+
+  /* Set by a jump cancel's landing. While it runs, the manual turn is
+   * uncapped and works even though the landing itself locks out control --
+   * that window is the entire reason to cancel. */
+  int   iFreeTurnTicks;
 
   /* Angular error added to the firing solution, in the shared 14-bit
    * circle. Weapons aim themselves at whatever is locked, so this is the

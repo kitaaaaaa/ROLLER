@@ -326,17 +326,17 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
   }
 
   /* Out of everything, or blind behind cover with only direct-fire weapons:
-   * sit down and refill, which is what crouching is for. */
+   * sit down and refill, which is one of the things guard is for. * */
   if ((!bAmmoLeft || (!bHasLine && fBoost < 0.35f))
       && fDistance > fPreferred * 0.8f) {
-    pOut->bCrouch = true;
+    pOut->bGuard = true;
     pOut->iMoveX = 0;
     pOut->iMoveZ = 0;
     pOut->bDash = false;
   }
 
   /* Take the high ground now and then, or hop a wall that is in the way. */
-  if (!pOut->bCrouch && fBoost > 0.7f
+  if (!pOut->bGuard && fBoost > 0.7f
       && mecha_rng_range(&pWorld->rng, 240) == 0)
     pOut->bJump = true;
   if (!bHasLine && fBoost > 0.5f && fDistance < fPreferred
@@ -350,10 +350,10 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
     pOut->iMoveX = iDodge * 100;
     pOut->iMoveZ = 0;
     pOut->bDash = true;
-    pOut->bCrouch = false;
+    pOut->bGuard = false;
   }
 
-  /* --- shooting --------------------------------------------------------- */
+  /* --- holding the lock ------------------------------------------------- */
 
   iBearing = mecha_atan2_angle(pTarget->fX - pSelf->fX,
                                pTarget->fZ - pSelf->fZ);
@@ -361,8 +361,32 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
   if (iOff < 0)
     iOff = -iOff;
 
+  /*
+   * The pilot plays by the same lock rules the player does, which it has to:
+   * a computer pilot exempt from them would be tracking through a mechanic
+   * the player is fighting, and the skill levels would stop meaning
+   * anything. The lock does the turning while it is live, so the manual
+   * stick is only reached for once it has gone -- and with the auto-turn no
+   * longer following, that stick is the only way back.
+   */
+  if (pSelf->byLock != MECHA_LOCK_HELD) {
+    int iSign = mecha_angle_delta(pSelf->iFacing, iBearing) >= 0 ? 1 : -1;
+
+    pOut->iTurn = iSign * 100;
+    /* Well off the nose, boosting is faster than turning: it snaps the lock
+     * on from any angle. Worth the gauge; grinding the machine around is
+     * not. */
+    if (iOff > MECHA_LOCK_CONE && fBoost > 0.35f && !pOut->bGuard)
+      pOut->bDash = true;
+  }
+
+  /* --- shooting --------------------------------------------------------- */
+
   iSlot = mecha_ai_choose_weapon(pWorld, iMechIdx, fDistance, bHasLine);
   if (iSlot >= 0 && pSelf->iRecovery <= 0 && iOff <= MECHA_AI_FIRE_CONE
+      /* No lock, no lead. Firing anyway just empties the magazine into the
+       * space beside them. */
+      && pSelf->byLock == MECHA_LOCK_HELD
       && !pSelf->abFireHeld[iSlot]
       /* A moment's hesitation on the shot rather than the trigger coming
        * down the instant the solution is good. */

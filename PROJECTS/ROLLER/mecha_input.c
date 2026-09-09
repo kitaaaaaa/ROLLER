@@ -85,7 +85,7 @@ void mecha_input_poll(tMechaInput *pInput)
 
   pInput->bDash        = mecha_key(WHIP_SCANCODE_LSHIFT) != 0;
   pInput->bJump        = mecha_key(WHIP_SCANCODE_SPACE) != 0;
-  pInput->bCrouch      = mecha_key(WHIP_SCANCODE_LCTRL) != 0
+  pInput->bGuard      = mecha_key(WHIP_SCANCODE_LCTRL) != 0
                       || mecha_key(WHIP_SCANCODE_C) != 0;
   pInput->bFireLeft    = mecha_key(WHIP_SCANCODE_J) != 0;
   pInput->bFireCenter  = mecha_key(WHIP_SCANCODE_K) != 0;
@@ -120,7 +120,7 @@ void mecha_input_poll(tMechaInput *pInput)
         || SDL_GetGamepadButton(pPad, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER))
       pInput->bDash = true;
     if (SDL_GetGamepadButton(pPad, SDL_GAMEPAD_BUTTON_WEST))
-      pInput->bCrouch = true;
+      pInput->bGuard = true;
     if (SDL_GetGamepadButton(pPad, SDL_GAMEPAD_BUTTON_NORTH)
         || SDL_GetGamepadButton(pPad, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER))
       pInput->bCycleTarget = true;

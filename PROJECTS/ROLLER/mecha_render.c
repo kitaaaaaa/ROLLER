@@ -598,16 +598,39 @@ static void mecha_hud_bar(uint8 *pScrBuf, int iWidth, int iHeight,
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * The reticle carries the lock state, because nothing else can. Whether a
+ * weapon leads its shot is now the single most important thing on screen,
+ * and it is invisible in the world -- so the brackets close up and go hot
+ * when the lock is live, open and go amber the moment it starts to slip, and
+ * sit wide and cold once it has gone.
+ */
 static void mecha_hud_reticle(uint8 *pScrBuf, int iWidth, int iHeight,
                               const tMechaCamera *pCamera,
                               const tMechaWorld *pWorld, int iTargetIdx,
-                              int iScale)
+                              int iLock, int iScale)
 {
   int iScreenX;
   int iScreenY;
   int iArm = 5 * iScale;
-  int iGap = 9 * iScale;
+  int iGap;
   int iThick = iScale;
+  uint8 byColour;
+
+  switch (iLock) {
+  case MECHA_LOCK_HELD:
+    iGap = 9 * iScale;
+    byColour = MECHA_HUD_LOCK;
+    break;
+  case MECHA_LOCK_SLIPPING:
+    iGap = 13 * iScale;
+    byColour = MECHA_HUD_AMMO;
+    break;
+  default:
+    iGap = 17 * iScale;
+    byColour = MECHA_HUD_EMPTY;
+    break;
+  }
 
   if (iTargetIdx < 0 || iTargetIdx >= MECHA_MAX_MECHS)
     return;
@@ -623,21 +646,21 @@ static void mecha_hud_reticle(uint8 *pScrBuf, int iWidth, int iHeight,
   /* Four corner brackets rather than a full box: it marks the target without
    * covering it. */
   mecha_render_fill(pScrBuf, iWidth, iHeight, iScreenX - iGap,
-                    iScreenY - iGap, iArm, iThick, MECHA_HUD_LOCK);
+                    iScreenY - iGap, iArm, iThick, byColour);
   mecha_render_fill(pScrBuf, iWidth, iHeight, iScreenX - iGap,
-                    iScreenY - iGap, iThick, iArm, MECHA_HUD_LOCK);
+                    iScreenY - iGap, iThick, iArm, byColour);
   mecha_render_fill(pScrBuf, iWidth, iHeight, iScreenX + iGap - iArm,
-                    iScreenY - iGap, iArm, iThick, MECHA_HUD_LOCK);
+                    iScreenY - iGap, iArm, iThick, byColour);
   mecha_render_fill(pScrBuf, iWidth, iHeight, iScreenX + iGap - iThick,
-                    iScreenY - iGap, iThick, iArm, MECHA_HUD_LOCK);
+                    iScreenY - iGap, iThick, iArm, byColour);
   mecha_render_fill(pScrBuf, iWidth, iHeight, iScreenX - iGap,
-                    iScreenY + iGap - iThick, iArm, iThick, MECHA_HUD_LOCK);
+                    iScreenY + iGap - iThick, iArm, iThick, byColour);
   mecha_render_fill(pScrBuf, iWidth, iHeight, iScreenX - iGap,
-                    iScreenY + iGap - iArm, iThick, iArm, MECHA_HUD_LOCK);
+                    iScreenY + iGap - iArm, iThick, iArm, byColour);
   mecha_render_fill(pScrBuf, iWidth, iHeight, iScreenX + iGap - iArm,
-                    iScreenY + iGap - iThick, iArm, iThick, MECHA_HUD_LOCK);
+                    iScreenY + iGap - iThick, iArm, iThick, byColour);
   mecha_render_fill(pScrBuf, iWidth, iHeight, iScreenX + iGap - iThick,
-                    iScreenY + iGap - iArm, iThick, iArm, MECHA_HUD_LOCK);
+                    iScreenY + iGap - iArm, iThick, iArm, byColour);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -796,7 +819,7 @@ static void mecha_render_hud(uint8 *pScrBuf, int iWidth, int iHeight,
     mecha_hud_rounds(pScrBuf, iWidth, iHeight, pWorld, iTargetIdx,
                      iRightX, 32 * iScale, iScale);
     mecha_hud_reticle(pScrBuf, iWidth, iHeight, pCamera, pWorld, iTargetIdx,
-                      iScale);
+                      (int)pMech->byLock, iScale);
   }
 
   /* --- round clock, top centre ------------------------------------------ */
@@ -847,7 +870,8 @@ static const char *const s_aaszControls[][2] = {
   { "TURN",        "Q E  /  RIGHT STICK" },
   { "DASH",        "SHIFT  /  B OR LB" },
   { "JUMP",        "SPACE  /  A" },
-  { "CROUCH",      "C OR CTRL  /  X" },
+  { "GUARD",       "C OR CTRL  /  X" },
+  { "JUMP CANCEL", "GUARD WHILE AIRBORNE" },
   { "FIRE L C R",  "J K L  /  LT  BOTH  RT" },
   { "CHANGE LOCK", "TAB  /  Y OR RB" },
   { "LEAVE MATCH", "ESC" },
@@ -867,9 +891,9 @@ static const char *const s_aaszControls[][2] = {
 
 /*
  * Lines the screen occupies besides the rows, which vary: two for the
- * double-height title, one each for the strapline and the result, a blank,
- * the controls heading, one per control, a blank either side of the rows,
- * the footer, and one more as the margin the footer's own glyphs need.
+ * double-height title, one for the result, a blank, the controls heading,
+ * one per control, a blank either side of the rows, the footer, and one
+ * more as the margin the footer's own glyphs need.
  *
  * The budget matters because the game's smaller video mode gives this a
  * 320x200 buffer, and at 200 pixels there is room for exactly twenty-five
@@ -929,9 +953,6 @@ void mecha_render_briefing(const tMechaBriefing *pBrief, uint8 *pScrBuf,
   mecha_render_text(pScrBuf, iWidth, iHeight, iX, iY, iScale * 2,
                     MECHA_BRIEF_TITLE, "ARENA");
   iY += iLine * 2;
-  mecha_render_text(pScrBuf, iWidth, iHeight, iX, iY, iScale,
-                    MECHA_BRIEF_DIM, "MECH DUEL ON THE WHIPLASH ENGINE");
-  iY += iLine;
 
   /* Only after a match; on the way in there is nothing to report, and the
    * line is left blank rather than closed up so the screen does not shift

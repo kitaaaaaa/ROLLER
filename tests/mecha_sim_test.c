@@ -177,8 +177,8 @@ static int test_roster(void)
         CHECK(pDef->iDashTicks > 0 && pDef->iLandTicks > 0);
         /* Dashing has to be faster than walking or the gauge means nothing. */
         CHECK(pDef->fDashSpeed > pDef->fWalkSpeed);
-        /* Crouching is the fast refill; that is the whole reason to do it. */
-        CHECK(pDef->iBoostCrouchRegen > pDef->iBoostRegen);
+        /* Guarding is the fast refill; that is one of two reasons to do it. */
+        CHECK(pDef->iBoostGuardRegen > pDef->iBoostRegen);
 
         for (iSlot = 0; iSlot < MECHA_WEAPON_SLOTS; iSlot++) {
             int iStance;
@@ -217,7 +217,7 @@ static int test_movement_and_boost(void)
     float fStartZ;
     int iBoostAfterDash;
     int iBoostAfterStand;
-    int iBoostAfterCrouch;
+    int iBoostAfterGuard;
 
     start_duel(&world, 0, 0, 0, 1234u, 2);
     pDef = mecha_def_get(0);
@@ -241,7 +241,7 @@ static int test_movement_and_boost(void)
     iBoostAfterDash = world.aMechs[0].iBoost;
     CHECK(iBoostAfterDash < pDef->iBoostMax * MECHA_TICK_HZ);
 
-    /* Standing refills, crouching refills faster. Both start from the same
+    /* Standing refills, guarding refills faster. Both start from the same
      * low gauge, and over a short enough window that neither saturates --
      * comparing two full gauges would prove nothing. */
     memset(aInputs, 0, sizeof(aInputs));
@@ -253,12 +253,12 @@ static int test_movement_and_boost(void)
     CHECK(iBoostAfterStand < pDef->iBoostMax * MECHA_TICK_HZ);
 
     world.aMechs[0].iBoost = pDef->iBoostMax * MECHA_TICK_HZ / 10;
-    aInputs[0].bCrouch = true;
+    aInputs[0].bGuard = true;
     run_ticks(&world, aInputs, 2, 30);
-    iBoostAfterCrouch = world.aMechs[0].iBoost;
-    CHECK(world.aMechs[0].byMove == MECHA_MOVE_CROUCH);
-    CHECK(iBoostAfterCrouch < pDef->iBoostMax * MECHA_TICK_HZ);
-    CHECK(iBoostAfterCrouch > iBoostAfterStand);
+    iBoostAfterGuard = world.aMechs[0].iBoost;
+    CHECK(world.aMechs[0].byMove == MECHA_MOVE_GUARD);
+    CHECK(iBoostAfterGuard < pDef->iBoostMax * MECHA_TICK_HZ);
+    CHECK(iBoostAfterGuard > iBoostAfterStand);
 
     /* An empty gauge locks the thrusters out until it has climbed back. */
     memset(aInputs, 0, sizeof(aInputs));
@@ -330,7 +330,7 @@ static int test_stance_selects_weapon(void)
     tMechaWorld world;
     tMechaInput aInputs[2];
     const tMechaWeaponDef *pStanding;
-    const tMechaWeaponDef *pCrouched;
+    const tMechaWeaponDef *pGuarding;
 
     start_duel(&world, 0, 0, 1, 9u, 2);
     memset(aInputs, 0, sizeof(aInputs));
@@ -339,16 +339,16 @@ static int test_stance_selects_weapon(void)
     pStanding = mecha_mech_weapon(&world, 0, MECHA_SLOT_CENTER);
     CHECK(pStanding != NULL);
 
-    aInputs[0].bCrouch = true;
+    aInputs[0].bGuard = true;
     mecha_sim_tick(&world, aInputs, 2);
-    CHECK(mecha_mech_stance(&world.aMechs[0]) == MECHA_STANCE_CROUCH);
-    pCrouched = mecha_mech_weapon(&world, 0, MECHA_SLOT_CENTER);
-    CHECK(pCrouched != NULL);
+    CHECK(mecha_mech_stance(&world.aMechs[0]) == MECHA_STANCE_GUARD);
+    pGuarding = mecha_mech_weapon(&world, 0, MECHA_SLOT_CENTER);
+    CHECK(pGuarding != NULL);
 
     /* The same trigger has to be a different attack in a different stance --
      * that is the mode's central rule. */
-    CHECK(pCrouched != pStanding);
-    CHECK(strcmp(pCrouched->szName, pStanding->szName) != 0);
+    CHECK(pGuarding != pStanding);
+    CHECK(strcmp(pGuarding->szName, pStanding->szName) != 0);
     return 0;
 }
 
@@ -587,7 +587,7 @@ static void run_scripted_match(tMechaWorld *pWorld, uint32_t uiSeed)
         aInputs[0].iMoveZ = ((i / 53) % 3) ? 60 : -80;
         aInputs[0].bDash = (i % 120) < 25;
         aInputs[0].bJump = (i % 300) < 6;
-        aInputs[0].bCrouch = (i % 210) < 30;
+        aInputs[0].bGuard = (i % 210) < 30;
         aInputs[0].bFireLeft = (i % 23) < 3;
         aInputs[0].bFireCenter = (i % 61) < 4;
         aInputs[0].bFireRight = (i % 97) < 4;
@@ -628,6 +628,8 @@ static int test_ai_fights(void)
     for (iDefA = 0; iDefA < mecha_def_count(); iDefA++) {
         int iDefB = (iDefA + 1) % mecha_def_count();
         int i;
+        int iBrokenTicks = 0;
+        int iHeldTicks = 0;
         bool bDamaged = false;
 
         mecha_sim_init(&world, iDefA % mecha_arena_count(),
@@ -646,11 +648,27 @@ static int test_ai_fights(void)
             if (world.aMechs[0].fArmour + world.aMechs[1].fArmour
                 < fStartArmour - 1.0f)
                 bDamaged = true;
+            if (world.aMechs[0].byLock == MECHA_LOCK_HELD)
+                iHeldTicks++;
+            else
+                iBrokenTicks++;
             if (world.match.byPhase == MECHA_PHASE_MATCH_OVER)
                 break;
         }
         CHECK(bDamaged);
         CHECK(world.aMechs[0].fDamageDealt + world.aMechs[1].fDamageDealt > 0.0f);
+
+        /*
+         * The computer pilot plays by the lock rules, and both halves of
+         * that have to be true. It has to lose the lock sometimes, or the
+         * mechanic does not exist in its hands and it is quietly privileged
+         * over the player; and it has to hold one most of the time, or it
+         * has no idea how to fight and the skill levels are measuring noise.
+         * Measured across the roster it spends between eight and twenty per
+         * cent of a fight without one.
+         */
+        CHECK(iBrokenTicks > 0);
+        CHECK(iHeldTicks > iBrokenTicks * 2);
     }
     return 0;
 }
@@ -772,6 +790,268 @@ static int test_ai_skill_ladder(void)
         run_skill_probe_world(&b, MECHA_AI_ROOKIE, 0x2468u);
         CHECK(memcmp(&a, &b, sizeof(a)) == 0);
     }
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/* Points a mech at a heading and puts its lock into a known state. */
+static void face_mech(tMechaWorld *pWorld, int iIdx, int iFacing)
+{
+    pWorld->aMechs[iIdx].iFacing = mecha_angle_wrap(iFacing);
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_lock_breaks_and_returns(void)
+{
+    tMechaWorld world;
+    tMechaInput aInputs[2];
+    int iShot;
+    int iShotsFound = 0;
+
+    start_duel(&world, 0, 0, 0, 0x10Cu, 1);
+    memset(aInputs, 0, sizeof(aInputs));
+    world.aMechs[0].fX = 0.0f;
+    world.aMechs[0].fZ = 0.0f;
+    world.aMechs[1].fX = 0.0f;
+    world.aMechs[1].fZ = MECHA_M(60.0f);
+    /* Facing zero is facing +Z, which is where mech 1 was just put. Moving a
+     * mech does not move where it is pointed, and the lock has to be earned
+     * from a broken start -- it only comes on inside the narrow reacquire
+     * cone. */
+    face_mech(&world, 0, 0);
+    face_mech(&world, 1, MECHA_ANGLE_HALF);
+    run_ticks(&world, aInputs, 2, 4);
+
+    /* Squared up: the lock is live and the weapons lead their shots. */
+    CHECK(world.aMechs[0].byLock == MECHA_LOCK_HELD);
+
+    /* Spun to face away. The auto-turn only runs off a live lock, so once
+     * the grace period lapses there is nothing pulling the machine back and
+     * it stays broken. */
+    face_mech(&world, 0, MECHA_ANGLE_HALF);
+    run_ticks(&world, aInputs, 2, MECHA_LOCK_BREAK_TICKS + 6);
+    CHECK(world.aMechs[0].byLock == MECHA_LOCK_NONE);
+
+    /* And it does not drift back on by itself. */
+    run_ticks(&world, aInputs, 2, MECHA_TICK_HZ);
+    CHECK(world.aMechs[0].byLock == MECHA_LOCK_NONE);
+
+    /* A shot fired off a broken lock goes where the barrel points, not
+     * where the enemy is: facing is half a turn away from them, so its
+     * velocity must carry it away down -Z rather than towards +Z. */
+    aInputs[0].bFireCenter = true;
+    mecha_sim_tick(&world, aInputs, 2);
+    memset(aInputs, 0, sizeof(aInputs));
+    for (iShot = 0; iShot < MECHA_MAX_PROJECTILES; iShot++) {
+        const tMechaProjectile *pShot = &world.aProjectiles[iShot];
+
+        if (!pShot->bActive || (int)pShot->byOwner != 0)
+            continue;
+        iShotsFound++;
+        CHECK(pShot->fVelZ < 0.0f);
+        /* Unguided, too: nothing to home on. */
+        CHECK(pShot->iTarget < 0);
+    }
+    CHECK(iShotsFound > 0);
+
+    /* Boost snaps it back on from any angle -- the quick way back, and the
+     * reason to spend gauge on a dash you did not need for distance. */
+    aInputs[0].bDash = true;
+    run_ticks(&world, aInputs, 2, 3);
+    CHECK(world.aMechs[0].byMove == MECHA_MOVE_DASH);
+    CHECK(world.aMechs[0].byLock == MECHA_LOCK_HELD);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_lock_survives_a_glance(void)
+{
+    tMechaWorld world;
+    tMechaInput aInputs[2];
+
+    /* Inside the cone the lock is simply held, and a moment outside it is a
+     * slip rather than a break -- a lock that died to one frame of overshoot
+     * would be unusable. */
+    start_duel(&world, 0, 0, 0, 0x9A5u, 1);
+    memset(aInputs, 0, sizeof(aInputs));
+    world.aMechs[0].fX = 0.0f;
+    world.aMechs[0].fZ = 0.0f;
+    world.aMechs[1].fX = 0.0f;
+    world.aMechs[1].fZ = MECHA_M(60.0f);
+    face_mech(&world, 0, 0);
+    face_mech(&world, 1, MECHA_ANGLE_HALF);
+    run_ticks(&world, aInputs, 2, 4);
+    CHECK(world.aMechs[0].byLock == MECHA_LOCK_HELD);
+
+    /* Just inside the hold cone: still locked, and the auto-turn is closing
+     * the gap rather than the lock decaying. */
+    face_mech(&world, 0, MECHA_LOCK_CONE - MECHA_DEG(3));
+    mecha_sim_tick(&world, aInputs, 2);
+    CHECK(world.aMechs[0].byLock == MECHA_LOCK_HELD);
+    CHECK(world.aMechs[0].iLockSlipTicks == 0);
+
+    /* Just outside it, for less than the grace period. */
+    face_mech(&world, 0, MECHA_LOCK_CONE + MECHA_DEG(12));
+    mecha_sim_tick(&world, aInputs, 2);
+    CHECK(world.aMechs[0].byLock == MECHA_LOCK_SLIPPING);
+    CHECK(world.aMechs[0].byLock != MECHA_LOCK_NONE);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_jump_cancel(void)
+{
+    tMechaWorld plain;
+    tMechaWorld cancelled;
+    tMechaInput aInputs[2];
+    const tMechaMechDef *pDef = mecha_def_get(0);
+    int iPlainAir = 0;
+    int iCancelAir = 0;
+    int i;
+
+    /* Two identical jumps, one of them cancelled. */
+    start_duel(&plain, 0, 0, 0, 0x5A11u, 1);
+    start_duel(&cancelled, 0, 0, 0, 0x5A11u, 1);
+
+    memset(aInputs, 0, sizeof(aInputs));
+    aInputs[0].bJump = true;
+    mecha_sim_tick(&plain, aInputs, 2);
+    mecha_sim_tick(&cancelled, aInputs, 2);
+    CHECK(plain.aMechs[0].byMove == MECHA_MOVE_JUMP);
+
+    /* Leaving the ground snaps the lock on, whatever the machine was
+     * pointed at: going up is how you find someone who got behind you. */
+    face_mech(&cancelled, 0, MECHA_ANGLE_HALF);
+    memset(aInputs, 0, sizeof(aInputs));
+    run_ticks(&plain, aInputs, 2, 12);
+    run_ticks(&cancelled, aInputs, 2, 12);
+    CHECK(cancelled.aMechs[0].byLock == MECHA_LOCK_HELD);
+
+    /* Guard in the air throws the arc away. */
+    aInputs[0].bGuard = true;
+    mecha_sim_tick(&cancelled, aInputs, 2);
+    CHECK(cancelled.aMechs[0].byMove == MECHA_MOVE_CANCEL);
+    memset(aInputs, 0, sizeof(aInputs));
+
+    /* The cancelled machine reaches the ground first. */
+    for (i = 0; i < MECHA_TICK_HZ * 4; i++) {
+        if (plain.aMechs[0].byMove == MECHA_MOVE_JUMP)
+            iPlainAir++;
+        if (cancelled.aMechs[0].byMove == MECHA_MOVE_JUMP
+            || cancelled.aMechs[0].byMove == MECHA_MOVE_CANCEL)
+            iCancelAir++;
+        mecha_sim_tick(&plain, aInputs, 2);
+        mecha_sim_tick(&cancelled, aInputs, 2);
+    }
+    CHECK(iCancelAir < iPlainAir);
+
+    /* And the landing left the turn rate off its leash, which is the whole
+     * reason to have done it. */
+    {
+        tMechaWorld spun;
+        int iBefore;
+        int iTurned;
+        int iCapped;
+
+        start_duel(&spun, 0, 0, 0, 0x5A11u, 1);
+        memset(aInputs, 0, sizeof(aInputs));
+        aInputs[0].bJump = true;
+        mecha_sim_tick(&spun, aInputs, 2);
+        memset(aInputs, 0, sizeof(aInputs));
+        run_ticks(&spun, aInputs, 2, 12);
+        aInputs[0].bGuard = true;
+        mecha_sim_tick(&spun, aInputs, 2);
+        memset(aInputs, 0, sizeof(aInputs));
+        /* Down to the ground. */
+        for (i = 0; i < MECHA_TICK_HZ * 4
+                    && spun.aMechs[0].byMove == MECHA_MOVE_CANCEL; i++)
+            mecha_sim_tick(&spun, aInputs, 2);
+        CHECK(spun.aMechs[0].iFreeTurnTicks > 0);
+
+        /* Turning under the free window covers more ground in the same
+         * ticks than the machine's own rate allows. */
+        iBefore = spun.aMechs[0].iFacing;
+        aInputs[0].iTurn = 100;
+        run_ticks(&spun, aInputs, 2, 6);
+        iTurned = mecha_angle_delta(iBefore, spun.aMechs[0].iFacing);
+        if (iTurned < 0)
+            iTurned = -iTurned;
+        iCapped = (int)(pDef->fTurnRate * MECHA_TICK_SECONDS) * 6;
+        CHECK(iTurned > iCapped);
+    }
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_guard_turns_melee_aside(void)
+{
+    const tMechaMechDef *pDef = mecha_def_get(3);
+    int iMeleeSlot = -1;
+    float afLost[2];
+    int iGuarding;
+    int iSlot;
+
+    /* Find the machine's standing melee rather than hardcoding a slot, so
+     * this keeps working when the roster is rebalanced. */
+    for (iSlot = 0; iSlot < MECHA_WEAPON_SLOTS; iSlot++) {
+        if (pDef->aWeapons[iSlot][MECHA_STANCE_STAND].byKind
+            == MECHA_PROJ_MELEE)
+            iMeleeSlot = iSlot;
+    }
+    CHECK(iMeleeSlot >= 0);
+
+    /* The same swing landed twice: once on a machine standing there, once on
+     * one holding guard. */
+    for (iGuarding = 0; iGuarding < 2; iGuarding++) {
+        tMechaWorld world;
+        tMechaInput aInputs[2];
+        float fBefore;
+        int i;
+
+        start_duel(&world, 0, 3, 0, 0x6DA5u, 1);
+        memset(aInputs, 0, sizeof(aInputs));
+        world.aMechs[0].fX = 0.0f;
+        world.aMechs[0].fZ = 0.0f;
+        world.aMechs[1].fX = 0.0f;
+        world.aMechs[1].fZ = MECHA_M(14.0f);
+        face_mech(&world, 0, 0);
+        face_mech(&world, 1, MECHA_ANGLE_HALF);
+        run_ticks(&world, aInputs, 2, 4);
+
+        /* Hold guard from before the swing so the stance is already set when
+         * the blade arrives. */
+        aInputs[1].bGuard = iGuarding != 0;
+        run_ticks(&world, aInputs, 2, 6);
+        if (iGuarding)
+            CHECK(world.aMechs[1].byMove == MECHA_MOVE_GUARD);
+
+        fBefore = world.aMechs[1].fArmour;
+        switch (iMeleeSlot) {
+        case MECHA_SLOT_LEFT:   aInputs[0].bFireLeft = true; break;
+        case MECHA_SLOT_CENTER: aInputs[0].bFireCenter = true; break;
+        default:                aInputs[0].bFireRight = true; break;
+        }
+        mecha_sim_tick(&world, aInputs, 2);
+        aInputs[0].bFireLeft = false;
+        aInputs[0].bFireCenter = false;
+        aInputs[0].bFireRight = false;
+        for (i = 0; i < MECHA_TICK_HZ; i++)
+            mecha_sim_tick(&world, aInputs, 2);
+        afLost[iGuarding] = fBefore - world.aMechs[1].fArmour;
+    }
+
+    /* The swing has to have connected at all, or this proves nothing. */
+    CHECK(afLost[0] > 0.0f);
+    /* And guard has to have turned most of it aside. Asserted as a band
+     * rather than a figure: the constant is 15%, and anything under a third
+     * means the rule fired. */
+    CHECK(afLost[1] < afLost[0] * 0.34f);
+    CHECK(afLost[1] > 0.0f);
     return 0;
 }
 
@@ -968,6 +1248,10 @@ int main(void)
         { "determinism", test_determinism },
         { "ai fights", test_ai_fights },
         { "ai skill ladder", test_ai_skill_ladder },
+        { "lock breaks and returns", test_lock_breaks_and_returns },
+        { "lock survives a glance", test_lock_survives_a_glance },
+        { "jump cancel", test_jump_cancel },
+        { "guard turns melee aside", test_guard_turns_melee_aside },
     };
     size_t i;
 

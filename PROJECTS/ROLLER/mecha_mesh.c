@@ -335,6 +335,9 @@ static int mecha_mesh_body_pitch(const tMechaMech *pMech)
   case MECHA_MOVE_DESTROYED: return iDownPitch;
   case MECHA_MOVE_DASH:      return MECHA_DEG(12);
   case MECHA_MOVE_JUMP:      return -MECHA_DEG(6);
+  /* Nose down through the drop, which is what tells the other player the
+   * arc has been thrown away rather than merely peaked. */
+  case MECHA_MOVE_CANCEL:    return MECHA_DEG(16);
   case MECHA_MOVE_LAND:      return MECHA_DEG(9);
   case MECHA_MOVE_STAGGER:   return -MECHA_DEG(10);
   default:                   return 0;
@@ -393,7 +396,7 @@ void mecha_mesh_mech(tMechaQuadList *pList, const tMechaWorld *pWorld,
     fLateral /= pDef->fDashSpeed;
   iRoll = (int)(pMech->fLeanRoll * mecha_clampf(fLateral, -1.0f, 1.0f));
 
-  fVertical = pMech->byMove == MECHA_MOVE_CROUCH ? 0.66f : 1.0f;
+  fVertical = pMech->byMove == MECHA_MOVE_GUARD ? 0.66f : 1.0f;
   mecha_pose_build(&pose, pMech->iFacing, mecha_mesh_body_pitch(pMech), iRoll,
                    pMech->fX, pMech->fY, pMech->fZ, fVertical);
 

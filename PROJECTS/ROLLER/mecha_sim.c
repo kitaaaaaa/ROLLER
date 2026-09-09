@@ -767,6 +767,53 @@ static void mecha_start_dash(tMechaMech *pMech, const tMechaInput *pInput)
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * Drives the machine towards a velocity instead of assigning one.
+ *
+ * The velocity it already has is split into the part pointing where it is
+ * being asked to go and the part pointing across that. The first is pushed
+ * towards the speed asked for at the machine's own drive rate; the second is
+ * bled off at its grip. That single split is what makes a heavy machine
+ * slide out of a direction change and a light one snap round -- the sideways
+ * component is the skid, and grip is how fast it stops being one.
+ *
+ * fDirX/fDirZ must be unit length, or zero to mean "no direction asked for",
+ * in which case everything is treated as sideways and simply brakes.
+ */
+static void mecha_drive(tMechaMech *pMech, const tMechaMechDef *pDef,
+                        float fDirX, float fDirZ, float fSpeed,
+                        float fAccelScale, float fGripScale)
+{
+  float fGrip = pDef->fGrip > 0.0f ? pDef->fGrip : MECHA_MPS(90.0f);
+  float fAccel = pDef->fDriveAccel > 0.0f ? pDef->fDriveAccel
+                                                : MECHA_MPS(70.0f);
+  float fAlong;
+  float fPerpX;
+  float fPerpZ;
+
+  fGrip *= fGripScale * MECHA_DT;
+  fAccel *= fAccelScale * MECHA_DT;
+
+  if (fDirX == 0.0f && fDirZ == 0.0f) {
+    pMech->fVelX = mecha_approachf(pMech->fVelX, 0.0f, fGrip);
+    pMech->fVelZ = mecha_approachf(pMech->fVelZ, 0.0f, fGrip);
+    return;
+  }
+
+  fAlong = pMech->fVelX * fDirX + pMech->fVelZ * fDirZ;
+  fPerpX = pMech->fVelX - fDirX * fAlong;
+  fPerpZ = pMech->fVelZ - fDirZ * fAlong;
+
+  fAlong = mecha_approachf(fAlong, fSpeed, fAccel);
+  fPerpX = mecha_approachf(fPerpX, 0.0f, fGrip);
+  fPerpZ = mecha_approachf(fPerpZ, 0.0f, fGrip);
+
+  pMech->fVelX = fDirX * fAlong + fPerpX;
+  pMech->fVelZ = fDirZ * fAlong + fPerpZ;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
                                   const tMechaInput *pInput, bool bCanAct)
 {
@@ -908,13 +955,15 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
     pMech->fVelX = 0.0f;
     pMech->fVelZ = 0.0f;
   } else if (pMech->byMove == MECHA_MOVE_WALK) {
-    pMech->fVelX = fDirX * pDef->fWalkSpeed;
-    pMech->fVelZ = fDirZ * pDef->fWalkSpeed;
+    mecha_drive(pMech, pDef, fDirX, fDirZ, pDef->fWalkSpeed * fStick,
+                1.0f, 1.0f);
   } else {
-    pMech->fVelX = mecha_approachf(pMech->fVelX, 0.0f,
-                                   pDef->fWalkSpeed * 4.0f * MECHA_DT);
-    pMech->fVelZ = mecha_approachf(pMech->fVelZ, 0.0f,
-                                   pDef->fWalkSpeed * 4.0f * MECHA_DT);
+    /* Nothing asked for: everything on the clock is skid, and the machine
+     * leans on its brakes rather than its grip. */
+    float fGrip = pDef->fGrip > 0.0f ? pDef->fGrip : MECHA_MPS(90.0f);
+    float fBrake = pDef->fBrake > 0.0f ? pDef->fBrake : MECHA_MPS(60.0f);
+
+    mecha_drive(pMech, pDef, 0.0f, 0.0f, 0.0f, 1.0f, fBrake / fGrip);
   }
 
   /* Ending a dash: the burst decides when, not the player. */

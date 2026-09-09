@@ -165,6 +165,14 @@ Both are read every frame, so either works at any time.
   game announces things in. That one takes a colour, so a banner can still
   go green for a win and red for a loss.
 
+- **Machines carry their weight.** Velocity is driven, not assigned. The
+  race game's cars work the same way: a grip figure limits how fast sideways
+  motion is corrected, whatever is left over bleeds off on its own, and a
+  car cannot simply be told to be going somewhere else. Each machine has a
+  grip, a drive acceleration and a brake, all in absolute metres per second
+  squared. A siege platform sheds its old direction in about fourteen ticks
+  and takes nineteen to reverse; an interceptor does both in four and seven.
+
 ## Layout
 
 The mode is split so that the half worth testing has no engine dependencies at

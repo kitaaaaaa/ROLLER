@@ -208,6 +208,31 @@ typedef struct
    * interceptor that is all narrow torso and thin legs. Zero means one, so a
    * machine that never sets them still builds.
    */
+  /*
+   * How the machine carries its own weight.
+   *
+   * The race game's cars do not set their velocity, they drive it: a grip
+   * figure limits how fast sideways motion can be corrected, whatever is
+   * left over decays on its own, and steering authority falls off as speed
+   * rises. The same three ideas are what make a machine here feel like it
+   * has mass rather than like a cursor.
+   *
+   * fGrip is how much sideways velocity is killed per second -- high is
+   * crisp, low slides wide out of a turn. fDriveAccel is how hard it can
+   * push itself towards the speed it is asking for. fBrake is how quickly
+   * it sheds speed with nothing asked of it.
+   *
+   * All three are absolute, in metres per second squared, and deliberately
+   * not multiples of the machine's own walk speed. Scaling them that way
+   * normalises out the very thing they exist to express: it makes every
+   * machine take the same time to gather itself, so the interceptor -- being
+   * simply faster -- slides the furthest, and the siege platform comes out
+   * the nimbler of the two.
+   */
+  float fGrip;
+  float fDriveAccel;
+  float fBrake;
+
   float fBuildShoulder;
   float fBuildTorso;
   float fBuildLimb;

@@ -1138,6 +1138,140 @@ static int test_death_throws_debris(void)
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * Runs a machine up to speed, then asks it for something else, and reports
+ * the two things that separate a heavy machine from a light one: how far it
+ * keeps drifting the old way, and how long it takes to obey.
+ *
+ * Everything is measured along whichever way the machine was actually
+ * travelling, not along a world axis. A machine faces whatever it has
+ * locked, so "forward" is wherever the fight put it -- measuring against +Z
+ * reported zero for all three and looked for a moment like the physics had
+ * simply stopped working.
+ */
+static void measure_handling(int iDefIdx, float *pfSkidMetres,
+                             int *piReverseTicks)
+{
+    tMechaWorld world;
+    tMechaInput aInputs[2];
+    float fDirX;
+    float fDirZ;
+    float fLen;
+    float fStartX;
+    float fStartZ;
+    float fFurthest;
+    int i;
+
+    /* --- lateral skid: up to speed, then hard across it ------------------ */
+    start_duel(&world, 0, iDefIdx, 0, 0x5C1Du, 1);
+    memset(aInputs, 0, sizeof(aInputs));
+    aInputs[0].iMoveZ = 100;
+    run_ticks(&world, aInputs, 2, MECHA_TICK_HZ * 2);
+
+    fDirX = world.aMechs[0].fVelX;
+    fDirZ = world.aMechs[0].fVelZ;
+    fLen = mecha_length2(fDirX, fDirZ);
+    if (fLen < 1.0f) {
+        *pfSkidMetres = 0.0f;
+        *piReverseTicks = 0;
+        return;
+    }
+    fDirX /= fLen;
+    fDirZ /= fLen;
+    (void)fStartX;
+    (void)fStartZ;
+    (void)fFurthest;
+
+    /*
+     * How long the old motion takes to bleed away, as a count of ticks for
+     * the velocity still pointing the original way to fall to a fifth of
+     * what it was. A ratio rather than a distance on purpose: distance is
+     * speed times decay time, so the fastest machine covers the most ground
+     * while skidding least, and measuring metres ranks the interceptor as
+     * the heaviest thing on the roster.
+     */
+    aInputs[0].iMoveZ = 0;
+    aInputs[0].iMoveX = 100;
+    *pfSkidMetres = (float)(MECHA_TICK_HZ * 2);
+    for (i = 0; i < MECHA_TICK_HZ * 2; i++) {
+        float fAlong;
+
+        mecha_sim_tick(&world, aInputs, 2);
+        fAlong = world.aMechs[0].fVelX * fDirX
+               + world.aMechs[0].fVelZ * fDirZ;
+        if (fAlong < fLen * 0.2f) {
+            *pfSkidMetres = (float)i;
+            break;
+        }
+    }
+
+    /* --- how long it takes to actually turn round ------------------------ */
+    start_duel(&world, 0, iDefIdx, 0, 0x5C1Du, 1);
+    memset(aInputs, 0, sizeof(aInputs));
+    aInputs[0].iMoveZ = 100;
+    run_ticks(&world, aInputs, 2, MECHA_TICK_HZ * 2);
+
+    fDirX = world.aMechs[0].fVelX;
+    fDirZ = world.aMechs[0].fVelZ;
+    fLen = mecha_length2(fDirX, fDirZ);
+    fDirX /= fLen;
+    fDirZ /= fLen;
+
+    aInputs[0].iMoveZ = -100;
+    *piReverseTicks = MECHA_TICK_HZ * 3;
+    for (i = 0; i < MECHA_TICK_HZ * 3; i++) {
+        mecha_sim_tick(&world, aInputs, 2);
+        if (world.aMechs[0].fVelX * fDirX
+            + world.aMechs[0].fVelZ * fDirZ < 0.0f) {
+            *piReverseTicks = i;
+            break;
+        }
+    }
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_machines_carry_their_weight(void)
+{
+    float afSkid[3];
+    int aiTicks[3];
+    int i;
+    static const int aiDefs[3] = { 1, 0, 2 };   /* heavy, middle, light */
+    static const char *const aszNames[3] = { "BULWARK", "LANCER", "HALCYON" };
+
+    for (i = 0; i < 3; i++)
+        measure_handling(aiDefs[i], &afSkid[i], &aiTicks[i]);
+
+    for (i = 0; i < 3; i++)
+        printf("   %-8s sheds its old motion in %2d ticks, turns round in %2d\n",
+               aszNames[i], (int)afSkid[i], aiTicks[i]);
+
+    /*
+     * Velocity is driven rather than assigned now, and the two levers that
+     * do it are separate. Grip decides how much of the old direction
+     * survives being asked for a new one -- so it is measured by turning
+     * across the motion, never by reversing along it, where the sideways
+     * component is zero and grip is never consulted at all. Drive
+     * acceleration decides how long obeying takes, and that is what
+     * reversing measures.
+     *
+     * Orderings rather than figures: the walk speeds these play out at move
+     * whenever the roster is tuned.
+     */
+    CHECK(afSkid[0] > afSkid[1]);
+    CHECK(afSkid[1] > afSkid[2]);
+    CHECK(aiTicks[0] > aiTicks[1]);
+    CHECK(aiTicks[1] > aiTicks[2]);
+
+    /* Worth having, and not so much that a machine is on ice. */
+    CHECK(afSkid[0] > afSkid[2] * 1.5f);
+    CHECK(afSkid[0] < (float)MECHA_TICK_HZ);
+    CHECK(aiTicks[0] < MECHA_TICK_HZ * 2);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static int test_lobbed_shots_reach_their_target(void)
 {
     tMechaWorld world;
@@ -1395,6 +1529,7 @@ int main(void)
         { "jump cancel", test_jump_cancel },
         { "guard turns melee aside", test_guard_turns_melee_aside },
         { "death throws debris", test_death_throws_debris },
+        { "machines carry their weight", test_machines_carry_their_weight },
     };
     size_t i;
 

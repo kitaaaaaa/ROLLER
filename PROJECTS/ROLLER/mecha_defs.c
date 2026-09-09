@@ -42,6 +42,8 @@ static const tMechaMechDef s_aMechDefs[] = {
 //-------------------------------------------------------------------------------------------------
 {
   .szName = "LANCER", .szClass = "LINE ASSAULT",
+  .fGrip = MECHA_MPS(90.0f), .fDriveAccel = MECHA_MPS(70.0f),
+  .fBrake = MECHA_MPS(60.0f),
   .fBuildShoulder = 1.00f, .fBuildTorso = 1.00f, .fBuildLimb = 1.00f,
   .fBuildHead = 1.00f, .fBuildGun = 1.00f,
   .fHeight = MECHA_M(14.0f), .fRadius = MECHA_M(3.2f), .fMass = 1.0f,
@@ -141,6 +143,10 @@ static const tMechaMechDef s_aMechDefs[] = {
 //-------------------------------------------------------------------------------------------------
 {
   .szName = "BULWARK", .szClass = "SIEGE PLATFORM",
+  /* Carries its mass: slow to gather speed, slower to shed it, and it
+   * slides a long way out of anything taken quickly. */
+  .fGrip = MECHA_MPS(34.0f), .fDriveAccel = MECHA_MPS(30.0f),
+  .fBrake = MECHA_MPS(24.0f),
   /* The bruiser: everything wide, everything heavy, and a gun on each
    * arm you could not possibly run with. */
   .fBuildShoulder = 1.50f, .fBuildTorso = 1.30f, .fBuildLimb = 1.34f,
@@ -243,6 +249,9 @@ static const tMechaMechDef s_aMechDefs[] = {
 //-------------------------------------------------------------------------------------------------
 {
   .szName = "HALCYON", .szClass = "FAST INTERCEPT",
+  /* Almost no weight to fight: changes direction nearly on the spot. */
+  .fGrip = MECHA_MPS(190.0f), .fDriveAccel = MECHA_MPS(150.0f),
+  .fBrake = MECHA_MPS(130.0f),
   /* All silhouette and no mass: narrow shoulders, thin legs, and a head
    * that actually clears them. */
   .fBuildShoulder = 0.78f, .fBuildTorso = 0.80f, .fBuildLimb = 0.72f,
@@ -344,6 +353,8 @@ static const tMechaMechDef s_aMechDefs[] = {
 //-------------------------------------------------------------------------------------------------
 {
   .szName = "SABRE", .szClass = "CLOSE QUARTERS",
+  .fGrip = MECHA_MPS(120.0f), .fDriveAccel = MECHA_MPS(100.0f),
+  .fBrake = MECHA_MPS(85.0f),
   .fBuildShoulder = 0.90f, .fBuildTorso = 0.94f, .fBuildLimb = 0.84f,
   .fBuildHead = 1.06f, .fBuildGun = 0.82f,
   .fHeight = MECHA_M(13.5f), .fRadius = MECHA_M(3.0f), .fMass = 0.9f,

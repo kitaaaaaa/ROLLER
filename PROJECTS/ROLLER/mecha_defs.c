@@ -9,13 +9,20 @@
  * entries are tuned by eye against the same palette; every colour the mode
  * paints with is named here or in mecha_arena.c so a retune stays local.
  */
-#define PAL_TRACER_ORANGE 183
-#define PAL_TRACER_AMBER  194
-#define PAL_TRACER_VIOLET 35
+/*
+ * Measured against the game's own PALETTE.PAL, not chosen to look right in
+ * the mode's fallback table. Several of these were picked before the retail
+ * palette was ever loaded and were badly wrong in it -- the "green" tracer
+ * came out blue, "amber" magenta and "orange" pink -- which nothing noticed
+ * while the mode only ever drew through its own colours.
+ */
+#define PAL_TRACER_ORANGE 171
+#define PAL_TRACER_AMBER  206
+#define PAL_TRACER_VIOLET 192
 #define PAL_TRACER_WHITE  143
 #define PAL_TRACER_RED    231
-#define PAL_TRACER_SAND   67
-#define PAL_TRACER_GREEN  148
+#define PAL_TRACER_SAND    34
+#define PAL_TRACER_GREEN  255
 #define PAL_TRACER_CYAN   218
 
 #define PAL_HULL_STEEL    128

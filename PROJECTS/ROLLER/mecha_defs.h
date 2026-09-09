@@ -101,6 +101,40 @@
 #define MECHA_CANCEL_TURN_TICKS  MECHA_SEC(0.45f)
 #define MECHA_CANCEL_TURN_SCALE  7
 
+/*
+ * Tiles in the game's own texture banks.
+ *
+ * Chosen by measuring the decoded banks, not by eye. track1.drh holds 246
+ * tiles and most of them are track furniture -- kerbs, arrows, lane
+ * markings, a sponsor emblem -- none of which survives being tiled across a
+ * floor. What a ground surface needs is uniformity, so the candidates were
+ * ranked by the standard deviation of their luminance and the flattest ones
+ * taken: 54 and 55 are the same grey a shade apart, 205 and 210 clean grass,
+ * 12 and 13 concrete and rust. A pair has to be neighbours in appearance as
+ * well, because the two alternate across the floor the way the two palette
+ * entries do -- pairing plain tarmac with a lane-marked tile turned the
+ * arena into a chessboard instead of a surface.
+ *
+ * Every one of these is reached only when the retail data is installed;
+ * each surface keeps a palette index for the flat fallback.
+ */
+#define MECHA_TILE_TARMAC_A        54
+#define MECHA_TILE_TARMAC_B        55
+#define MECHA_TILE_GRASS_A        205
+#define MECHA_TILE_GRASS_B        210
+#define MECHA_TILE_PLATE_A         12
+#define MECHA_TILE_PLATE_B         13
+#define MECHA_TILE_CONCRETE        12
+#define MECHA_TILE_BRICK            9
+#define MECHA_TILE_RUST            14
+
+/* Building facades for the sides of cover, and the flattest panel in that
+ * bank for the roofs -- a facade laid on its back reads as a building that
+ * has fallen over. */
+#define MECHA_TILE_FACADE_FIRST    11
+#define MECHA_TILE_FACADE_COUNT     8
+#define MECHA_TILE_ROOF             8
+
 /* Mechs push each other apart rather than overlapping. */
 #define MECHA_PUSH_PER_TICK    MECHA_M(0.9f)
 

@@ -96,16 +96,19 @@ static const uint8 s_aabyFont[][MECHA_GLYPH_H] = {
 #define MECHA_GLYPH_PCT   (MECHA_GLYPH_COLON + 4)
 
 //-------------------------------------------------------------------------------------------------
-/* HUD palette. Named here for the same reason as the arena's colours. */
+/* HUD palette, measured against the game's own PALETTE.PAL. Three of these
+ * used to be picked to look right in the fallback table alone and were quite
+ * wrong once the retail palette was actually loaded: the armour bar came out
+ * blue, the ammo pips magenta and the lock reticle pink. */
 #define MECHA_HUD_FRAME   115
 #define MECHA_HUD_TEXT    143
-#define MECHA_HUD_ARMOUR  148
+#define MECHA_HUD_ARMOUR  255
 #define MECHA_HUD_ARMOUR_LOW 231
 #define MECHA_HUD_BOOST   218
 #define MECHA_HUD_BOOST_LOCKED 231
-#define MECHA_HUD_AMMO    194
+#define MECHA_HUD_AMMO    206
 #define MECHA_HUD_EMPTY   119
-#define MECHA_HUD_LOCK    183
+#define MECHA_HUD_LOCK    171
 #define MECHA_HUD_ENEMY   231
 
 /* Camera framing, in metres. */
@@ -142,10 +145,10 @@ static const uint8 s_aabyFont[][MECHA_GLYPH_H] = {
  * by the text and quad routines above them.
  */
 static tBlockHeader *s_pFont;
-static TextureHandle s_hSprites;
 static int mecha_font_advance(char cChar);
-static bool mecha_sprites_ensure(GameRenderer *pRenderer);
-static bool mecha_sprite_valid(int iFrame);
+static bool mecha_bank_ensure(GameRenderer *pRenderer, int iBank);
+static TextureHandle mecha_bank_handle(int iBank);
+static bool mecha_bank_has_tile(int iBank, int iTile);
 
 static int mecha_glyph_index(char cChar)
 {
@@ -665,8 +668,9 @@ static void mecha_render_scene(GameRenderer *pRenderer,
      * when it is not -- rasterises flat, which is why the mesh still picks a
      * palette index for every particle it makes.
      */
-    if (pQuad->bySprite >= 0 && mecha_sprites_ensure(pRenderer)
-        && mecha_sprite_valid((int)pQuad->bySprite)) {
+    if (pQuad->byTexBank != MECHA_TEX_NONE
+        && mecha_bank_ensure(pRenderer, (int)pQuad->byTexBank)
+        && mecha_bank_has_tile((int)pQuad->byTexBank, (int)pQuad->byTile)) {
       /*
        * Which tile of the bank to draw lives in the low byte of the surface
        * type -- it is not a palette index here, which is the one thing about
@@ -679,9 +683,14 @@ static void mecha_render_scene(GameRenderer *pRenderer,
        * every one of these frames is drawn on index 0 -- between a third and
        * nine tenths of each tile is background.
        */
-      int iSprite = ((int)pQuad->bySprite & SURFACE_MASK_TEXTURE_INDEX)
-                  | SURFACE_FLAG_APPLY_TEXTURE
-                  | SURFACE_FLAG_PARTIAL_TRANS;
+      int iSprite = ((int)pQuad->byTile & SURFACE_MASK_TEXTURE_INDEX)
+                  | SURFACE_FLAG_APPLY_TEXTURE;
+
+      /* Only the effect frames are keyed. Ground, walls and block faces are
+       * solid surfaces, and skipping index 0 in those would punch holes
+       * through the world wherever the artwork happened to use it. */
+      if (pQuad->byTexBank == MECHA_TEX_EFFECT)
+        iSprite |= SURFACE_FLAG_PARTIAL_TRANS;
 
       /* The legacy path works its own texture coordinates out inside
        * POLYTEX, from the tile index and the projected polygon -- the track
@@ -693,7 +702,9 @@ static void mecha_render_scene(GameRenderer *pRenderer,
       aVerts[1].u = 0.0f; aVerts[1].v = 0.0f;
       aVerts[2].u = 0.0f; aVerts[2].v = 0.0f;
       aVerts[3].u = 0.0f; aVerts[3].v = 0.0f;
-      game_render_quad_world(pRenderer, aVerts, s_hSprites, iSprite, 1.0f);
+      game_render_quad_world(pRenderer, aVerts,
+                             mecha_bank_handle((int)pQuad->byTexBank),
+                             iSprite, 1.0f);
       continue;
     }
 
@@ -1216,65 +1227,136 @@ static int mecha_font_advance(char cChar)
  * effect still carries a palette index, so a mode with no bank draws exactly
  * what it drew before.
  */
-static int s_iSpriteTiles;
-static bool s_bSpritesTried;
-
-static bool mecha_sprites_ensure(GameRenderer *pRenderer)
+/*
+ * The banks this mode draws from, and how each one gets loaded.
+ *
+ * Every one is loaded by a routine the game already has, which is the point:
+ * nothing here parses a .DRH. What this owns is the part those routines are
+ * careless about. Each calls ErrorBoxExit when its file is missing -- taking
+ * the process down rather than returning a failure -- so each is probed
+ * first, and a bank that is not there simply never becomes available. And
+ * each uploads through g_pGameRenderer, the global the race sets up, so a
+ * mode drawing on its own renderer gets the decompress and the sort but no
+ * upload; the pixels are left in a global either way, so they are handed to
+ * the renderer that is actually drawing.
+ *
+ * The engine's own numbering is not exposed past this table. The track bank
+ * is bank 0 while its tile count lives at num_textures[19], and that is not
+ * a quirk worth spreading through the mesh.
+ */
+typedef struct
 {
-  int iFileHandle;
+  int           iEngineBank;
+  int           iCountSlot;
+  TextureHandle hTexture;
+  int           iTiles;
+  bool          bTried;
+} tMechaTexBank;
 
-  if (s_hSprites != TEXTURE_HANDLE_INVALID)
-    return true;
-  if (!pRenderer)
+static const char *const s_szWorldFile = "track1.drh";
+
+static tMechaTexBank s_aBanks[4] = {
+  { 0,                     0,  0, 0, false },   /* NONE   */
+  { TEXTURE_BANK_CARGEN,   18, 0, 0, false },   /* EFFECT */
+  { 0,                     19, 0, 0, false },   /* WORLD  */
+  { TEXTURE_BANK_BUILDING, 17, 0, 0, false },   /* STRUCT */
+};
+
+static bool mecha_file_present(const char *szFile)
+{
+  int iFile;
+
+  if (!szFile || !szFile[0])
     return false;
+  iFile = ROLLERopen(szFile, O_RDONLY | O_BINARY);
+  if (iFile == -1)
+    return false;
+  close(iFile);
+  return true;
+}
 
-  /* Already loaded by the race, in which case it is simply ours to use. */
-  if (num_textures[TEXTURE_BANK_CARGEN] > 0) {
-    s_hSprites = game_render_get_texture_handle(pRenderer,
-                                                TEXTURE_BANK_CARGEN);
-    if (s_hSprites != TEXTURE_HANDLE_INVALID) {
-      s_iSpriteTiles = num_textures[TEXTURE_BANK_CARGEN];
+static bool mecha_bank_ensure(GameRenderer *pRenderer, int iBank)
+{
+  tMechaTexBank *pBank;
+  uint8 *pPixels = NULL;
+
+  if (iBank <= MECHA_TEX_NONE || iBank > MECHA_TEX_STRUCT || !pRenderer)
+    return false;
+  pBank = &s_aBanks[iBank];
+  if (pBank->hTexture != TEXTURE_HANDLE_INVALID)
+    return true;
+
+  /* Already loaded by the race, in which case it is ours to use. */
+  if (num_textures[pBank->iCountSlot] > 0) {
+    pBank->hTexture = game_render_get_texture_handle(pRenderer,
+                                                     pBank->iEngineBank);
+    if (pBank->hTexture != TEXTURE_HANDLE_INVALID) {
+      pBank->iTiles = num_textures[pBank->iCountSlot];
       return true;
     }
   }
 
-  /* One attempt. A missing bank is not going to appear later in the match,
-   * and retrying every frame would stat the filesystem sixty times a
-   * second for an answer that cannot change. */
-  if (s_bSpritesTried)
+  /* One attempt each: a missing bank will not appear later in the match. */
+  if (pBank->bTried)
     return false;
-  s_bSpritesTried = true;
+  pBank->bTried = true;
 
-  iFileHandle = ROLLERopen(gencartex_name, O_RDONLY | O_BINARY);
-  if (iFileHandle == -1)
-    return false;
-  close(iFileHandle);
+  switch (iBank) {
+  case MECHA_TEX_EFFECT:
+    if (!mecha_file_present(gencartex_name))
+      return false;
+    LoadGenericCarTextures();
+    pPixels = cargen_vga;
+    break;
+  case MECHA_TEX_WORLD:
+    if (!mecha_file_present(s_szWorldFile))
+      return false;
+    /* LoadTextures reads its filename out of a global, the same one the
+     * track loader points at whichever bank a track wants. */
+    SDL_strlcpy(texture_file, s_szWorldFile, sizeof(texture_file));
+    LoadTextures();
+    pPixels = texture_vga;
+    break;
+  default:
+    if (!mecha_file_present(bldtex_file))
+      return false;
+    LoadBldTextures();
+    pPixels = building_vga;
+    break;
+  }
 
-  LoadGenericCarTextures();
-  s_iSpriteTiles = num_textures[TEXTURE_BANK_CARGEN];
-  s_hSprites = game_render_get_texture_handle(pRenderer, TEXTURE_BANK_CARGEN);
-
-  /*
-   * The loader uploads through g_pGameRenderer, the global the race sets up.
-   * This mode may be running on a renderer that global has never pointed at
-   * -- the headless test builds its own, and the mode itself stands one up
-   * when it is entered before any race -- in which case the decompress and
-   * the sort happened but the upload was skipped, and the handle comes back
-   * invalid with the tiles counted. The pixels are sitting in cargen_vga
-   * either way, so hand them to the renderer that is actually drawing.
-   */
-  if (s_hSprites == TEXTURE_HANDLE_INVALID && cargen_vga
-      && s_iSpriteTiles > 0) {
+  pBank->iTiles = num_textures[pBank->iCountSlot];
+  pBank->hTexture = game_render_get_texture_handle(pRenderer,
+                                                   pBank->iEngineBank);
+  if (pBank->hTexture == TEXTURE_HANDLE_INVALID && pPixels
+      && pBank->iTiles > 0) {
     int iTile = gfx_size ? 32 : 64;
     int iPerRow = 256 / iTile;
-    int iRows = (s_iSpriteTiles + iPerRow - 1) / iPerRow;
+    int iRows = (pBank->iTiles + iPerRow - 1) / iPerRow;
 
-    s_hSprites = game_render_load_texture(pRenderer, cargen_vga, 256,
-                                          iRows * iTile,
-                                          TEXTURE_BANK_CARGEN, gfx_size);
+    pBank->hTexture = game_render_load_texture(pRenderer, pPixels, 256,
+                                               iRows * iTile,
+                                               pBank->iEngineBank, gfx_size);
   }
-  return s_hSprites != TEXTURE_HANDLE_INVALID && s_iSpriteTiles > 0;
+  return pBank->hTexture != TEXTURE_HANDLE_INVALID && pBank->iTiles > 0;
 }
+
+static TextureHandle mecha_bank_handle(int iBank)
+{
+  if (iBank <= MECHA_TEX_NONE || iBank > MECHA_TEX_STRUCT)
+    return TEXTURE_HANDLE_INVALID;
+  return s_aBanks[iBank].hTexture;
+}
+
+/* True when the loaded bank actually has this tile. */
+static bool mecha_bank_has_tile(int iBank, int iTile)
+{
+  if (iBank <= MECHA_TEX_NONE || iBank > MECHA_TEX_STRUCT)
+    return false;
+  return iTile >= 0 && iTile < s_aBanks[iBank].iTiles;
+}
+
+//-------------------------------------------------------------------------------------------------
 
 void mecha_render_init_assets(GameRenderer *pRenderer)
 {
@@ -1290,15 +1372,11 @@ bool mecha_render_font_is_retail(void)
 
 bool mecha_render_sprites_active(void)
 {
-  return s_hSprites != TEXTURE_HANDLE_INVALID && s_iSpriteTiles > 0;
+  return s_aBanks[MECHA_TEX_EFFECT].hTexture != TEXTURE_HANDLE_INVALID
+      && s_aBanks[MECHA_TEX_EFFECT].iTiles > 0;
 }
 
 /* True when the loaded bank actually has this frame. */
-static bool mecha_sprite_valid(int iFrame)
-{
-  return iFrame >= 0 && iFrame < s_iSpriteTiles;
-}
-
 //-------------------------------------------------------------------------------------------------
 /* Sky */
 
@@ -1488,6 +1566,10 @@ static const struct
   { 194, 63, 52, 10 },   /* amber tracer, ammo pips                     */
   { 218, 16, 52, 63 },   /* cyan tracer, boost gauge                    */
   { 231, 63, 12, 12 },   /* red tracer, low armour, enemy bar           */
+  { 255, 10, 60, 14 },   /* green tracer, armour bar                    */
+  { 206, 60, 56, 12 },   /* amber tracer, ammo pips                     */
+  { 192, 46, 10, 58 },   /* violet tracer                               */
+  {  34, 55, 48, 30 },   /* sand tracer                                 */
 
   /*
    * The sky, deepest first. These indices are not arbitrary: in the game's

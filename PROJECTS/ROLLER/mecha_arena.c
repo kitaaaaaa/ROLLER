@@ -1,5 +1,7 @@
 #include "mecha_arena.h"
 
+#include "mecha_defs.h"
+
 #include <math.h>
 #include <string.h>
 
@@ -52,6 +54,14 @@ static void mecha_arena_add_box(tMechaArena *pArena,
   pBox->fHeight = fHeight;
   pBox->byPalette = byPalette;
   pBox->byTrimPalette = byTrimPalette;
+  /* Cover is the one thing out here with a real analogue in the retail art,
+   * so it takes a building facade and a roof off that bank. Which facade
+   * follows the box's own index, so a row of them is not one building
+   * repeated. */
+  pBox->byTile = (uint8_t)(MECHA_TILE_FACADE_FIRST
+                           + (pArena->iObstacleCount
+                              % MECHA_TILE_FACADE_COUNT));
+  pBox->byTopTile = MECHA_TILE_ROOF;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -95,6 +105,20 @@ void mecha_arena_init(tMechaArena *pArena, int iArenaIdx)
   pArena->byGridPalette = MECHA_PAL_GRID;
   pArena->byWallPalette = MECHA_PAL_WALL;
 
+  /*
+   * Tiles in the game's own track bank, used whenever the retail data is
+   * installed. They do not replace the palette entries above -- those stay
+   * as the fallback, so an arena still comes up on a bare checkout and the
+   * checkerboard it draws there is the same checkerboard, only flat.
+   *
+   * Each arena takes a different surface so the three do not read as one
+   * place with the furniture moved: a yard in tarmac, a field in grass, and
+   * a plate floor in worn metal.
+   */
+  pArena->byFloorTile = MECHA_TILE_TARMAC_A;
+  pArena->byGridTile = MECHA_TILE_TARMAC_B;
+  pArena->byWallTile = MECHA_TILE_CONCRETE;
+
   switch (iArenaIdx) {
   case 0:
     /* Four tall pillars around the middle and four low blocks further out:
@@ -126,6 +150,9 @@ void mecha_arena_init(tMechaArena *pArena, int iArenaIdx)
     pArena->fHalfExtent = 140.0f * m;
     pArena->fWallHeight = 26.0f * m;
     pArena->byFloorPalette = MECHA_PAL_FLOOR_B;
+    pArena->byFloorTile = MECHA_TILE_GRASS_A;
+    pArena->byGridTile = MECHA_TILE_GRASS_B;
+    pArena->byWallTile = MECHA_TILE_BRICK;
     mecha_arena_add_box(pArena, -30.0f * m, -20.0f * m, 3.0f * m, 46.0f * m,
                         12.0f * m, MECHA_PAL_BLOCK, MECHA_PAL_HAZARD);
     mecha_arena_add_box(pArena,  30.0f * m,  20.0f * m, 3.0f * m, 46.0f * m,
@@ -143,6 +170,9 @@ void mecha_arena_init(tMechaArena *pArena, int iArenaIdx)
     break;
 
   default:
+    pArena->byFloorTile = MECHA_TILE_PLATE_A;
+    pArena->byGridTile = MECHA_TILE_PLATE_B;
+    pArena->byWallTile = MECHA_TILE_RUST;
     /* Small and vertical. The centre block is low enough to jump onto and
      * wide enough to fight on, which turns the whole round into a scrap over
      * high ground. */

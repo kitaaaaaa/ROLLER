@@ -231,20 +231,27 @@ int mecha_mode_skill_count(void)
  * game which cannot load is worse than not offering one. Probed once: a
  * missing install is not going to appear mid-match.
  */
+static bool mecha_file_present(const char *szFile)
+{
+  int iFile;
+
+  if (!szFile || !szFile[0])
+    return false;
+  iFile = ROLLERopen(szFile, O_RDONLY | O_BINARY);
+  if (iFile == -1)
+    return false;
+  close(iFile);
+  return true;
+}
+
 static bool mecha_mode_retail_present(void)
 {
   static bool s_bChecked;
   static bool s_bPresent;
-  int iFile;
 
-  if (s_bChecked)
-    return s_bPresent;
-  s_bChecked = true;
-
-  iFile = ROLLERopen(gencartex_name, O_RDONLY | O_BINARY);
-  if (iFile != -1) {
-    close(iFile);
-    s_bPresent = true;
+  if (!s_bChecked) {
+    s_bChecked = true;
+    s_bPresent = mecha_file_present(gencartex_name);
   }
   return s_bPresent;
 }
@@ -402,6 +409,26 @@ void mecha_mode_enter(void)
    */
   s_pSavedPalAddr = pal_addr;
   s_bPaletteInstalled = false;
+  /*
+   * The game's own palette first, when it is installed.
+   *
+   * This mode's fallback table defines about thirty indices and fills the
+   * rest with one neutral grey, which is fine for geometry it colours
+   * itself and wrong for anything out of the retail banks: those tiles and
+   * frames are drawn in the retail palette's indices, so resolving them
+   * through the fallback turns a tarmac surface into noise. Loading the
+   * real palette is what makes the textures and the explosion frames look
+   * like themselves rather than like static.
+   */
+  if (!mecha_mode_palette_loaded() && mecha_file_present("palette.pal")) {
+    setpal("palette.pal");
+    /* setpal fills palette[] and leaves pal_addr alone -- the GPU renderer
+     * says as much in its own notes, and presentation reads pal_addr. Point
+     * it at the array setpal actually wrote, or the frame is presented
+     * through whatever was there before and comes out black. */
+    pal_addr = palette;
+    FindShades();
+  }
   if (!mecha_mode_palette_loaded()) {
     memcpy(s_aSavedPalette, palette, sizeof(s_aSavedPalette));
     mecha_render_build_palette(s_aArenaPalette);

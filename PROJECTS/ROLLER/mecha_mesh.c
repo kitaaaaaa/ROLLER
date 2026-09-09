@@ -25,7 +25,11 @@
 /* The arena floor is a checkerboard rather than one big quad: the software
  * rasteriser has no depth buffer and no texture here, so the tiling is what
  * gives the ground any sense of distance at all. */
-#define MECHA_FLOOR_TILES 16
+/* Across the whole arena, so a 220 metre floor at sixteen was stretching one
+ * 64-pixel texture over fourteen metres of ground. Thirty-two puts a tile at
+ * roughly the size of a road panel, which is the scale the artwork was drawn
+ * at. It costs a thousand quads on a four-thousand budget. */
+#define MECHA_FLOOR_TILES 32
 
 /* Number of ticks a knocked-down mech takes to actually hit the floor. */
 #define MECHA_FALL_TICKS 8
@@ -65,7 +69,8 @@ bool mecha_quads_add(tMechaQuadList *pList, const float afVert[4][3],
   memcpy(pQuad->afVert, afVert, sizeof(pQuad->afVert));
   pQuad->byPalette = byPalette;
   pQuad->byFlags = byFlags;
-  pQuad->bySprite = MECHA_SPRITE_NONE;
+  pQuad->byTexBank = MECHA_TEX_NONE;
+  pQuad->byTile = 0;
 
   for (i = 0; i < 3; i++) {
     afEdge1[i] = afVert[1][i] - afVert[0][i];
@@ -260,6 +265,12 @@ static void mecha_add_floor_quad(tMechaQuadList *pList,
 
 //-------------------------------------------------------------------------------------------------
 
+/* Defined with the rest of the quad helpers below, needed by the arena
+ * builder above them. */
+static void mecha_tag_box(tMechaQuadList *pList, int iFirst, int iBank,
+                          int iSide, int iTop);
+static void mecha_tag_texture(tMechaQuadList *pList, int iBank, int iTile);
+
 void mecha_mesh_arena(tMechaQuadList *pList, const tMechaArena *pArena)
 {
   float fExtent;
@@ -280,10 +291,19 @@ void mecha_mesh_arena(tMechaQuadList *pList, const tMechaArena *pArena)
       float fX0 = -fExtent + fTile * (float)iCol;
       float fZ0 = -fExtent + fTile * (float)iRow;
 
+      bool bAlternate = ((iRow + iCol) & 1) != 0;
+
       mecha_add_floor_quad(pList, fX0, fZ0, fX0 + fTile, fZ0 + fTile, 0.0f,
-                           ((iRow + iCol) & 1) ? pArena->byFloorPalette
-                                               : pArena->byGridPalette,
+                           bAlternate ? pArena->byFloorPalette
+                                      : pArena->byGridPalette,
                            0);
+      /* The checkerboard survives the texturing: the two tiles alternate
+       * the same way the two palette entries do, so a floor with the retail
+       * art on it still reads as a grid to move about on rather than as one
+       * flat expanse. */
+      mecha_tag_texture(pList, MECHA_TEX_WORLD,
+                        bAlternate ? pArena->byFloorTile
+                                   : pArena->byGridTile);
     }
   }
 
@@ -292,21 +312,29 @@ void mecha_mesh_arena(tMechaQuadList *pList, const tMechaArena *pArena)
    * because they are one-sided and get culled from behind. */
   mecha_add_panel(pList,  fExtent, -fExtent,  fExtent,  fExtent,
                   0.0f, pArena->fWallHeight, pArena->byWallPalette, 0);
+  mecha_tag_texture(pList, MECHA_TEX_WORLD, pArena->byWallTile);
   mecha_add_panel(pList, -fExtent,  fExtent, -fExtent, -fExtent,
                   0.0f, pArena->fWallHeight, pArena->byWallPalette, 0);
+  mecha_tag_texture(pList, MECHA_TEX_WORLD, pArena->byWallTile);
   mecha_add_panel(pList,  fExtent,  fExtent, -fExtent,  fExtent,
                   0.0f, pArena->fWallHeight, pArena->byWallPalette, 0);
+  mecha_tag_texture(pList, MECHA_TEX_WORLD, pArena->byWallTile);
   mecha_add_panel(pList, -fExtent, -fExtent,  fExtent, -fExtent,
                   0.0f, pArena->fWallHeight, pArena->byWallPalette, 0);
+  mecha_tag_texture(pList, MECHA_TEX_WORLD, pArena->byWallTile);
 
   for (i = 0; i < pArena->iObstacleCount; i++) {
     const tMechaObstacle *pBox = &pArena->aObstacles[i];
     tMechaPose pose;
 
+    int iFirst = pList->iCount;
+
     mecha_pose_build(&pose, 0, 0, 0, pBox->fX, 0.0f, pBox->fZ, 1.0f);
     mecha_add_box(pList, &pose, 0.0f, pBox->fHeight * 0.5f, 0.0f,
                   pBox->fHalfX, pBox->fHeight * 0.5f, pBox->fHalfZ,
                   pBox->byPalette, pBox->byTrimPalette, 0);
+    mecha_tag_box(pList, iFirst, MECHA_TEX_STRUCT, pBox->byTile,
+                  pBox->byTopTile);
   }
 }
 
@@ -539,10 +567,32 @@ void mecha_mesh_shadows(tMechaQuadList *pList, const tMechaWorld *pWorld)
 
 /* Tags the quad most recently added to the list. Every add appends exactly
  * one, so this is simply "the billboard I just made". */
-static void mecha_tag_sprite(tMechaQuadList *pList, int iFrame)
+/*
+ * Tags every quad added since iFirst. A box is six faces, and the one
+ * looking at the sky wants a roof rather than a wall -- picked off the
+ * normal rather than off the order the faces happen to be built in, so it
+ * stays right if that order ever changes.
+ */
+static void mecha_tag_box(tMechaQuadList *pList, int iFirst, int iBank,
+                          int iSide, int iTop)
 {
-  if (pList && pList->iCount > 0)
-    pList->paQuads[pList->iCount - 1].bySprite = (int8_t)iFrame;
+  int i;
+
+  if (!pList || iBank == MECHA_TEX_NONE)
+    return;
+  for (i = iFirst; i < pList->iCount; i++) {
+    pList->paQuads[i].byTexBank = (uint8_t)iBank;
+    pList->paQuads[i].byTile = pList->paQuads[i].afNormal[1] > 0.5f
+                                 ? (uint8_t)iTop : (uint8_t)iSide;
+  }
+}
+
+static void mecha_tag_texture(tMechaQuadList *pList, int iBank, int iTile)
+{
+  if (pList && pList->iCount > 0) {
+    pList->paQuads[pList->iCount - 1].byTexBank = (uint8_t)iBank;
+    pList->paQuads[pList->iCount - 1].byTile = (uint8_t)iTile;
+  }
 }
 
 /* Walks a frame range by an effect's age, clamped at both ends. */
@@ -730,9 +780,9 @@ void mecha_mesh_effects(tMechaQuadList *pList, const tMechaWorld *pWorld,
                                               / (1.0f - MECHA_FX_BURST_PEAK)));
       mecha_add_billboard(pList, iCameraYaw, pFx->fX, pFx->fY, pFx->fZ,
                           fSize, pFx->byPalette);
-      mecha_tag_sprite(pList, mecha_sprite_frame(MECHA_SPRITE_BLAST_FIRST,
-                                                 MECHA_SPRITE_BLAST_LAST,
-                                                 fAge));
+      mecha_tag_texture(pList, MECHA_TEX_EFFECT,
+                        mecha_sprite_frame(MECHA_SPRITE_BLAST_FIRST,
+                                           MECHA_SPRITE_BLAST_LAST, fAge));
       break;
 
     case MECHA_FX_EMBER: {
@@ -760,14 +810,14 @@ void mecha_mesh_effects(tMechaQuadList *pList, const tMechaWorld *pWorld,
       mecha_add_billboard(pList, iCameraYaw, pFx->fX, pFx->fY, pFx->fZ,
                           fSize, abyCool[iStep]);
       /* Alight for the first half of its life, smoke for the rest. */
-      mecha_tag_sprite(pList,
-                       fAge < 0.5f
-                         ? mecha_sprite_frame(MECHA_SPRITE_FIRE_FIRST,
-                                              MECHA_SPRITE_FIRE_LAST,
-                                              fAge * 2.0f)
-                         : mecha_sprite_frame(MECHA_SPRITE_SMOKE_FIRST,
-                                              MECHA_SPRITE_SMOKE_LAST,
-                                              (fAge - 0.5f) * 2.0f));
+      mecha_tag_texture(pList, MECHA_TEX_EFFECT,
+                        fAge < 0.5f
+                          ? mecha_sprite_frame(MECHA_SPRITE_FIRE_FIRST,
+                                               MECHA_SPRITE_FIRE_LAST,
+                                               fAge * 2.0f)
+                          : mecha_sprite_frame(MECHA_SPRITE_SMOKE_FIRST,
+                                               MECHA_SPRITE_SMOKE_LAST,
+                                               (fAge - 0.5f) * 2.0f));
       break;
     }
 

@@ -400,6 +400,10 @@ typedef struct
   float fHeight;
   uint8_t byPalette;
   uint8_t byTrimPalette;
+  /* Tiles in the game's building bank, used when the retail data is there.
+   * The palette entries above stay the fallback and the shading. */
+  uint8_t byTile;
+  uint8_t byTopTile;
 } tMechaObstacle;
 
 //-------------------------------------------------------------------------------------------------
@@ -412,6 +416,11 @@ typedef struct
   uint8_t byFloorPalette;
   uint8_t byGridPalette;
   uint8_t byWallPalette;
+  /* Tiles in the game's track bank, which is where its ground, grass and
+   * wall artwork lives. Zero means this surface stays flat-shaded. */
+  uint8_t byFloorTile;
+  uint8_t byGridTile;
+  uint8_t byWallTile;
   int   iObstacleCount;
   tMechaObstacle aObstacles[MECHA_MAX_OBSTACLES];
 } tMechaArena;

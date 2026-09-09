@@ -31,8 +31,34 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Not a colour this mode ever paints with; used to prove a full redraw. */
+#define MECHA_TEST_SENTINEL 254
+
 #define FRAME_W 640
 #define FRAME_H 400
+
+/* palette[] is the array setpal actually writes; pal_addr is not reliably
+ * updated by it, which the GPU renderer documents in its own source. */
+static bool mecha_test_palette_loaded(void)
+{
+    int i;
+
+    for (i = 0; i < 256; i++) {
+        if (palette[i].byR || palette[i].byG || palette[i].byB)
+            return true;
+    }
+    return false;
+}
+
+static bool mecha_test_file_present(const char *szFile)
+{
+    FILE *pFile = fopen(szFile, "rb");
+
+    if (!pFile)
+        return false;
+    fclose(pFile);
+    return true;
+}
 
 static int check(int bCondition, int iLine)
 {
@@ -133,6 +159,17 @@ static int distinct_colours(const int aiCounts[256])
  */
 static void build_preview_palette(tColor *paPalette)
 {
+    /*
+     * The palette the frame was actually drawn through, when there is one.
+     * Dumping through the mode's own table regardless is what made these
+     * previews lie: retail tiles and effect frames are drawn in the retail
+     * palette's indices, so rendering them with the fallback showed noise
+     * for surfaces that were perfectly fine on screen.
+     */
+    if (mecha_test_palette_loaded()) {
+        memcpy(paPalette, palette, sizeof(tColor) * 256);
+        return;
+    }
     mecha_render_build_palette(paPalette);
 }
 
@@ -190,6 +227,12 @@ int main(int argc, char **argv)
      * quietly does nothing when it is not -- which is how this runs in CI,
      * and why the built-in font has to keep working. */
     mecha_render_init_assets(pRenderer);
+    /* The retail palette when it is beside the binary, so the frames this
+     * dumps are shaded the way the game shades them. */
+    if (mecha_test_file_present("palette.pal")) {
+        setpal("palette.pal");
+        FindShades();
+    }
     CHECK(game_render_get_mode(pRenderer) == GAME_RENDER_SOFTWARE);
 
     /* Same palette install the mode performs, so the frames this test
@@ -197,10 +240,15 @@ int main(int argc, char **argv)
     {
         static tColor aPalette[256];
 
-        mecha_render_build_palette(aPalette);
-        memcpy(palette, aPalette, sizeof(palette));
-        pal_addr = aPalette;
-        FindShades();
+        /* Only when the retail palette is not already loaded -- installing
+         * the fallback over it is what made every textured surface come out
+         * as noise, since those tiles are drawn in the retail indices. */
+        if (!mecha_test_palette_loaded()) {
+            mecha_render_build_palette(aPalette);
+            memcpy(palette, aPalette, sizeof(palette));
+            pal_addr = aPalette;
+            FindShades();
+        }
     }
 
     mecha_sim_init(&s_World, 0, 0x5EED1234u, 2);
@@ -301,8 +349,11 @@ int main(int argc, char **argv)
 
         /* Shots in flight have to be visible, or the tracer geometry is
          * being built and then thrown away. */
-        iTracer = aiLater[231] + aiLater[207] + aiLater[171] + aiLater[243]
-                + aiLater[219] + aiLater[195] + aiLater[183];
+        /* Every colour a weapon paints its shots in. Kept in step with the
+         * PAL_TRACER_* set by the palette assertions further up, which walk
+         * the roster rather than trusting this list. */
+        iTracer = aiLater[231] + aiLater[255] + aiLater[206] + aiLater[192]
+                + aiLater[34] + aiLater[171] + aiLater[218] + aiLater[143];
         CHECK(iTracer > 0);
 
         /* The camera followed the fight rather than staying put. */
@@ -460,13 +511,17 @@ int main(int argc, char **argv)
         brief.aRows[4].szValue = mecha_sim_ai_skill_name(MECHA_AI_VETERAN);
         brief.aRows[5].szLabel = "EXIT TO WHIPLASH";
 
-        memset(s_aFrame, 0xFF, sizeof(s_aFrame));
+        /* An index nothing in the mode paints with, so anything still
+         * carrying it afterwards is a pixel the briefing failed to cover.
+         * It used to be 255, which stopped working the moment that became
+         * the armour green. */
+        memset(s_aFrame, MECHA_TEST_SENTINEL, sizeof(s_aFrame));
         mecha_render_briefing(&brief, s_aFrame, FRAME_W, FRAME_H);
         histogram(s_aFrame, aiBrief);
         dump_frame(szOutDir, "arena_briefing.png");
 
         /* Nothing left over from the frame before, and more than a fill. */
-        CHECK(aiBrief[255] == 0);
+        CHECK(aiBrief[MECHA_TEST_SENTINEL] == 0);
         CHECK(distinct_colours(aiBrief) >= 4);
 
         /*
@@ -483,7 +538,7 @@ int main(int argc, char **argv)
             CHECK(iLast > 0);
             CHECK(iLast < FRAME_H - 2);
 
-            memset(aSmall, 0xFF, sizeof(aSmall));
+            memset(aSmall, MECHA_TEST_SENTINEL, sizeof(aSmall));
             mecha_render_briefing(&brief, aSmall, 320, 200);
             iLast = last_ink_row(aSmall, 320, 200);
             CHECK(iLast > 0);

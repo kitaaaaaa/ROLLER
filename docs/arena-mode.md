@@ -148,6 +148,17 @@ Both are read every frame, so either works at any time.
   -- the file check is what makes that true, because the stock loader exits
   the process on a missing bank rather than returning a failure.
 
+- **Surfaces use the game's own textures.** Ground, walls and cover are
+  drawn from the retail texture banks when they are installed -- track1.drh
+  for ground and walls, building.drh for the faces of cover -- through the
+  loaders the engine already has. Each arena takes a different surface, and
+  every surface keeps a palette index so a checkout with no retail data
+  still comes up, flat-shaded, exactly as before.
+- **The palette matters more than it looks.** With the retail data present
+  the mode now loads palette.pal rather than its own fallback table. It has
+  to: retail tiles are drawn in the retail palette's indices, so resolving
+  them through a table that defines thirty colours turns tarmac into static.
+
 ## Layout
 
 The mode is split so that the half worth testing has no engine dependencies at

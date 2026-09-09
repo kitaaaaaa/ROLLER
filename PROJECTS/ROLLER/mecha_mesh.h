@@ -43,19 +43,33 @@ typedef struct
   float   afNormal[3];    /* unit outward normal, for back-face rejection */
   uint8_t byPalette;
   uint8_t byFlags;
-  /* Which frame of the game's own effect animation this quad wants, or -1
-   * for a flat-shaded one. The mesh layer never sees a texture -- it names a
-   * frame and the renderer resolves it, which is what keeps this file free
-   * of the engine. A frame that cannot be resolved falls back to byPalette,
-   * so the same mesh works with or without the retail texture bank. */
-  int8_t  bySprite;
+  /*
+   * Which tile of which of the game's texture banks this quad wants, or
+   * MECHA_TEX_NONE for a flat-shaded one. The mesh layer never sees a
+   * texture -- it names a bank and a tile and the renderer resolves them,
+   * which is what keeps this file free of the engine. Anything that cannot
+   * be resolved falls back to byPalette, so the same mesh works with or
+   * without the retail data.
+   */
+  uint8_t byTexBank;
+  uint8_t byTile;
 } tMechaQuad;
+
+/*
+ * The banks the mode draws from. These are the game's own, and the numbers
+ * the engine knows them by are not these -- the renderer maps them, because
+ * the track bank in particular is bank 0 while its tile count lives at
+ * num_textures[19], and that is not a quirk worth spreading.
+ */
+#define MECHA_TEX_NONE    0
+#define MECHA_TEX_EFFECT  1   /* generic/car bank: explosions, fire, smoke */
+#define MECHA_TEX_WORLD   2   /* track bank: ground, grass, walls */
+#define MECHA_TEX_STRUCT  3   /* building bank: block faces */
 
 /*
  * Frames in the game's generic texture bank. Sequences run start..end
  * inclusive and are walked by an effect's age.
  */
-#define MECHA_SPRITE_NONE       (-1)
 #define MECHA_SPRITE_FIRE_FIRST   4
 #define MECHA_SPRITE_FIRE_LAST    7
 #define MECHA_SPRITE_BLAST_FIRST 13

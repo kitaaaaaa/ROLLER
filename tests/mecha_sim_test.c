@@ -1117,20 +1117,22 @@ static int test_death_throws_debris(void)
      * wrong tile or read off the end of the atlas.
      */
     for (i = 0; i < list.iCount; i++) {
-        int iFrame = aStorage[i].bySprite;
-
-        if (iFrame == MECHA_SPRITE_NONE)
+        if (aStorage[i].byTexBank == MECHA_TEX_NONE)
             continue;
-        CHECK(iFrame >= MECHA_SPRITE_FIRE_FIRST);
-        CHECK(iFrame <= MECHA_SPRITE_SMOKE_LAST);
+        /* Effects come out of the effect bank and nowhere else, and only
+         * ever name frames inside the ranges they declare. */
+        CHECK(aStorage[i].byTexBank == MECHA_TEX_EFFECT);
+        CHECK(aStorage[i].byTile >= MECHA_SPRITE_FIRE_FIRST);
+        CHECK(aStorage[i].byTile <= MECHA_SPRITE_SMOKE_LAST);
     }
 
-    /* Arena geometry is flat and has to stay that way: it has no business
-     * carrying an effect frame. */
+    /* Arena geometry draws from the world and structure banks, never from
+     * the effect one -- a ground tile that named an explosion frame would
+     * be a silent mix-up rather than an obvious one. */
     mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
     mecha_mesh_arena(&list, &world.arena);
     for (i = 0; i < list.iCount; i++)
-        CHECK(aStorage[i].bySprite == MECHA_SPRITE_NONE);
+        CHECK(aStorage[i].byTexBank != MECHA_TEX_EFFECT);
     return 0;
 }
 

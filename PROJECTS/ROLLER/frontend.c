@@ -68,6 +68,8 @@ static const tFrontendScreen aScreens[eFRONTEND_STATE_QUIT + 1] = {
     frontend_championship_over_exit },
   [eFRONTEND_STATE_CREDITS] = { frontend_credits_enter, frontend_credits_update, NULL, frontend_credits_exit },
   [eFRONTEND_STATE_OPTIONS] = { frontend_config_enter, frontend_config_update, NULL, frontend_config_exit },
+  [eFRONTEND_STATE_ARENA] = {
+    mecha_mode_enter, mecha_mode_update, mecha_mode_draw, mecha_mode_exit },
   [eFRONTEND_STATE_SHUTDOWN] = { frontend_shutdown_enter, frontend_shutdown_update, NULL, NULL },
 };
 

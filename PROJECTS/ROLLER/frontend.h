@@ -53,6 +53,8 @@ typedef enum {
   eFRONTEND_STATE_CHAMPIONSHIP_OVER,
   eFRONTEND_STATE_CREDITS,
   eFRONTEND_STATE_OPTIONS,
+  /* Arena mode: the mecha duel, driven by mecha_mode.c. */
+  eFRONTEND_STATE_ARENA,
   eFRONTEND_STATE_SHUTDOWN,
   eFRONTEND_STATE_QUIT
 } eFrontendState;
@@ -69,6 +71,13 @@ void race_enter(void);
 void race_update(void);
 void race_draw(void);
 void race_exit(void);
+
+/* Arena mode, implemented in mecha_mode.c. Declared here so frontend.c's
+ * state table does not have to pull in the mode's own headers. */
+void mecha_mode_enter(void);
+void mecha_mode_update(void);
+void mecha_mode_draw(void);
+void mecha_mode_exit(void);
 void frontend_pause_enter(void);
 void frontend_pause_update(void);
 void frontend_pause_draw(void);

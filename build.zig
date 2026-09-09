@@ -129,6 +129,15 @@ pub fn build(b: *std.Build) void {
             "PROJECTS/ROLLER/gpu_parity.c",
             "PROJECTS/ROLLER/horizon.c",
             "PROJECTS/ROLLER/loadtrak.c",
+            "PROJECTS/ROLLER/mecha_ai.c",
+            "PROJECTS/ROLLER/mecha_arena.c",
+            "PROJECTS/ROLLER/mecha_defs.c",
+            "PROJECTS/ROLLER/mecha_input.c",
+            "PROJECTS/ROLLER/mecha_math.c",
+            "PROJECTS/ROLLER/mecha_mesh.c",
+            "PROJECTS/ROLLER/mecha_mode.c",
+            "PROJECTS/ROLLER/mecha_render.c",
+            "PROJECTS/ROLLER/mecha_sim.c",
             "PROJECTS/ROLLER/menu_render.c",
             "PROJECTS/ROLLER/menu_render_software.c",
             "PROJECTS/ROLLER/game_render.c",
@@ -856,9 +865,94 @@ fn configureRenderQueue3DTests(
     );
     tick_clock_tests.dependOn(&run_tick_clock.step);
 
+    const mecha_sim_mod = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    mecha_sim_mod.addIncludePath(b.path("PROJECTS/ROLLER"));
+    mecha_sim_mod.addCSourceFiles(.{
+        .flags = c_flags,
+        .files = &.{
+            "PROJECTS/ROLLER/mecha_math.c",
+            "PROJECTS/ROLLER/mecha_arena.c",
+            "PROJECTS/ROLLER/mecha_defs.c",
+            "PROJECTS/ROLLER/mecha_sim.c",
+            "PROJECTS/ROLLER/mecha_ai.c",
+            "PROJECTS/ROLLER/mecha_mesh.c",
+            "tests/mecha_sim_test.c",
+        },
+    });
+    const mecha_sim_exe = b.addExecutable(.{
+        .name = "mecha_sim_test",
+        .root_module = mecha_sim_mod,
+    });
+    const run_mecha_sim = runArtifact(b, mecha_sim_exe, under_valgrind);
+    const mecha_sim_tests = b.step(
+        "test-mecha-sim",
+        "Run arena mode simulation, arena, roster and mesh tests",
+    );
+    mecha_sim_tests.dependOn(&run_mecha_sim.step);
+
+    const mecha_frames_dir = b.option(
+        []const u8,
+        "mecha-frames",
+        "Directory for test-mecha-render to dump arena frames into as PNGs",
+    );
+
+    // The other half of the arena mode: a real software GameRenderer with no
+    // GPU device and no window, rendering frames into an indexed buffer.
+    // Needs no game assets -- the mode generates all of its own geometry.
+    const mecha_render_mod = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    mecha_render_mod.addCMacro("ROLLER_EDITOR_CORE", "1");
+    mecha_render_mod.addIncludePath(sdl.builder.path("include"));
+    mecha_render_mod.addIncludePath(sdl_image_source.builder.path("include"));
+    mecha_render_mod.addIncludePath(wildmidi.builder.path("include"));
+    mecha_render_mod.addIncludePath(libcdio.builder.path("include"));
+    mecha_render_mod.addIncludePath(libcdio.builder.path("zig-config"));
+    mecha_render_mod.addIncludePath(b.path("external/Nuklear-4.13.2"));
+    mecha_render_mod.addIncludePath(b.path("PROJECTS/ROLLER"));
+    mecha_render_mod.linkLibrary(sdl.artifact("SDL3"));
+    mecha_render_mod.linkLibrary(sdl_image.artifact("SDL3_image"));
+    mecha_render_mod.linkLibrary(wildmidi.artifact("wildmidi"));
+    mecha_render_mod.linkLibrary(libcdio.artifact("cdio"));
+    mecha_render_mod.addCSourceFiles(.{
+        .flags = c_flags,
+        .files = rollerCoreSources(b),
+    });
+    mecha_render_mod.addCSourceFiles(.{
+        .flags = c_flags,
+        .files = &.{
+            "tests/mecha_render_headless_test.c",
+        },
+    });
+    const mecha_render_exe = b.addExecutable(.{
+        .name = "mecha_render_headless_test",
+        .root_module = mecha_render_mod,
+    });
+    // Deliberately NOT installed. Installing it puts the test executable in
+    // the default `install` step, which the Android build runs -- and that
+    // drags SDL3 in to be compiled from source for aarch64-linux-android,
+    // where the build instead expects the prefab SDL named by
+    // -Dsdl-android-include/-Dsdl-android-lib. The frame dump is reached
+    // through -Dmecha-frames instead, so nothing has to be installed.
+    const run_mecha_render = runArtifact(b, mecha_render_exe, under_valgrind);
+    if (mecha_frames_dir) |szFramesDir| run_mecha_render.addArg(szFramesDir);
+    const mecha_render_tests = b.step(
+        "test-mecha-render",
+        "Render arena frames headlessly through the software rasteriser",
+    );
+    mecha_render_tests.dependOn(&run_mecha_render.step);
+
     const test_step = b.step("test", "Run focused unit tests and optional seam checks");
     test_step.dependOn(render_queue_tests);
     test_step.dependOn(tick_clock_tests);
+    test_step.dependOn(mecha_sim_tests);
+    test_step.dependOn(mecha_render_tests);
 
     const roller_core_manifest_check = b.addSystemCommand(&.{
         pythonExe(),

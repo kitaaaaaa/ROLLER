@@ -295,7 +295,7 @@ void mecha_sim_damage(tMechaWorld *pWorld, int iVictimIdx, int iAttackerIdx,
     pVictim->fVelZ = 0.0f;
     mecha_sim_spawn_effect(pWorld, MECHA_FX_EXPLOSION, pVictim->fX,
                            pVictim->fY + pDef->fHeight * 0.5f, pVictim->fZ,
-                           pDef->fHeight * 1.4f, pDef->abyPalette[3],
+                           pDef->fHeight * 0.7f, pDef->abyPalette[3],
                            MECHA_SEC(1.2f));
     return;
   }
@@ -329,8 +329,11 @@ static void mecha_sim_explode(tMechaWorld *pWorld, int iOwnerIdx,
 {
   int i;
 
-  mecha_sim_spawn_effect(pWorld, MECHA_FX_EXPLOSION, fX, fY, fZ, fRadius,
-                         byPalette, MECHA_SEC(0.5f));
+  /* Half the blast radius, because the effect's scale is a billboard
+   * half-extent: passing the radius itself paints a quad twice the width of
+   * the blast, which reads as a wall rather than a burst. */
+  mecha_sim_spawn_effect(pWorld, MECHA_FX_EXPLOSION, fX, fY, fZ,
+                         fRadius * 0.5f, byPalette, MECHA_SEC(0.5f));
 
   for (i = 0; i < MECHA_MAX_MECHS; i++) {
     tMechaMech *pMech = &pWorld->aMechs[i];

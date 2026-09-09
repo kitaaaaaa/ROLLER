@@ -96,9 +96,9 @@ static const uint8 s_aabyFont[][MECHA_GLYPH_H] = {
 #define MECHA_HUD_ENEMY   243
 
 /* Camera framing, in metres. */
-#define MECHA_CAM_BACK_NEAR  16.0f
-#define MECHA_CAM_BACK_FAR   30.0f
-#define MECHA_CAM_HEIGHT     10.0f
+#define MECHA_CAM_BACK_NEAR  24.0f
+#define MECHA_CAM_BACK_FAR   42.0f
+#define MECHA_CAM_HEIGHT     20.0f
 #define MECHA_CAM_FLOOR       2.5f
 
 /* The projection reference frame the software rasteriser works in: it
@@ -246,11 +246,14 @@ void mecha_camera_update(tMechaCamera *pCamera, const tMechaWorld *pWorld,
     fBack = MECHA_CAM_BACK_NEAR
             + (MECHA_CAM_BACK_FAR - MECHA_CAM_BACK_NEAR)
               * mecha_clampf(fRange / (90.0f * MECHA_METRE), 0.0f, 1.0f);
-    /* Frame a point a little in front of the player, towards the enemy. */
-    fFocusX = pMech->fX + fDx * 0.18f;
-    fFocusZ = pMech->fZ + fDz * 0.18f;
-    fFocusY = (mecha_mech_centre_height(pWorld, iViewMech)
-               + mecha_mech_centre_height(pWorld, iTargetIdx)) * 0.5f;
+    /* Centre the target, not the midpoint. The camera sits behind the player
+     * and looks along the lock, so anything it centres has the player's own
+     * mech in front of it; centring the enemy is what pushes your machine
+     * down into the foreground instead of parking it over the thing you are
+     * trying to shoot. */
+    fFocusX = pTarget->fX;
+    fFocusZ = pTarget->fZ;
+    fFocusY = mecha_mech_centre_height(pWorld, iTargetIdx);
   } else {
     iWantYaw = pMech->iFacing;
     fBack = MECHA_CAM_BACK_NEAR;
@@ -554,10 +557,15 @@ static void mecha_render_scene(GameRenderer *pRenderer,
 
     /* POLYFLAT takes its colour from the low byte of the surface flags, and
      * routes anything marked transparent through shadow_poly -- which is
-     * exactly the translucent pass mech shadows and ground dust want. */
+     * exactly the translucent pass mech shadows and ground dust want.
+     *
+     * For that path the low byte is a shade LEVEL, not a colour: shadow_poly
+     * indexes shade_palette[256 * level], and shade_palette holds only 16
+     * such blocks. The mask keeps a mislabelled quad from reading past the
+     * end of it -- a bad colour is a visible bug, a bad read is not. */
     iSurfaceFlags = (int)pQuad->byPalette;
     if (pQuad->byFlags & MECHA_QUAD_SHADOW)
-      iSurfaceFlags |= SURFACE_FLAG_TRANSPARENT;
+      iSurfaceFlags = SURFACE_FLAG_TRANSPARENT | (iSurfaceFlags & 0x0F);
 
     /* A positive threshold below the near plane means every quad rasterises
      * directly instead of being subdivided: subdivision exists for texture

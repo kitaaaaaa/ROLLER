@@ -89,6 +89,25 @@ asserts that two runs from the same seed are byte-identical.
 zig build test-mecha-sim
 ```
 
+`tests/mecha_render_headless_test.c` covers the other half -- the part no unit
+test or compile check can speak for. It builds a real `GameRenderer` in software
+mode with no GPU device and no window, renders arena frames into an indexed
+buffer, and asserts that the floor, the walls, the mechs, the tracers and the
+HUD all reach pixels:
+
+```sh
+zig build test-mecha-render
+```
+
+Given an output directory it also writes the frames out as indexed PNGs, so the
+layout can be looked at rather than only asserted about. The palette in those
+dumps is a stand-in -- the real one lives in the retail data, which this test
+deliberately does without:
+
+```sh
+zig build && ./zig-out/bin/mecha_render_headless_test /tmp/frames
+```
+
 ## Rendering notes
 
 - The mode forces `GAME_RENDER_SOFTWARE` on entry and restores the previous mode
@@ -108,6 +127,21 @@ zig build test-mecha-sim
   mode paints with is named at the top of `mecha_arena.c`, `mecha_defs.c`,
   `mecha_mesh.c` or `mecha_render.c`, so retuning against a different palette
   stays a small edit.
+
+## Known rough edges
+
+- At point-blank range the player's own machine overlaps the target on screen.
+  The chase camera centres the lock and drops your mech into the foreground,
+  which holds up at normal fighting distance, but two mechs in melee are simply
+  in the same place. This wants tuning against real play rather than against a
+  still frame.
+- The palette indices are tuned by eye, not derived. They are named constants at
+  the top of `mecha_arena.c`, `mecha_defs.c`, `mecha_mesh.c` and
+  `mecha_render.c` precisely so a retune stays a small edit.
+- Effects are opaque flat quads. An indexed frame buffer has no alpha, so a
+  blast reads as a coloured burst rather than a fireball; shadows and ground
+  dust get real translucency only because `POLYFLAT` routes
+  `SURFACE_FLAG_TRANSPARENT` through `shadow_poly`.
 
 ## Adding a machine
 

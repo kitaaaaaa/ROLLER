@@ -9,8 +9,18 @@
 
 //-------------------------------------------------------------------------------------------------
 /* Palette indices used only by the geometry; see mecha_arena.c for the rest. */
-#define MECHA_PAL_SHADOW 16
 #define MECHA_PAL_TRACER_CORE 255
+
+/*
+ * Translucent quads carry a SHADE LEVEL in the low byte, not a colour.
+ * POLYFLAT hands SURFACE_FLAG_TRANSPARENT polygons to shadow_poly, which
+ * indexes shade_palette[256 * level] to darken whatever is already there --
+ * and shade_palette is only 4096 bytes, so the level has to stay under 16 or
+ * the read runs off the end of it. The engine's own callers use 2 and 3
+ * (func2.c's blankwindow, replay.c's car shadows), so these match.
+ */
+#define MECHA_SHADE_SHADOW 3
+#define MECHA_SHADE_DUST   2
 
 /* The arena floor is a checkerboard rather than one big quad: the software
  * rasteriser has no depth buffer and no texture here, so the tiling is what
@@ -495,7 +505,7 @@ void mecha_mesh_shadows(tMechaQuadList *pList, const tMechaWorld *pWorld)
                                   / (28.0f * MECHA_METRE), 0.45f, 1.3f);
     mecha_add_floor_quad(pList, pMech->fX - fSize, pMech->fZ - fSize,
                          pMech->fX + fSize, pMech->fZ + fSize,
-                         fGround + 0.04f * MECHA_METRE, MECHA_PAL_SHADOW,
+                         fGround + 0.04f * MECHA_METRE, MECHA_SHADE_SHADOW,
                          MECHA_QUAD_TWO_SIDED | MECHA_QUAD_SHADOW);
   }
 }
@@ -659,7 +669,7 @@ void mecha_mesh_effects(tMechaQuadList *pList, const tMechaWorld *pWorld,
     case MECHA_FX_EXPLOSION:
       /* Expands over its life. Without alpha in an indexed frame buffer,
        * growth is the only way a blast reads as dissipating. */
-      fSize = pFx->fScale * (0.35f + 0.85f * fAge);
+      fSize = pFx->fScale * (0.25f + 0.75f * fAge);
       mecha_add_billboard(pList, iCameraYaw, pFx->fX, pFx->fY, pFx->fZ,
                           fSize, pFx->byPalette);
       break;
@@ -667,9 +677,12 @@ void mecha_mesh_effects(tMechaQuadList *pList, const tMechaWorld *pWorld,
     case MECHA_FX_DUST:
       /* Kicked-up grit lies on the ground rather than facing the camera. */
       fSize = pFx->fScale * (0.5f + fAge);
+      /* Darkens the ground rather than painting on it, so the shade level
+       * goes in the low byte -- the effect's own colour would be read as a
+       * level and index far past the end of shade_palette. */
       mecha_add_floor_quad(pList, pFx->fX - fSize, pFx->fZ - fSize,
                            pFx->fX + fSize, pFx->fZ + fSize,
-                           pFx->fY + 0.08f * MECHA_METRE, pFx->byPalette,
+                           pFx->fY + 0.08f * MECHA_METRE, MECHA_SHADE_DUST,
                            MECHA_QUAD_TWO_SIDED | MECHA_QUAD_SHADOW);
       break;
 

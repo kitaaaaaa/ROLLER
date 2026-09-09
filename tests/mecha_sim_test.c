@@ -812,6 +812,14 @@ static int test_mesh_survives_a_match(void)
 
         CHECK(list.iCount <= list.iCapacity);
         CHECK(list.iDropped == 0);
+
+        /* Translucent quads carry a shade level, not a colour: shadow_poly
+         * indexes shade_palette[256 * level] and that table holds only 16
+         * blocks, so anything larger reads off the end of it. */
+        for (iMech = 0; iMech < list.iCount; iMech++) {
+            if (aStorage[iMech].byFlags & MECHA_QUAD_SHADOW)
+                CHECK(aStorage[iMech].byPalette <= 15);
+        }
     }
     return 0;
 }

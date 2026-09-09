@@ -28,7 +28,11 @@
 #define MECHA_QUAD_GLOW      0x02
 /* Draw through ROLLER's translucent shadow path rather than as solid fill.
  * POLYFLAT already routes SURFACE_FLAG_TRANSPARENT to shadow_poly, so a mech
- * shadow costs nothing extra. */
+ * shadow costs nothing extra.
+ *
+ * A quad carrying this flag must put a SHADE LEVEL in byPalette, not a
+ * colour: shadow_poly darkens what is underneath by indexing
+ * shade_palette[256 * level], and that table holds only 16 blocks. */
 #define MECHA_QUAD_SHADOW    0x04
 
 //-------------------------------------------------------------------------------------------------

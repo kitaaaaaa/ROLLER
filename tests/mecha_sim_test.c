@@ -1057,6 +1057,60 @@ static int test_guard_turns_melee_aside(void)
 
 //-------------------------------------------------------------------------------------------------
 
+static int test_death_throws_debris(void)
+{
+    static tMechaQuad aStorage[MECHA_QUAD_CAPACITY];
+    tMechaQuadList list;
+    tMechaWorld world;
+    tMechaInput aInputs[2];
+    int iEmbers = 0;
+    int iMoving = 0;
+    float fFirstVelY = 0.0f;
+    int i;
+
+    start_duel(&world, 0, 0, 0, 0xDEB1u, 1);
+    memset(aInputs, 0, sizeof(aInputs));
+    mecha_sim_damage(&world, 1, 0, 100000.0f, 0.0f, 0.0f, 0.0f);
+
+    for (i = 0; i < MECHA_MAX_EFFECTS; i++) {
+        const tMechaEffect *pFx = &world.aEffects[i];
+
+        if (!pFx->bActive || pFx->byKind != MECHA_FX_EMBER)
+            continue;
+        if (iEmbers == 0)
+            fFirstVelY = pFx->fVelY;
+        iEmbers++;
+        if (mecha_length3(pFx->fVelX, pFx->fVelY, pFx->fVelZ) > 1.0f)
+            iMoving++;
+    }
+
+    /* A kill has to come apart, not just flash. */
+    CHECK(iEmbers >= 8);
+    CHECK(iMoving == iEmbers);
+
+    /* And the debris has to fall, or it is a firework rather than wreckage. */
+    run_ticks(&world, aInputs, 2, 10);
+    for (i = 0; i < MECHA_MAX_EFFECTS; i++) {
+        const tMechaEffect *pFx = &world.aEffects[i];
+
+        if (pFx->bActive && pFx->byKind == MECHA_FX_EMBER) {
+            CHECK(pFx->fVelY < fFirstVelY);
+            break;
+        }
+    }
+
+    /* The mesh has to actually build them, and every colour a cooling
+     * particle walks through has to be one the mode's palette defines --
+     * this is the exact shape of bug that put shade levels out of range
+     * before. */
+    mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
+    mecha_mesh_effects(&list, &world, 0);
+    CHECK(list.iCount > 0);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static int test_lobbed_shots_reach_their_target(void)
 {
     tMechaWorld world;
@@ -1313,6 +1367,7 @@ int main(void)
         { "lock survives a glance", test_lock_survives_a_glance },
         { "jump cancel", test_jump_cancel },
         { "guard turns melee aside", test_guard_turns_melee_aside },
+        { "death throws debris", test_death_throws_debris },
     };
     size_t i;
 

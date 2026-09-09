@@ -128,6 +128,17 @@ Both are read every frame, so either works at any time.
   needs to dodge with. The comment above `s_aAiProfiles` in `mecha_ai.c` has
   the figures.
 
+- **Machines read by silhouette.** Each carries build multipliers for
+  shoulder, torso, limb, head and gun, so a siege platform is wide and
+  thick-limbed with an oversized gun on each arm while an interceptor is a
+  narrow torso on thin legs. Measured off the mesh as width over standing
+  height they span 0.46 to 1.11.
+- **Blasts throw debris.** A kill spawns a short flash plus a burst of
+  particles that fly out, fall under gravity, shrink, and cool down a warm
+  palette ramp. This is how the race game draws its own smoke and flames --
+  a spray of camera-facing squares carrying velocity and a palette index,
+  not a sprite sheet -- so it needs no retail art of any kind.
+
 ## Layout
 
 The mode is split so that the half worth testing has no engine dependencies at

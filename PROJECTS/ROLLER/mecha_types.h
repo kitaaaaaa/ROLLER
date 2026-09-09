@@ -112,7 +112,15 @@ typedef enum
   MECHA_FX_EXPLOSION = 2,
   MECHA_FX_DUST      = 3,
   MECHA_FX_THRUSTER  = 4,
-  MECHA_FX_SPARK     = 5
+  MECHA_FX_SPARK     = 5,
+  /*
+   * A thrown, falling, cooling particle. The race game draws its smoke and
+   * flames the same way -- a spray of camera-facing squares carrying their
+   * own velocity and a palette index, not a sprite sheet -- and the same
+   * trick is what turns a blast here from one expanding quad into something
+   * that reads as debris.
+   */
+  MECHA_FX_EMBER     = 6
 } eMechaEffectKind;
 
 //-------------------------------------------------------------------------------------------------

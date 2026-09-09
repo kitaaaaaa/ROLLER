@@ -346,6 +346,19 @@ int main(int argc, char **argv)
             mecha_sim_tick(&s_World, aInputs, MECHA_MAX_MECHS);
         }
 
+        /* Every colour the cooling debris walks through has to have one of
+         * its own, or a dying machine sprays holes in the world. */
+        {
+            static const uint8 abyCool[] = {
+                207, 204, 171, 170, 167, 230, 227, 224, 221
+            };
+            size_t iCool;
+
+            for (iCool = 0; iCool < sizeof(abyCool) / sizeof(abyCool[0]);
+                 iCool++)
+                CHECK(mecha_render_palette_defines(abyCool[iCool]));
+        }
+
         printf("   death blast peaks at %d px, %.1f%% of the frame\n",
                iPeak, 100.0 * iPeak / (double)(FRAME_W * FRAME_H));
         CHECK(iPeak > 0);

@@ -230,14 +230,17 @@ int mecha_sim_nearest_enemy(const tMechaWorld *pWorld, int iMechIdx)
 
 //-------------------------------------------------------------------------------------------------
 
-void mecha_sim_spawn_effect(tMechaWorld *pWorld, uint8_t byKind,
-                            float fX, float fY, float fZ,
-                            float fScale, uint8_t byPalette, int iLife)
+/* Defined with the weapon code further down, needed by the burst above it. */
+static void mecha_direction_from_angles(int iYaw, int iPitch,
+                                        float *pfX, float *pfY, float *pfZ);
+
+/* First free slot, or NULL when the table is full. */
+static tMechaEffect *mecha_alloc_effect(tMechaWorld *pWorld, uint8_t byKind,
+                                        float fX, float fY, float fZ,
+                                        float fScale, uint8_t byPalette,
+                                        int iLife)
 {
   int i;
-
-  if (!pWorld || iLife <= 0)
-    return;
 
   for (i = 0; i < MECHA_MAX_EFFECTS; i++) {
     tMechaEffect *pFx = &pWorld->aEffects[i];
@@ -253,8 +256,63 @@ void mecha_sim_spawn_effect(tMechaWorld *pWorld, uint8_t byKind,
     pFx->fZ = fZ;
     pFx->fScale = fScale;
     pFx->iLife = iLife;
-    return;
+    return pFx;
   }
+  return NULL;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * A burst of debris thrown out of a point.
+ *
+ * Directions come off the shared RNG so a replay throws the same sparks the
+ * same way. Speed is jittered per particle rather than fixed, because a ring
+ * of debris all travelling at one speed reads as a expanding shell, which is
+ * the exact thing the single billboard already looked like.
+ */
+static void mecha_spawn_burst(tMechaWorld *pWorld, float fX, float fY,
+                              float fZ, float fSpeed, float fScale,
+                              int iCount, int iLife)
+{
+  int i;
+
+  for (i = 0; i < iCount; i++) {
+    tMechaEffect *pFx;
+    int iYaw = mecha_rng_range(&pWorld->rng, MECHA_ANGLE_FULL);
+    /* Biased upwards: debris that only ever went sideways looked like a
+     * puddle spreading. */
+    int iPitch = mecha_rng_range(&pWorld->rng, MECHA_ANGLE_QUARTER)
+                 - MECHA_ANGLE_QUARTER / 5;
+    float fThis = fSpeed * (0.45f + 0.55f * mecha_rng_unit(&pWorld->rng));
+    float fDirX;
+    float fDirY;
+    float fDirZ;
+
+    pFx = mecha_alloc_effect(pWorld, MECHA_FX_EMBER, fX, fY, fZ,
+                             fScale * (0.6f + 0.8f * mecha_rng_unit(&pWorld->rng)),
+                             0, iLife);
+    if (!pFx)
+      return;
+    mecha_direction_from_angles(iYaw, iPitch, &fDirX, &fDirY, &fDirZ);
+    pFx->fVelX = fDirX * fThis;
+    pFx->fVelY = fDirY * fThis;
+    pFx->fVelZ = fDirZ * fThis;
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+
+void mecha_sim_spawn_effect(tMechaWorld *pWorld, uint8_t byKind,
+                            float fX, float fY, float fZ,
+                            float fScale, uint8_t byPalette, int iLife)
+{
+  if (!pWorld || iLife <= 0)
+    return;
+
+  if (mecha_alloc_effect(pWorld, byKind, fX, fY, fZ, fScale, byPalette,
+                         iLife))
+    return;
   /* The effect table is cosmetic. When it is full the oldest survivors keep
    * playing and the new puff is simply dropped, which is invisible in
    * practice and keeps the simulation allocation-free. */
@@ -333,6 +391,12 @@ void mecha_sim_damage(tMechaWorld *pWorld, int iVictimIdx, int iAttackerIdx,
                            pVictim->fY + pDef->fHeight * 0.5f, pVictim->fZ,
                            pDef->fHeight * 0.25f, pDef->abyPalette[3],
                            MECHA_SEC(0.9f));
+    /* The flash alone was one quad appearing and vanishing. The debris is
+     * what makes a kill read as a machine coming apart. */
+    mecha_spawn_burst(pWorld, pVictim->fX,
+                      pVictim->fY + pDef->fHeight * 0.5f, pVictim->fZ,
+                      MECHA_MPS(34.0f), pDef->fRadius * 0.16f, 14,
+                      MECHA_SEC(1.5f));
     return;
   }
 
@@ -370,6 +434,8 @@ static void mecha_sim_explode(tMechaWorld *pWorld, int iOwnerIdx,
    * the blast, which reads as a wall rather than a burst. */
   mecha_sim_spawn_effect(pWorld, MECHA_FX_EXPLOSION, fX, fY, fZ,
                          fRadius * 0.5f, byPalette, MECHA_SEC(0.5f));
+  mecha_spawn_burst(pWorld, fX, fY, fZ, MECHA_MPS(22.0f), fRadius * 0.06f,
+                    7, MECHA_SEC(0.8f));
 
   for (i = 0; i < MECHA_MAX_MECHS; i++) {
     tMechaMech *pMech = &pWorld->aMechs[i];
@@ -1533,6 +1599,9 @@ static void mecha_update_effects(tMechaWorld *pWorld)
       pFx->bActive = false;
       continue;
     }
+    /* Debris falls; every other effect drifts wherever it was sent. */
+    if (pFx->byKind == MECHA_FX_EMBER)
+      pFx->fVelY -= MECHA_GRAVITY * MECHA_DT;
     pFx->fX += pFx->fVelX * MECHA_DT;
     pFx->fY += pFx->fVelY * MECHA_DT;
     pFx->fZ += pFx->fVelZ * MECHA_DT;

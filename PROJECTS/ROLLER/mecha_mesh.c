@@ -710,6 +710,33 @@ void mecha_mesh_effects(tMechaQuadList *pList, const tMechaWorld *pWorld,
                           fSize, pFx->byPalette);
       break;
 
+    case MECHA_FX_EMBER: {
+      /*
+       * Debris cools as it falls. The ramp runs from the pale gold at the
+       * top of the sky gradient back down through orange into the deep reds
+       * at its zenith -- the same indices, which is not a coincidence worth
+       * fighting: they are the one contiguous warm ramp the palette has,
+       * they read as heat in either palette, and a particle that walks them
+       * downwards is a particle going out.
+       */
+      static const uint8_t abyCool[] = {
+        207, 204, 171, 170, 167, 230, 227, 224, 221
+      };
+      const int iSteps = (int)(sizeof(abyCool) / sizeof(abyCool[0]));
+      int iStep = (int)(fAge * (float)iSteps);
+
+      if (iStep < 0)
+        iStep = 0;
+      if (iStep >= iSteps)
+        iStep = iSteps - 1;
+      /* Shrinking as well as cooling, so the last frames are embers rather
+       * than full-size squares blinking out. */
+      fSize = pFx->fScale * (1.0f - 0.55f * fAge);
+      mecha_add_billboard(pList, iCameraYaw, pFx->fX, pFx->fY, pFx->fZ,
+                          fSize, abyCool[iStep]);
+      break;
+    }
+
     case MECHA_FX_DUST:
       /* Kicked-up grit lies on the ground rather than facing the camera. */
       fSize = pFx->fScale * (0.5f + fAge);

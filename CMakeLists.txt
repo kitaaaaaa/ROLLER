@@ -59,6 +59,15 @@ set(ROLLER_GAME_BASE_SOURCES
     PROJECTS/ROLLER/gpu_parity.c
     PROJECTS/ROLLER/horizon.c
     PROJECTS/ROLLER/loadtrak.c
+    PROJECTS/ROLLER/mecha_ai.c
+    PROJECTS/ROLLER/mecha_arena.c
+    PROJECTS/ROLLER/mecha_defs.c
+    PROJECTS/ROLLER/mecha_input.c
+    PROJECTS/ROLLER/mecha_math.c
+    PROJECTS/ROLLER/mecha_mesh.c
+    PROJECTS/ROLLER/mecha_mode.c
+    PROJECTS/ROLLER/mecha_render.c
+    PROJECTS/ROLLER/mecha_sim.c
     PROJECTS/ROLLER/menu_render.c
     PROJECTS/ROLLER/menu_render_software.c
     PROJECTS/ROLLER/game_render.c

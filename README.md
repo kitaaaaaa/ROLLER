@@ -27,6 +27,18 @@ latest native version from the
 wherever you want. On initial launch, select a CD image (CUE/BIN or ISO) to
 extract the assets. Press the \` key to access additional settings.
 
+## Arena mode
+
+ROLLER also ships an arena mode: a 3D mecha duel on the same software
+rasteriser, reached with `--arena`. It is an original game built on the engine's
+renderer and math rather than a track, and it needs no extra assets -- the
+machines, the arenas and the HUD font are all generated at runtime. See
+[docs/arena-mode.md](./docs/arena-mode.md) for the controls and the layout.
+
+```bash
+zig build run -- --arena
+```
+
 ## About
 
 Debug symbol dump generated with wdump, part of:

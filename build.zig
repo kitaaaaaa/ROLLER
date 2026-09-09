@@ -129,6 +129,15 @@ pub fn build(b: *std.Build) void {
             "PROJECTS/ROLLER/gpu_parity.c",
             "PROJECTS/ROLLER/horizon.c",
             "PROJECTS/ROLLER/loadtrak.c",
+            "PROJECTS/ROLLER/mecha_ai.c",
+            "PROJECTS/ROLLER/mecha_arena.c",
+            "PROJECTS/ROLLER/mecha_defs.c",
+            "PROJECTS/ROLLER/mecha_input.c",
+            "PROJECTS/ROLLER/mecha_math.c",
+            "PROJECTS/ROLLER/mecha_mesh.c",
+            "PROJECTS/ROLLER/mecha_mode.c",
+            "PROJECTS/ROLLER/mecha_render.c",
+            "PROJECTS/ROLLER/mecha_sim.c",
             "PROJECTS/ROLLER/menu_render.c",
             "PROJECTS/ROLLER/menu_render_software.c",
             "PROJECTS/ROLLER/game_render.c",
@@ -856,9 +865,39 @@ fn configureRenderQueue3DTests(
     );
     tick_clock_tests.dependOn(&run_tick_clock.step);
 
+    const mecha_sim_mod = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    mecha_sim_mod.addIncludePath(b.path("PROJECTS/ROLLER"));
+    mecha_sim_mod.addCSourceFiles(.{
+        .flags = c_flags,
+        .files = &.{
+            "PROJECTS/ROLLER/mecha_math.c",
+            "PROJECTS/ROLLER/mecha_arena.c",
+            "PROJECTS/ROLLER/mecha_defs.c",
+            "PROJECTS/ROLLER/mecha_sim.c",
+            "PROJECTS/ROLLER/mecha_ai.c",
+            "PROJECTS/ROLLER/mecha_mesh.c",
+            "tests/mecha_sim_test.c",
+        },
+    });
+    const mecha_sim_exe = b.addExecutable(.{
+        .name = "mecha_sim_test",
+        .root_module = mecha_sim_mod,
+    });
+    const run_mecha_sim = runArtifact(b, mecha_sim_exe, under_valgrind);
+    const mecha_sim_tests = b.step(
+        "test-mecha-sim",
+        "Run arena mode simulation, arena, roster and mesh tests",
+    );
+    mecha_sim_tests.dependOn(&run_mecha_sim.step);
+
     const test_step = b.step("test", "Run focused unit tests and optional seam checks");
     test_step.dependOn(render_queue_tests);
     test_step.dependOn(tick_clock_tests);
+    test_step.dependOn(mecha_sim_tests);
 
     const roller_core_manifest_check = b.addSystemCommand(&.{
         pythonExe(),

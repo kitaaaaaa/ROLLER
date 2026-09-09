@@ -4,6 +4,7 @@
 #include "control.h"
 #include "drawtrk3.h"
 #include "loadtrak.h"
+#include "mecha_mode.h"
 #include "moving.h"
 #include "func2.h"
 #include "func3.h"
@@ -614,11 +615,26 @@ static void print_usage(FILE *f, const char *argv0)
   cli_fprintf(f, " --verify-track-state    seed populated community state and verify it is preserved\n");
   cli_fprintf(f, " --track-reload-malformed PATH  add a rejected path to the direct-load soak\n");
   cli_fprintf(f, " --track-reload-cycles N repeat valid/malformed/valid reload checks\n");
+  cli_fprintf(f, " --arena                 start in arena mode (mecha duel) instead of the menus\n");
+  cli_fprintf(f, " --arena-mech N          arena mode: player machine index\n");
+  cli_fprintf(f, " --arena-foe N           arena mode: opponent machine index\n");
+  cli_fprintf(f, " --arena-map N           arena mode: arena index\n");
+  cli_fprintf(f, " --arena-rounds N        arena mode: rounds needed to win (1-9)\n");
 }
 
 //-------------------------------------------------------------------------------------------------
 
 static void frontend_run_game_loop(eFrontendState eInitialState);
+
+//-------------------------------------------------------------------------------------------------
+/* Arena mode, selected with --arena. The mode owns its own configuration;
+ * these just carry the command line into mecha_mode_configure once the
+ * renderer and the screen buffer exist. */
+static int s_bArenaMode = 0;
+static int s_iArenaPlayerMech = 0;
+static int s_iArenaOpponentMech = 2;
+static int s_iArenaMap = 0;
+static int s_iArenaRounds = 2;
 
 //-------------------------------------------------------------------------------------------------
 
@@ -2960,6 +2976,41 @@ int main(int argc, const char **argv, const char **envp)
         cli_fprintf(stderr, "ERROR: '--gpu-parity' needs an argument\n");
         return 1;
       }
+    } else if (strcmp(argv[i], "--arena") == 0) {
+      s_bArenaMode = 1;
+      consumed = 1;
+    } else if (strcmp(argv[i], "--arena-mech") == 0
+               || strcmp(argv[i], "--arena-foe") == 0
+               || strcmp(argv[i], "--arena-map") == 0
+               || strcmp(argv[i], "--arena-rounds") == 0) {
+      if (i + 1 < argc) {
+        int iValue = atoi(argv[i + 1]);
+
+        if (iValue < 0) {
+          cli_fprintf(stderr, "ERROR: '%s' expects a non-negative index\n",
+                      argv[i]);
+          return 1;
+        }
+        if (strcmp(argv[i], "--arena-mech") == 0) {
+          s_iArenaPlayerMech = iValue;
+        } else if (strcmp(argv[i], "--arena-foe") == 0) {
+          s_iArenaOpponentMech = iValue;
+        } else if (strcmp(argv[i], "--arena-map") == 0) {
+          s_iArenaMap = iValue;
+        } else {
+          if (iValue < 1 || iValue > 9) {
+            cli_fprintf(stderr, "ERROR: '--arena-rounds' expects 1-9\n");
+            return 1;
+          }
+          s_iArenaRounds = iValue;
+        }
+        /* Naming an arena option is enough to ask for the mode. */
+        s_bArenaMode = 1;
+        consumed = 2;
+      } else {
+        cli_fprintf(stderr, "ERROR: '%s' needs an argument\n", argv[i]);
+        return 1;
+      }
     } else if (strcmp(argv[i], "--track-path") == 0) {
       if (i + 1 < argc) {
         g_szDirectTrackPath = argv[i + 1];
@@ -3256,7 +3307,13 @@ int main(int argc, const char **argv, const char **envp)
   winner_mode = 0;
   intro = -1;
   race_set_track(TrackLoad);                    // Start initial intro replay through the dispatcher.
-  frontend_run_game_loop(g_bSnapshotMode ? eFRONTEND_STATE_RACING : eFRONTEND_STATE_COPYRIGHT);
+  if (s_bArenaMode) {
+    mecha_mode_configure(s_iArenaPlayerMech, s_iArenaOpponentMech,
+                         s_iArenaMap, s_iArenaRounds);
+    frontend_run_game_loop(eFRONTEND_STATE_ARENA);
+  } else {
+    frontend_run_game_loop(g_bSnapshotMode ? eFRONTEND_STATE_RACING : eFRONTEND_STATE_COPYRIGHT);
+  }
   //__asm { int     10h; Reset video mode and exit game }// Reset video mode and exit game
   if (!frontend_shutdown_complete())
     doexit();

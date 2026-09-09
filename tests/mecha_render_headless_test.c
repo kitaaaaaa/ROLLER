@@ -92,6 +92,28 @@ static int last_ink_row(const uint8 *pFrame, int iWidth, int iHeight)
 
 //-------------------------------------------------------------------------------------------------
 
+/* True when one index covers the whole frame -- nothing rasterised. */
+static int single_colour(const int aiCounts[256])
+{
+    int i;
+
+    for (i = 0; i < 256; i++) {
+        if (aiCounts[i] == FRAME_W * FRAME_H)
+            return 1;
+    }
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/* The index in the middle of a row, away from anything drawn at the edges. */
+static uint8 row_colour(const uint8 *pFrame, int iY)
+{
+    return pFrame[iY * FRAME_W + FRAME_W / 2];
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static int distinct_colours(const int aiCounts[256])
 {
     int iCount = 0;
@@ -190,13 +212,22 @@ int main(int argc, char **argv)
     histogram(s_aFrame, aiCounts);
     dump_frame(szOutDir, "arena_ready.png");
 
-    /* If the sky fill were the only thing written, nothing rasterised. */
-    iSkyOnly = aiCounts[s_World.arena.bySkyPalette] == FRAME_W * FRAME_H;
+    /* If one colour covered the frame, nothing rasterised. */
+    iSkyOnly = single_colour(aiCounts);
     CHECK(!iSkyOnly);
     CHECK(distinct_colours(aiCounts) >= 6);
 
-    /* The arena itself: sky, both checkerboard tones, and the walls. */
-    CHECK(aiCounts[s_World.arena.bySkyPalette] > 0);
+    /*
+     * The sky is a gradient rather than a fill, and the cheapest way to say
+     * so without copying the band table into the test is that the top of the
+     * frame is not the colour of the band just above the horizon. Row zero
+     * is always sky; the row the horizon sits on is not known here, so a row
+     * a third of the way down stands in for it -- with the camera pitched
+     * down as it is, that is still sky and still several bands lower.
+     */
+    CHECK(row_colour(s_aFrame, 0) != row_colour(s_aFrame, FRAME_H / 3));
+
+    /* The arena itself: both checkerboard tones and the walls. */
     CHECK(aiCounts[s_World.arena.byFloorPalette] > 0);
     CHECK(aiCounts[s_World.arena.byGridPalette] > 0);
     CHECK(aiCounts[s_World.arena.byWallPalette] > 0);
@@ -215,7 +246,6 @@ int main(int argc, char **argv)
      * never chose, so "everything on screen is one of ours" is not true and
      * asserting it only produces false failures.
      */
-    CHECK(mecha_render_palette_defines(s_World.arena.bySkyPalette));
     CHECK(mecha_render_palette_defines(s_World.arena.byFloorPalette));
     CHECK(mecha_render_palette_defines(s_World.arena.byGridPalette));
     CHECK(mecha_render_palette_defines(s_World.arena.byWallPalette));
@@ -262,7 +292,7 @@ int main(int argc, char **argv)
         histogram(s_aFrame, aiLater);
         dump_frame(szOutDir, "arena_fight.png");
 
-        CHECK(aiLater[s_World.arena.bySkyPalette] != FRAME_W * FRAME_H);
+        CHECK(!single_colour(aiLater));
         CHECK(distinct_colours(aiLater) >= 6);
 
         /* Shots in flight have to be visible, or the tracer geometry is
@@ -335,7 +365,7 @@ int main(int argc, char **argv)
         render_now(pRenderer, iPlayer);
         histogram(s_aFrame, aiCounts);
         dump_frame(szOutDir, "arena_down.png");
-        CHECK(aiCounts[s_World.arena.bySkyPalette] != FRAME_W * FRAME_H);
+        CHECK(!single_colour(aiCounts));
     }
 
     /* --- the briefing screen draws ---------------------------------------

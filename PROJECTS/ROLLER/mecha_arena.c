@@ -94,7 +94,6 @@ void mecha_arena_init(tMechaArena *pArena, int iArenaIdx)
   pArena->byFloorPalette = MECHA_PAL_FLOOR_A;
   pArena->byGridPalette = MECHA_PAL_GRID;
   pArena->byWallPalette = MECHA_PAL_WALL;
-  pArena->bySkyPalette = MECHA_PAL_SKY;
 
   switch (iArenaIdx) {
   case 0:

@@ -98,7 +98,21 @@ static const uint8 s_aabyFont[][MECHA_GLYPH_H] = {
 /* Camera framing, in metres. */
 #define MECHA_CAM_BACK_NEAR  24.0f
 #define MECHA_CAM_BACK_FAR   42.0f
-#define MECHA_CAM_HEIGHT     20.0f
+/* Roughly two thirds of the way up a machine, which is where an arcade
+ * mecha camera sits: high enough to see the floor you are circling on, low
+ * enough that the horizon stays in frame and the arena reads as somewhere
+ * rather than as a floor plan. */
+#define MECHA_CAM_HEIGHT     11.0f
+
+/*
+ * Cover is 5 to 20 metres tall, so no fixed low camera clears all of it --
+ * and parking the camera above the tallest block is what made the arena read
+ * as a floor plan. Instead it sits low and lifts only when something is
+ * actually between it and what it is looking at, which is the same segment
+ * trace the computer pilot uses to decide whether it has a shot.
+ */
+#define MECHA_CAM_LIFT_STEP   3.0f
+#define MECHA_CAM_LIFT_STEPS  6
 #define MECHA_CAM_FLOOR       2.5f
 
 /* The projection reference frame the software rasteriser works in: it
@@ -289,6 +303,23 @@ void mecha_camera_update(tMechaCamera *pCamera, const tMechaWorld *pWorld,
                                       pCamera->fZ, pCamera->fY);
   if (pCamera->fY < fGround + MECHA_CAM_FLOOR * MECHA_METRE)
     pCamera->fY = fGround + MECHA_CAM_FLOOR * MECHA_METRE;
+
+  /* Lift over anything standing in the way. Stepping rather than solving
+   * because the trace is cheap and the answer only has to be good enough to
+   * see past a box; a camera that slid sideways instead would swing the
+   * whole arena around the player for what is usually one pillar. */
+  {
+    int iStep;
+
+    for (iStep = 0; iStep < MECHA_CAM_LIFT_STEPS; iStep++) {
+      if (!mecha_arena_trace_segment(&pWorld->arena,
+                                     pCamera->fX, pCamera->fY, pCamera->fZ,
+                                     fFocusX, fFocusY, fFocusZ,
+                                     NULL, NULL, NULL))
+        break;
+      pCamera->fY += MECHA_CAM_LIFT_STEP * MECHA_METRE;
+    }
+  }
 
   fFlat = mecha_length2(fFocusX - pCamera->fX, fFocusZ - pCamera->fZ);
   pCamera->iPitch = fFlat > 1.0f
@@ -1005,6 +1036,78 @@ void mecha_render_briefing(const tMechaBriefing *pBrief, uint8 *pScrBuf,
 }
 
 //-------------------------------------------------------------------------------------------------
+/* Sky */
+
+/*
+ * The sky, top band first, running down to the one that sits on the horizon.
+ * A flat fill was what the arena had, and against a horizon this low it read
+ * as a wall rather than as distance -- the whole depth of an outdoor arena is
+ * carried by the sky, because everything else on screen is untextured flat
+ * shading.
+ */
+static const uint8 s_abySkyBand[] = {
+  221, 224, 227, 230, 167, 170, 171, 204, 207
+};
+
+#define MECHA_SKY_BANDS \
+  ((int)(sizeof(s_abySkyBand) / sizeof(s_abySkyBand[0])))
+
+/* Below the horizon. The floor covers most of it, but not the gap past the
+ * arena wall, and sky colour showing under the ground reads as a hole. */
+#define MECHA_SKY_GROUND 118
+
+/*
+ * Which row the horizon falls on.
+ *
+ * Taken through the same projection the rasteriser uses rather than guessed
+ * at, so the gradient stays welded to the world when the camera pitches: for
+ * a ray that is horizontal in world space and infinitely far off, the
+ * view-space slope works out as -tan(pitch), which puts the horizon at
+ * 99 + viewdist * tan(pitch) in the 320x200 reference frame.
+ */
+static int mecha_horizon_row(const tMechaCamera *pCamera, int iHeight)
+{
+  float fSin = mecha_sin(pCamera->iPitch);
+  float fCos = mecha_cos(pCamera->iPitch);
+  float fRefY;
+
+  /* Straight up or straight down: the horizon is off the frame either way,
+   * and the clamps below put it there. */
+  if (fCos > -1e-3f && fCos < 1e-3f)
+    return fSin >= 0.0f ? iHeight : 0;
+
+  fRefY = (199.0f - (float)MECHA_PROJ_CENTRE_Y)
+        + (float)MECHA_PROJ_VIEWDIST * (fSin / fCos);
+  fRefY = fRefY * (float)iHeight / 200.0f;
+
+  if (fRefY < 0.0f)
+    return 0;
+  if (fRefY > (float)iHeight)
+    return iHeight;
+  return (int)fRefY;
+}
+
+static void mecha_render_sky(uint8 *pScrBuf, int iWidth, int iHeight,
+                             const tMechaCamera *pCamera)
+{
+  int iHorizon = mecha_horizon_row(pCamera, iHeight);
+  int y;
+
+  for (y = 0; y < iHeight; y++) {
+    uint8 byColour = MECHA_SKY_GROUND;
+
+    if (y < iHorizon) {
+      int iBand = y * MECHA_SKY_BANDS / iHorizon;
+
+      if (iBand >= MECHA_SKY_BANDS)
+        iBand = MECHA_SKY_BANDS - 1;
+      byColour = s_abySkyBand[iBand];
+    }
+    memset(pScrBuf + (size_t)y * (size_t)iWidth, byColour, (size_t)iWidth);
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
 
 void mecha_render_frame(GameRenderer *pRenderer, const tMechaWorld *pWorld,
                         const tMechaCamera *pCamera, int iViewMech,
@@ -1032,10 +1135,7 @@ void mecha_render_frame(GameRenderer *pRenderer, const tMechaWorld *pWorld,
   game_render_set_target(pRenderer, pScrBuf, iWidth, iWidth, iHeight);
   game_render_set_viewport(pRenderer, 0, 0, iWidth, iHeight);
 
-  /* Sky. The arena floor and walls cover everything below the horizon, so a
-   * flat fill is the whole background. */
-  memset(pScrBuf, pWorld->arena.bySkyPalette,
-         (size_t)iWidth * (size_t)iHeight);
+  mecha_render_sky(pScrBuf, iWidth, iHeight, pCamera);
 
   mecha_camera_basis(pCamera, afRight, afUp, afForward);
 
@@ -1124,6 +1224,27 @@ static const struct
   { 194, 63, 52, 10 },   /* amber tracer, ammo pips                     */
   { 218, 16, 52, 63 },   /* cyan tracer, boost gauge                    */
   { 231, 63, 12, 12 },   /* red tracer, low armour, enemy bar           */
+
+  /*
+   * The sky, deepest first. These indices are not arbitrary: in the game's
+   * own PALETTE.PAL 221-230 is a dark-to-bright red ramp, 167-171 a
+   * dark-to-bright orange one and 204-207 the top of a yellow one, so the
+   * band list below climbs steadily in brightness whether it is resolved
+   * through the retail palette or through this table. 231 was the obvious
+   * brightest red to finish the reds on and is deliberately not used: it is
+   * the low-armour warning, and a sky that matches the colour of "you are
+   * about to die" is a sky that hides it.
+   */
+  { 221, 15,  3, 10 },   /* zenith                                      */
+  { 224, 27,  4,  9 },
+  { 227, 39,  6,  8 },
+  { 230, 51,  9,  6 },
+  { 167, 57, 20,  5 },
+  { 170, 61, 30,  6 },
+  { 171, 63, 38,  8 },
+  { 204, 63, 48, 12 },
+  { 207, 63, 58, 22 },   /* the band sitting on the horizon             */
+  { 118,  9,  8, 10 },   /* everything below it                         */
 };
 
 #define MECHA_PALETTE_COUNT \

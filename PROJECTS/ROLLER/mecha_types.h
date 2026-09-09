@@ -387,7 +387,6 @@ typedef struct
   uint8_t byFloorPalette;
   uint8_t byGridPalette;
   uint8_t byWallPalette;
-  uint8_t bySkyPalette;
   int   iObstacleCount;
   tMechaObstacle aObstacles[MECHA_MAX_OBSTACLES];
 } tMechaArena;

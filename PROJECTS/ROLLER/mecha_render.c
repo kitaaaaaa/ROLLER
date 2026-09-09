@@ -224,8 +224,7 @@ int mecha_render_text(uint8 *pScrBuf, int iWidth, int iHeight,
 /* Defined with the effect sprites further down, needed by the quad
  * submission above them. */
 static bool mecha_sprites_ensure(GameRenderer *pRenderer);
-static bool mecha_sprite_uv(int iFrame, float *pfU0, float *pfV0,
-                            float *pfU1, float *pfV1);
+static bool mecha_sprite_valid(int iFrame);
 static TextureHandle s_hSprites;
 
 //-------------------------------------------------------------------------------------------------
@@ -625,26 +624,36 @@ static void mecha_render_scene(GameRenderer *pRenderer,
      * when it is not -- rasterises flat, which is why the mesh still picks a
      * palette index for every particle it makes.
      */
-    if (pQuad->bySprite >= 0 && mecha_sprites_ensure(pRenderer)) {
-      float fU0;
-      float fV0;
-      float fU1;
-      float fV1;
+    if (pQuad->bySprite >= 0 && mecha_sprites_ensure(pRenderer)
+        && mecha_sprite_valid((int)pQuad->bySprite)) {
+      /*
+       * Which tile of the bank to draw lives in the low byte of the surface
+       * type -- it is not a palette index here, which is the one thing about
+       * this path that is easy to get wrong: a colour left in those bits
+       * names a tile the bank does not have, the renderer rejects it, and
+       * the quad quietly comes out flat instead of textured.
+       *
+       * PARTIAL_TRANS is what makes the frame a sprite rather than a black
+       * square. On that path index 0 is skipped instead of written, and
+       * every one of these frames is drawn on index 0 -- between a third and
+       * nine tenths of each tile is background.
+       */
+      int iSprite = ((int)pQuad->bySprite & SURFACE_MASK_TEXTURE_INDEX)
+                  | SURFACE_FLAG_APPLY_TEXTURE
+                  | SURFACE_FLAG_PARTIAL_TRANS;
 
-      if (mecha_sprite_uv((int)pQuad->bySprite, &fU0, &fV0, &fU1, &fV1)) {
-        /* Wound the way mecha_add_billboard builds its corners: bottom
-         * left, bottom right, top right, top left. */
-        aVerts[0].u = fU0; aVerts[0].v = fV1;
-        aVerts[1].u = fU1; aVerts[1].v = fV1;
-        aVerts[2].u = fU1; aVerts[2].v = fV0;
-        aVerts[3].u = fU0; aVerts[3].v = fV0;
-        /* Subdivision is what gives a textured polygon its perspective, so
-         * unlike the flat geometry these do want it: threshold zero. */
-        game_render_quad_world(pRenderer, aVerts, s_hSprites,
-                               iSurfaceFlags | SURFACE_FLAG_APPLY_TEXTURE,
-                               0.0f);
-        continue;
-      }
+      /* The legacy path works its own texture coordinates out inside
+       * POLYTEX, from the tile index and the projected polygon -- the track
+       * renderer passes zeroes on every vertex and always has. Rasterise
+       * directly rather than subdividing, for the same reason the flat
+       * geometry does: subdivision exists for large perspective surfaces,
+       * and a billboard is neither. */
+      aVerts[0].u = 0.0f; aVerts[0].v = 0.0f;
+      aVerts[1].u = 0.0f; aVerts[1].v = 0.0f;
+      aVerts[2].u = 0.0f; aVerts[2].v = 0.0f;
+      aVerts[3].u = 0.0f; aVerts[3].v = 0.0f;
+      game_render_quad_world(pRenderer, aVerts, s_hSprites, iSprite, 1.0f);
+      continue;
     }
 
     /* A positive threshold below the near plane means every quad rasterises
@@ -1156,37 +1165,40 @@ static bool mecha_sprites_ensure(GameRenderer *pRenderer)
   close(iFileHandle);
 
   LoadGenericCarTextures();
-  s_hSprites = game_render_get_texture_handle(pRenderer, TEXTURE_BANK_CARGEN);
   s_iSpriteTiles = num_textures[TEXTURE_BANK_CARGEN];
+  s_hSprites = game_render_get_texture_handle(pRenderer, TEXTURE_BANK_CARGEN);
+
+  /*
+   * The loader uploads through g_pGameRenderer, the global the race sets up.
+   * This mode may be running on a renderer that global has never pointed at
+   * -- the headless test builds its own, and the mode itself stands one up
+   * when it is entered before any race -- in which case the decompress and
+   * the sort happened but the upload was skipped, and the handle comes back
+   * invalid with the tiles counted. The pixels are sitting in cargen_vga
+   * either way, so hand them to the renderer that is actually drawing.
+   */
+  if (s_hSprites == TEXTURE_HANDLE_INVALID && cargen_vga
+      && s_iSpriteTiles > 0) {
+    int iTile = gfx_size ? 32 : 64;
+    int iPerRow = 256 / iTile;
+    int iRows = (s_iSpriteTiles + iPerRow - 1) / iPerRow;
+
+    s_hSprites = game_render_load_texture(pRenderer, cargen_vga, 256,
+                                          iRows * iTile,
+                                          TEXTURE_BANK_CARGEN, gfx_size);
+  }
   return s_hSprites != TEXTURE_HANDLE_INVALID && s_iSpriteTiles > 0;
 }
 
-/*
- * Where one frame sits in the atlas.
- *
- * The bank is packed 256 pixels wide, so a 64-pixel tile gives four to a row
- * and a 32-pixel one eight; gfx_size says which mode the game is running.
- * Returns false for a frame the loaded bank does not actually contain.
- */
-static bool mecha_sprite_uv(int iFrame, float *pfU0, float *pfV0,
-                            float *pfU1, float *pfV1)
+bool mecha_render_sprites_active(void)
 {
-  int iTile = gfx_size ? 32 : 64;
-  int iPerRow = 256 / iTile;
-  int iRows;
-  float fTileV;
+  return s_hSprites != TEXTURE_HANDLE_INVALID && s_iSpriteTiles > 0;
+}
 
-  if (iFrame < 0 || iFrame >= s_iSpriteTiles)
-    return false;
-
-  iRows = (s_iSpriteTiles + iPerRow - 1) / iPerRow;
-  fTileV = 1.0f / (float)iRows;
-
-  *pfU0 = (float)(iFrame % iPerRow) / (float)iPerRow;
-  *pfU1 = *pfU0 + 1.0f / (float)iPerRow;
-  *pfV0 = (float)(iFrame / iPerRow) * fTileV;
-  *pfV1 = *pfV0 + fTileV;
-  return true;
+/* True when the loaded bank actually has this frame. */
+static bool mecha_sprite_valid(int iFrame)
+{
+  return iFrame >= 0 && iFrame < s_iSpriteTiles;
 }
 
 //-------------------------------------------------------------------------------------------------

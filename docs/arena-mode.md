@@ -140,10 +140,13 @@ Both are read every frame, so either works at any time.
   carries the retail explosion, flame and smoke animations as 64x64 tiles,
   and the engine already decompresses that bank and uploads it as an atlas.
   The mode checks the file exists, lets the existing loader do the work, and
-  points its effect quads at the right frames. With no retail data it draws
-  the flat-shaded particles instead and everything still runs -- the file
-  check is what makes that true, because the stock loader exits the process
-  on a missing bank rather than returning a failure.
+  points its effect quads at the right frames. They are drawn masked, with
+  palette index 0 skipped rather than written -- every frame in that bank
+  sits on index 0, between a third and nine tenths of each tile, so drawing
+  them opaque would put a black square round every explosion. With no retail
+  data it draws the flat-shaded particles instead and everything still runs
+  -- the file check is what makes that true, because the stock loader exits
+  the process on a missing bank rather than returning a failure.
 
 ## Layout
 

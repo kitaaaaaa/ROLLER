@@ -78,6 +78,18 @@ bool mecha_render_project(const tMechaCamera *pCamera, int iWidth, int iHeight,
  */
 void mecha_render_build_palette(tColor *paPalette);
 
+/*
+ * True when the mode is drawing effects from the game's own texture bank
+ * rather than as flat-shaded particles.
+ *
+ * Exposed for tests, which otherwise measure the wrong thing: a blast drawn
+ * from gentex.drh paints none of the palette index the flat path uses, so a
+ * test that counts that index reads zero and concludes nothing rendered. It
+ * only becomes true once a frame has actually been submitted, since the bank
+ * is loaded lazily on the first effect that wants it.
+ */
+bool mecha_render_sprites_active(void);
+
 /* True when index byIndex has a colour of its own in the table above rather
  * than the neutral fill. Lets the render test catch a quad that paints with
  * an index nobody gave a colour to. */

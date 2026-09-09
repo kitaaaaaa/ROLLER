@@ -339,10 +339,14 @@ int main(int argc, char **argv)
         for (i = 0; i < MECHA_TICK_HZ; i++) {
             render_now(pRenderer, iPlayer);
             histogram(s_aFrame, aiPeak);
-            if (aiPeak[byBlast] > iPeak) {
+            if (aiPeak[byBlast] > iPeak)
                 iPeak = aiPeak[byBlast];
+            /* Dumped on a fixed tick rather than on the peak: with the
+             * texture bank loaded the peak count stays zero, so a dump tied
+             * to it would never fire and the one frame worth looking at
+             * would be the one never written. */
+            if (i == MECHA_TICK_HZ / 6)
                 dump_frame(szOutDir, "arena_blast.png");
-            }
             mecha_sim_tick(&s_World, aInputs, MECHA_MAX_MECHS);
         }
 
@@ -359,10 +363,55 @@ int main(int argc, char **argv)
                 CHECK(mecha_render_palette_defines(abyCool[iCool]));
         }
 
-        printf("   death blast peaks at %d px, %.1f%% of the frame\n",
-               iPeak, 100.0 * iPeak / (double)(FRAME_W * FRAME_H));
-        CHECK(iPeak > 0);
-        CHECK(iPeak < FRAME_W * FRAME_H / 16);   /* under 6.25% */
+        /*
+         * Which path drew it decides what there is to measure. Drawn from
+         * the game's own texture bank the blast paints none of the flat
+         * path's palette index, so this count is legitimately zero and the
+         * size bound belongs to the other path. Without the bank -- which
+         * is how this runs on a checkout with no retail data, and so how it
+         * runs in CI -- the flat particles are what is on screen and their
+         * size is the thing worth pinning.
+         */
+        printf("   death blast peaks at %d px, %.1f%% of the frame (%s)\n",
+               iPeak, 100.0 * iPeak / (double)(FRAME_W * FRAME_H),
+               mecha_render_sprites_active() ? "textured" : "flat");
+        if (mecha_render_sprites_active()) {
+            int iForeign = 0;
+            int iIdx;
+
+            /*
+             * The blast is drawn out of the retail bank now, so it paints
+             * none of the flat path's colour -- zero here is the expected
+             * reading, not a missing explosion. What proves the frames
+             * actually reached the screen is the opposite: the bank's tiles
+             * are drawn in the retail palette's indices, which are mostly
+             * ones this mode never paints with, so pixels the mode's own
+             * palette does not define can only have come from a sprite.
+             *
+             * (It is also why the dumped PNGs look empty here: they are
+             * written through the mode's fallback palette, where those
+             * indices resolve to the neutral fill. With the retail palette
+             * loaded, as in the game, they resolve to fire.)
+             */
+            histogram(s_aFrame, aiPeak);
+            for (iIdx = 0; iIdx < 256; iIdx++) {
+                if (aiPeak[iIdx] > 0 && !mecha_render_palette_defines(iIdx))
+                    iForeign += aiPeak[iIdx];
+            }
+            printf("   %d px came out of the texture bank\n", iForeign);
+            /*
+             * Bank pixels on screen is the whole assertion. The flat path's
+             * colour is not required to vanish: the machine's own visor is
+             * painted in it too, so a handful of pixels survive that have
+             * nothing to do with the blast -- which is also why counting
+             * that index was never a clean measure of blast size, only ever
+             * an upper bound on it.
+             */
+            CHECK(iForeign > 0);
+        } else {
+            CHECK(iPeak > 0);
+            CHECK(iPeak < FRAME_W * FRAME_H / 16);   /* under 6.25% */
+        }
     }
 
     /* --- a knocked-down mech still renders ------------------------------- */

@@ -105,7 +105,7 @@ dumps is a stand-in -- the real one lives in the retail data, which this test
 deliberately does without:
 
 ```sh
-zig build && ./zig-out/bin/mecha_render_headless_test /tmp/frames
+zig build test-mecha-render -Dmecha-frames=/tmp/frames
 ```
 
 ## Rendering notes

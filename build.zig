@@ -894,6 +894,12 @@ fn configureRenderQueue3DTests(
     );
     mecha_sim_tests.dependOn(&run_mecha_sim.step);
 
+    const mecha_frames_dir = b.option(
+        []const u8,
+        "mecha-frames",
+        "Directory for test-mecha-render to dump arena frames into as PNGs",
+    );
+
     // The other half of the arena mode: a real software GameRenderer with no
     // GPU device and no window, rendering frames into an indexed buffer.
     // Needs no game assets -- the mode generates all of its own geometry.
@@ -928,8 +934,14 @@ fn configureRenderQueue3DTests(
         .name = "mecha_render_headless_test",
         .root_module = mecha_render_mod,
     });
-    b.installArtifact(mecha_render_exe);
+    // Deliberately NOT installed. Installing it puts the test executable in
+    // the default `install` step, which the Android build runs -- and that
+    // drags SDL3 in to be compiled from source for aarch64-linux-android,
+    // where the build instead expects the prefab SDL named by
+    // -Dsdl-android-include/-Dsdl-android-lib. The frame dump is reached
+    // through -Dmecha-frames instead, so nothing has to be installed.
     const run_mecha_render = runArtifact(b, mecha_render_exe, under_valgrind);
+    if (mecha_frames_dir) |szFramesDir| run_mecha_render.addArg(szFramesDir);
     const mecha_render_tests = b.step(
         "test-mecha-render",
         "Render arena frames headlessly through the software rasteriser",

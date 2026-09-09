@@ -88,6 +88,15 @@ void mecha_render_build_palette(tColor *paPalette);
  * only becomes true once a frame has actually been submitted, since the bank
  * is loaded lazily on the first effect that wants it.
  */
+/* Loads whatever retail assets the mode can use -- currently the HUD font.
+ * Safe to call with none present; the mode falls back to its own font. */
+void mecha_render_init_assets(GameRenderer *pRenderer);
+
+/* True when HUD text is being drawn in the game's own font rather than the
+ * built-in one. Those glyphs carry retail palette indices, so a test that
+ * checks every colour on screen belongs to this mode has to know. */
+bool mecha_render_font_is_retail(void);
+
 bool mecha_render_sprites_active(void);
 
 /* True when index byIndex has a colour of its own in the table above rather

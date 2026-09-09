@@ -6,6 +6,7 @@
 
 #include "3d.h"
 #include "func2.h"
+#include "func3.h"
 #include "graphics.h"
 #include "roller.h"
 #include "scene_render.h"
@@ -114,7 +115,7 @@ static const uint8 s_aabyFont[][MECHA_GLYPH_H] = {
  * mecha camera sits: high enough to see the floor you are circling on, low
  * enough that the horizon stays in frame and the arena reads as somewhere
  * rather than as a floor plan. */
-#define MECHA_CAM_HEIGHT     11.0f
+#define MECHA_CAM_HEIGHT     14.0f
 
 /*
  * Cover is 5 to 20 metres tall, so no fixed low camera clears all of it --
@@ -135,6 +136,16 @@ static const uint8 s_aabyFont[][MECHA_GLYPH_H] = {
 #define MECHA_PROJ_NEAR     90.0f
 
 //-------------------------------------------------------------------------------------------------
+
+/*
+ * Defined further down, beside the retail assets they belong to, but needed
+ * by the text and quad routines above them.
+ */
+static tBlockHeader *s_pFont;
+static TextureHandle s_hSprites;
+static int mecha_font_advance(char cChar);
+static bool mecha_sprites_ensure(GameRenderer *pRenderer);
+static bool mecha_sprite_valid(int iFrame);
 
 static int mecha_glyph_index(char cChar)
 {
@@ -183,6 +194,15 @@ int mecha_render_text_width(int iScale, const char *szText)
 {
   if (!szText || iScale < 1)
     return 0;
+
+  if (s_pFont) {
+    const char *pChar;
+    int iTotal = 0;
+
+    for (pChar = szText; *pChar; pChar++)
+      iTotal += mecha_font_advance(*pChar);
+    return iTotal * iScale;
+  }
   return (int)strlen(szText) * MECHA_GLYPH_ADVANCE * iScale;
 }
 
@@ -198,6 +218,32 @@ int mecha_render_text(uint8 *pScrBuf, int iWidth, int iHeight,
     return iX;
   if (iScale < 1)
     iScale = 1;
+
+  if (s_pFont) {
+    int iSavedScrSize = scr_size;
+    uint8 *pSavedScreen = screen_pointer;
+
+    /*
+     * prt_letter scales through scr_size and pre-multiplies the coordinates
+     * it is handed by the same factor, so drawing at iScale means setting
+     * the global and passing coordinates that have not been scaled. Every
+     * position this HUD computes is a multiple of iScale, so dividing gives
+     * the original back exactly; the few that are centring arithmetic can
+     * land a pixel out, which is invisible at this size.
+     *
+     * The colour is the retail font's own -- these glyphs carry their
+     * palette with them and prt_letter has nowhere to put a tint. Colour
+     * coding on this HUD lives in the bars, which are drawn here rather
+     * than printed, so nothing that has to be read at a glance loses by it.
+     */
+    (void)byColour;
+    screen_pointer = pScrBuf;
+    scr_size = 64 * iScale;
+    mini_prt_string(s_pFont, szText, iX / iScale, iY / iScale);
+    scr_size = iSavedScrSize;
+    screen_pointer = pSavedScreen;
+    return iX + mecha_render_text_width(iScale, szText);
+  }
 
   for (pChar = szText; *pChar; pChar++) {
     const uint8 *pGlyph = s_aabyFont[mecha_glyph_index(*pChar)];
@@ -221,11 +267,6 @@ int mecha_render_text(uint8 *pScrBuf, int iWidth, int iHeight,
 
 //-------------------------------------------------------------------------------------------------
 
-/* Defined with the effect sprites further down, needed by the quad
- * submission above them. */
-static bool mecha_sprites_ensure(GameRenderer *pRenderer);
-static bool mecha_sprite_valid(int iFrame);
-static TextureHandle s_hSprites;
 
 //-------------------------------------------------------------------------------------------------
 /* Camera */
@@ -1113,6 +1154,51 @@ void mecha_render_briefing(const tMechaBriefing *pBrief, uint8 *pScrBuf,
 }
 
 //-------------------------------------------------------------------------------------------------
+/* The game's own HUD font */
+
+/*
+ * minitext.bm is the small font the race HUD prints its speed and gear with,
+ * and it is what this mode's HUD should be using when it is there. The
+ * built-in five-by-seven stays as the fallback, because the arena has to
+ * come up with no retail data at all.
+ *
+ * Two things about the retail path are worth knowing. Glyphs are indexed
+ * through ascii_conv3, where 255 means "no glyph" and costs a fixed four
+ * pixels of advance; and prt_letter scales through the scr_size global
+ * rather than through an argument, so drawing at twice size means setting
+ * scr_size and handing it coordinates that have not been scaled yet.
+ */
+static bool s_bFontTried;
+
+static bool mecha_font_ensure(GameRenderer *pRenderer)
+{
+  if (s_pFont)
+    return true;
+  if (s_bFontTried)
+    return false;
+  s_bFontTried = true;
+
+  s_pFont = (tBlockHeader *)try_load_picture("minitext.bm");
+  if (s_pFont && pRenderer) {
+    /* Registered the way play_game_init registers it, so the GPU path has
+     * it too rather than only the software one this mode forces. */
+    game_render_load_blocks(pRenderer, 0, s_pFont, pal_addr);
+  }
+  return s_pFont != NULL;
+}
+
+/* Advance of one character in the retail font, unscaled. */
+static int mecha_font_advance(char cChar)
+{
+  int iIndex = (uint8)ascii_conv3[(uint8)cChar];
+
+  /* The sentinel is a space, and prt_letter charges a flat four for it. */
+  if (iIndex == 255)
+    return 4;
+  return s_pFont[iIndex].iWidth;
+}
+
+//-------------------------------------------------------------------------------------------------
 /* Effect sprites */
 
 /*
@@ -1188,6 +1274,18 @@ static bool mecha_sprites_ensure(GameRenderer *pRenderer)
                                           TEXTURE_BANK_CARGEN, gfx_size);
   }
   return s_hSprites != TEXTURE_HANDLE_INVALID && s_iSpriteTiles > 0;
+}
+
+void mecha_render_init_assets(GameRenderer *pRenderer)
+{
+  /* Called on entry so the briefing screen is drawn in the same font the
+   * match is, rather than the fallback until the first fight starts. */
+  mecha_font_ensure(pRenderer);
+}
+
+bool mecha_render_font_is_retail(void)
+{
+  return s_pFont != NULL;
 }
 
 bool mecha_render_sprites_active(void)

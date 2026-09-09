@@ -414,6 +414,8 @@ void mecha_mode_enter(void)
     s_bPaletteInstalled = true;
   }
 
+  mecha_render_init_assets(g_pGameRenderer);
+
   /* The briefing first, always. Coming straight in on --arena would
    * otherwise drop a player into a fight without ever having been told
    * which keys do what, and leave no way back to the race but the window

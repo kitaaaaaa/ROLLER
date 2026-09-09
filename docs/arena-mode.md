@@ -73,6 +73,13 @@ Both are read every frame, so either works at any time.
 
 ## How it plays
 
+- **You point the machine; the lock aims the guns.** The auto-turn only
+  squares the shoulders up inside about 34 metres, where a melee exchange is
+  too fast to aim by hand. Past that, pointing it is yours to do -- and since
+  the lock only holds while the enemy is inside your cone, keeping one at
+  range is now something you do rather than something that happens. Aim
+  elevation still comes off the lock at any distance; that tilts the guns,
+  not the machine.
 - **The lock does the aiming, while you have it.** Your mech keeps its
   shoulders square to the target on its own; the sticks decide where the feet
   go. Manual turn rides on top for shaking a lock or lining one up again.

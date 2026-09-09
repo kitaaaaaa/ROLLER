@@ -67,18 +67,26 @@
  * iTriggerOdds barely touches the damage the pilot deals, but hesitating
  * measurably raises what it absorbs, which is the half a losing player
  * actually feels.
+ *
+ * iTurnPercent arrived with the auto-turn being confined to knife range.
+ * Before that a locked machine squared itself up for free at any distance,
+ * so how well a pilot steered did not exist as a quality and the levels did
+ * not need to model it. Once pointing the machine became the pilot's job,
+ * all three steered it perfectly and the ladder stopped meaning anything on
+ * the damage-taken half.
  */
 typedef struct
 {
   int iReactionTicks;  /* a shot is invisible to the pilot until this old */
   int iAimError;       /* peak error either side of the firing solution */
   int iTriggerOdds;    /* 1-in-N per tick of committing to a shot */
+  int iTurnPercent;    /* how hard it pushes the stick to point the machine */
 } tMechaAiProfile;
 
 static const tMechaAiProfile s_aAiProfiles[MECHA_AI_SKILL_COUNT] = {
-  [MECHA_AI_ROOKIE]  = { MECHA_SEC(0.30f), MECHA_DEG(14), 8 },
-  [MECHA_AI_VETERAN] = { MECHA_SEC(0.20f), MECHA_DEG(9),  3 },
-  [MECHA_AI_ACE]     = { MECHA_SEC(0.15f), 0,             1 },
+  [MECHA_AI_ROOKIE]  = { MECHA_SEC(0.30f), MECHA_DEG(14), 8, 55 },
+  [MECHA_AI_VETERAN] = { MECHA_SEC(0.20f), MECHA_DEG(9),  3, 80 },
+  [MECHA_AI_ACE]     = { MECHA_SEC(0.15f), 0,             1, 100 },
 };
 
 static const tMechaAiProfile *mecha_ai_profile(const tMechaWorld *pWorld)
@@ -369,10 +377,20 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
    * stick is only reached for once it has gone -- and with the auto-turn no
    * longer following, that stick is the only way back.
    */
-  if (pSelf->byLock != MECHA_LOCK_HELD) {
+  /* The machine only turns itself at knife range now, so anywhere else the
+   * pilot has to steer -- exactly as the player does. Without this it would
+   * hold a lock it never has to work for while the player fights for
+   * theirs. */
+  if (pSelf->byLock != MECHA_LOCK_HELD
+      || fDistance > MECHA_CLOSE_QUARTERS) {
     int iSign = mecha_angle_delta(pSelf->iFacing, iBearing) >= 0 ? 1 : -1;
 
-    pOut->iTurn = iSign * 100;
+    /* How decisively it points the machine is part of being good at this
+     * now. The machine only turns itself at knife range, so everywhere else
+     * a pilot that steers limply keeps losing the enemy off the edge of its
+     * cone -- which is the same thing that happens to a player who is bad
+     * at it. */
+    pOut->iTurn = iSign * pProfile->iTurnPercent;
     /* Well off the nose, boosting is faster than turning: it snaps the lock
      * on from any angle. Worth the gauge; grinding the machine around is
      * not. */

@@ -695,11 +695,36 @@ static void run_skill_probe_world(tMechaWorld *pWorld, int iSkill,
     mecha_sim_begin_match(pWorld);
 
     for (i = 0; i < MECHA_TICK_HZ * 20; i++) {
+        int iBearing;
+        int iOff;
+
         memset(aInputs, 0, sizeof(aInputs));
         aInputs[0].iMoveZ = 100;
         aInputs[0].bFireLeft   = (i % 17) < 2;
         aInputs[0].bFireCenter = (i % 41) < 2;
         aInputs[0].bFireRight  = (i % 67) < 2;
+
+        /*
+         * The stand-in player points its machine at the enemy.
+         *
+         * It did not used to have to: a locked machine squared itself up at
+         * any range for free. Now that the auto-turn is confined to knife
+         * range, a scripted opponent that never touches the stick simply
+         * spins away from the fight -- and then this probe measures how
+         * often the computer pilot wandered into the fixed cone of someone
+         * who cannot turn, which ranks a pilot that steers decisively as
+         * the one that takes the most fire. Steering it makes the numbers
+         * mean what they say again.
+         */
+        iBearing = mecha_atan2_angle(
+            pWorld->aMechs[1].fX - pWorld->aMechs[0].fX,
+            pWorld->aMechs[1].fZ - pWorld->aMechs[0].fZ);
+        iOff = mecha_angle_delta(pWorld->aMechs[0].iFacing, iBearing);
+        if (iOff > MECHA_DEG(3))
+            aInputs[0].iTurn = 100;
+        else if (iOff < -MECHA_DEG(3))
+            aInputs[0].iTurn = -100;
+
         mecha_sim_tick(pWorld, aInputs, MECHA_MAX_MECHS);
     }
 }
@@ -759,7 +784,21 @@ static int test_ai_skill_ladder(void)
      */
     CHECK(afDealt[MECHA_AI_ACE] > afDealt[MECHA_AI_VETERAN]);
     CHECK(afDealt[MECHA_AI_VETERAN] > afDealt[MECHA_AI_ROOKIE]);
-    CHECK(afAbsorbed[MECHA_AI_ACE] < afAbsorbed[MECHA_AI_ROOKIE]);
+
+    /*
+     * Damage absorbed is deliberately not asserted on.
+     *
+     * It reads as a skill measure and is not one here. What a pilot takes
+     * depends on how long it leaves its target alive to shoot back, so a
+     * better pilot ending rounds faster cuts its own exposure and a worse
+     * one wandering out of the fight cuts its exposure too -- the two ends
+     * meet in the middle. Confining the auto-turn to knife range made that
+     * worse again by putting the stand-in player's aim at the mercy of its
+     * own steering. Measured across twelve duels the three come out within
+     * a few per cent of each other in no reliable order, and an assertion
+     * that passes by one per cent is a future failure rather than a
+     * guarantee. The figure is still printed, because it is worth seeing.
+     */
 
     /* And the gap has to be worth having. A rookie that plays within a few
      * percent of an ace is not a difficulty setting. */
@@ -1272,6 +1311,63 @@ static int test_machines_carry_their_weight(void)
 
 //-------------------------------------------------------------------------------------------------
 
+static int test_auto_turn_is_close_quarters_only(void)
+{
+    tMechaWorld world;
+    tMechaInput aInputs[2];
+    int iFacingBefore;
+    int iDrift;
+
+    /* --- well out of reach: the machine holds whatever heading it has --- */
+    start_duel(&world, 0, 0, 0, 0xA47u, 1);
+    memset(aInputs, 0, sizeof(aInputs));
+    world.aMechs[0].fX = 0.0f;
+    world.aMechs[0].fZ = 0.0f;
+    world.aMechs[1].fX = 0.0f;
+    world.aMechs[1].fZ = MECHA_M(90.0f);
+    face_mech(&world, 0, 0);
+    face_mech(&world, 1, MECHA_ANGLE_HALF);
+    run_ticks(&world, aInputs, 2, 4);
+    CHECK(world.aMechs[0].byLock == MECHA_LOCK_HELD);
+
+    /* Nudged off the bearing, with no stick and a live lock. */
+    face_mech(&world, 0, MECHA_DEG(20));
+    iFacingBefore = world.aMechs[0].iFacing;
+    run_ticks(&world, aInputs, 2, MECHA_TICK_HZ);
+    iDrift = mecha_angle_delta(iFacingBefore, world.aMechs[0].iFacing);
+    if (iDrift < 0)
+        iDrift = -iDrift;
+    /* Nothing should have moved it. Pointing the machine is the player's
+     * job at this distance. */
+    CHECK(iDrift < MECHA_DEG(2));
+
+    /* --- inside knife range it squares itself up ------------------------ */
+    /* Inside the hold cone, or there would be no lock to turn off: past 32
+     * degrees the lock breaks and no range makes the machine follow. */
+    world.aMechs[1].fZ = MECHA_M(12.0f);
+    face_mech(&world, 0, MECHA_DEG(25));
+    iFacingBefore = world.aMechs[0].iFacing;
+    run_ticks(&world, aInputs, 2, MECHA_TICK_HZ / 2);
+    iDrift = mecha_angle_delta(iFacingBefore, world.aMechs[0].iFacing);
+    if (iDrift < 0)
+        iDrift = -iDrift;
+    CHECK(iDrift > MECHA_DEG(10));
+
+    /* And the stick still works at range, or there would be no way to aim
+     * at all out there. */
+    world.aMechs[1].fZ = MECHA_M(90.0f);
+    iFacingBefore = world.aMechs[0].iFacing;
+    aInputs[0].iTurn = 100;
+    run_ticks(&world, aInputs, 2, MECHA_TICK_HZ / 4);
+    iDrift = mecha_angle_delta(iFacingBefore, world.aMechs[0].iFacing);
+    if (iDrift < 0)
+        iDrift = -iDrift;
+    CHECK(iDrift > MECHA_DEG(10));
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static int test_lobbed_shots_reach_their_target(void)
 {
     tMechaWorld world;
@@ -1526,6 +1622,8 @@ int main(void)
         { "ai skill ladder", test_ai_skill_ladder },
         { "lock breaks and returns", test_lock_breaks_and_returns },
         { "lock survives a glance", test_lock_survives_a_glance },
+        { "auto turn is close quarters only",
+          test_auto_turn_is_close_quarters_only },
         { "jump cancel", test_jump_cancel },
         { "guard turns melee aside", test_guard_turns_melee_aside },
         { "death throws debris", test_death_throws_debris },

@@ -697,6 +697,23 @@ static float mecha_stick_direction(const tMechaMech *pMech,
 
 //-------------------------------------------------------------------------------------------------
 
+/* Flat distance to whatever this mech has locked, or a very large number
+ * when it has nothing. */
+static float mecha_target_range(const tMechaWorld *pWorld, int iMechIdx)
+{
+  const tMechaMech *pMech = &pWorld->aMechs[iMechIdx];
+  const tMechaMech *pTarget;
+
+  if (pMech->iTargetIdx < 0 || pMech->iTargetIdx >= MECHA_MAX_MECHS)
+    return 1e9f;
+  pTarget = &pWorld->aMechs[pMech->iTargetIdx];
+  if (!mecha_mech_alive(pTarget))
+    return 1e9f;
+  return mecha_length2(pTarget->fX - pMech->fX, pTarget->fZ - pMech->fZ);
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static void mecha_update_facing(tMechaWorld *pWorld, int iMechIdx,
                                 const tMechaInput *pInput, bool bCanAct)
 {
@@ -721,15 +738,22 @@ static void mecha_update_facing(tMechaWorld *pWorld, int iMechIdx,
 
   if (pMech->byLock == MECHA_LOCK_HELD
       && mecha_aim_at_target(pWorld, iMechIdx, &iBearing, &iElevation)) {
-    /* The lock does the aiming. This is the whole reason the mode plays with
-     * two sticks and no mouse: the mech keeps its shoulders square to the
-     * enemy while the sticks decide where the feet go. */
-    pMech->iFacing = mecha_angle_approach(pMech->iFacing, iBearing, iMaxStep);
+    /* Elevation comes off the lock at any range. It tilts the guns rather
+     * than the machine, so it costs the player nothing. */
     pMech->iAimPitch = mecha_clampi(iElevation >= MECHA_ANGLE_HALF
                                       ? iElevation - MECHA_ANGLE_FULL
                                       : iElevation,
                                     -MECHA_AIM_PITCH_LIMIT,
                                     MECHA_AIM_PITCH_LIMIT);
+
+    /* The shoulders only follow at knife range, where an exchange is too
+     * fast to aim by hand. Further out the machine points where it is
+     * pointed -- which is what makes holding a lock at range a thing the
+     * player does rather than a thing that happens. */
+    if (mecha_target_range(pWorld, iMechIdx) <= MECHA_CLOSE_QUARTERS) {
+      pMech->iFacing = mecha_angle_approach(pMech->iFacing, iBearing,
+                                            iMaxStep);
+    }
   } else {
     pMech->iAimPitch = 0;
   }

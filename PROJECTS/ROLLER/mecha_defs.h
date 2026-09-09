@@ -135,6 +135,20 @@
 #define MECHA_TILE_FACADE_COUNT     8
 #define MECHA_TILE_ROOF             8
 
+/*
+ * Inside this the machine keeps its own shoulders square to whatever it has
+ * locked; outside it, pointing the thing is the player's job.
+ *
+ * The auto-turn used to run at every range, which quietly took the steering
+ * away: there was no distance at which a player chose where the machine was
+ * facing. Confining it to knife range keeps the one place it earns its
+ * keep -- a melee exchange is too fast to aim by hand -- and gives the
+ * rest of the fight back. The lock is unaffected either way; it still
+ * decides whether the weapons lead, and holding it at range now means
+ * actually keeping the enemy in front of you.
+ */
+#define MECHA_CLOSE_QUARTERS   MECHA_M(34.0f)
+
 /* Mechs push each other apart rather than overlapping. */
 #define MECHA_PUSH_PER_TICK    MECHA_M(0.9f)
 

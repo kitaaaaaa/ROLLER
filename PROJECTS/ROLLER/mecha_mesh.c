@@ -9,7 +9,7 @@
 
 //-------------------------------------------------------------------------------------------------
 /* Palette indices used only by the geometry; see mecha_arena.c for the rest. */
-#define MECHA_PAL_TRACER_CORE 255
+#define MECHA_PAL_TRACER_CORE 143
 
 /*
  * Translucent quads carry a SHADE LEVEL in the low byte, not a colour.

@@ -9,24 +9,24 @@
  * entries are tuned by eye against the same palette; every colour the mode
  * paints with is named here or in mecha_arena.c so a retune stays local.
  */
-#define PAL_TRACER_ORANGE 231
-#define PAL_TRACER_AMBER  207
-#define PAL_TRACER_VIOLET 171
-#define PAL_TRACER_WHITE  255
-#define PAL_TRACER_RED    243
-#define PAL_TRACER_SAND   219
-#define PAL_TRACER_GREEN  195
-#define PAL_TRACER_CYAN   183
+#define PAL_TRACER_ORANGE 183
+#define PAL_TRACER_AMBER  194
+#define PAL_TRACER_VIOLET 35
+#define PAL_TRACER_WHITE  143
+#define PAL_TRACER_RED    231
+#define PAL_TRACER_SAND   67
+#define PAL_TRACER_GREEN  148
+#define PAL_TRACER_CYAN   218
 
-#define PAL_HULL_STEEL    148
-#define PAL_HULL_STEEL_T  152
-#define PAL_HULL_IRON     134
-#define PAL_HULL_IRON_T   138
-#define PAL_HULL_PALE     162
-#define PAL_HULL_PALE_T   166
-#define PAL_HULL_DARK     130
-#define PAL_HULL_DARK_T   142
-#define PAL_JOINT         120
+#define PAL_HULL_STEEL    128
+#define PAL_HULL_STEEL_T  136
+#define PAL_HULL_IRON     125
+#define PAL_HULL_IRON_T   18
+#define PAL_HULL_PALE     137
+#define PAL_HULL_PALE_T   141
+#define PAL_HULL_DARK     119
+#define PAL_HULL_DARK_T   127
+#define PAL_JOINT         105
 
 //-------------------------------------------------------------------------------------------------
 

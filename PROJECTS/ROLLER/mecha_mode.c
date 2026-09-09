@@ -11,6 +11,7 @@
 #include "frontend.h"
 #include "func2.h"
 #include "game_render.h"
+#include "sound.h"
 
 #include <SDL3/SDL.h>
 #include <string.h>
@@ -48,6 +49,36 @@ static bool s_bActive;
 /* Restored on exit so the frontend and the race find the screen globals the
  * way they left them. */
 static GameRenderMode s_ePreviousRenderMode;
+
+/*
+ * The mode's own palette.
+ *
+ * Everything the arena draws is generated rather than loaded, but the frame
+ * is still an indexed buffer that gets presented through pal_addr -- and
+ * pal_addr is only filled in by the states that load the retail data. Coming
+ * straight in on --arena skips all of those, so without this the geometry
+ * rasterises correctly and then presents as a black screen. The previous
+ * palette is put back on exit so the menus and the race are unaffected.
+ */
+static tColor s_aArenaPalette[256];
+static tColor s_aSavedPalette[256];
+static tColor *s_pSavedPalAddr;
+static bool s_bPaletteInstalled;
+
+/* A palette counts as loaded once any entry is non-black; an all-zero table
+ * presents every frame as black whatever the renderer drew. */
+static bool mecha_mode_palette_loaded(void)
+{
+  int i;
+
+  if (!pal_addr)
+    return false;
+  for (i = 0; i < 256; i++) {
+    if (pal_addr[i].byR || pal_addr[i].byG || pal_addr[i].byB)
+      return true;
+  }
+  return false;
+}
 static int s_iSavedWinX;
 static int s_iSavedWinY;
 static int s_iSavedWinW;
@@ -119,6 +150,25 @@ void mecha_mode_enter(void)
   s_ePreviousRenderMode = game_render_get_mode(g_pGameRenderer);
   game_render_set_mode(g_pGameRenderer, GAME_RENDER_SOFTWARE);
 
+  /*
+   * Only supply a palette when nothing has loaded one. The mode's indices
+   * were picked to match the game's own PALETTE.PAL, so a player with the
+   * retail data should see it through their palette, not a substitute.
+   */
+  s_pSavedPalAddr = pal_addr;
+  s_bPaletteInstalled = false;
+  if (!mecha_mode_palette_loaded()) {
+    memcpy(s_aSavedPalette, palette, sizeof(s_aSavedPalette));
+    mecha_render_build_palette(s_aArenaPalette);
+    memcpy(palette, s_aArenaPalette, sizeof(palette));
+    pal_addr = s_aArenaPalette;
+    /* Derives shade_palette from palette[], which is what shadow_poly reads
+     * for mech shadows and ground dust. */
+    FindShades();
+    game_render_set_palette(g_pGameRenderer, s_aArenaPalette);
+    s_bPaletteInstalled = true;
+  }
+
   mecha_sim_init(&s_World, s_iArenaIdx, (uint32)SDL_GetTicks() | 1u,
                  s_iRoundsToWin);
   s_iPlayerIdx = mecha_sim_add_mech(&s_World, s_iPlayerDef,
@@ -129,6 +179,11 @@ void mecha_mode_enter(void)
   mecha_camera_reset(&s_Camera);
   if (s_iPlayerIdx >= 0)
     mecha_camera_update(&s_Camera, &s_World, s_iPlayerIdx);
+
+  SDL_Log("arena: entered (renderer=%p scrbuf=%p frame=%dx%d player=%d "
+          "palette=%s)",
+          (void *)g_pGameRenderer, (void *)scrbuf, XMAX, YMAX, s_iPlayerIdx,
+          s_bPaletteInstalled ? "built-in fallback" : "game's own");
 
   s_ullLastTimeNs = SDL_GetTicksNS();
   s_ullAccumulatorNs = 0;
@@ -206,7 +261,14 @@ void mecha_mode_exit(void)
   if (!s_bActive)
     return;
 
+  SDL_Log("arena: exiting");
   game_render_set_mode(g_pGameRenderer, s_ePreviousRenderMode);
+
+  if (s_bPaletteInstalled) {
+    memcpy(palette, s_aSavedPalette, sizeof(palette));
+    pal_addr = s_pSavedPalAddr;
+    s_bPaletteInstalled = false;
+  }
 
   winx = s_iSavedWinX;
   winy = s_iSavedWinY;

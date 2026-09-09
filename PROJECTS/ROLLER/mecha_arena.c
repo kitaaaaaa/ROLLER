@@ -13,14 +13,14 @@
  * goes through a name defined here or in mecha_defs.c, so retuning against a
  * different palette is a one-file edit.
  */
-#define MECHA_PAL_FLOOR_A   146
-#define MECHA_PAL_FLOOR_B   148
-#define MECHA_PAL_GRID      158
-#define MECHA_PAL_WALL      140
-#define MECHA_PAL_SKY       118
-#define MECHA_PAL_BLOCK     134
-#define MECHA_PAL_BLOCK_TOP 138
-#define MECHA_PAL_HAZARD    207
+#define MECHA_PAL_FLOOR_A   123
+#define MECHA_PAL_FLOOR_B   126
+#define MECHA_PAL_GRID      129
+#define MECHA_PAL_WALL      120
+#define MECHA_PAL_SKY       11
+#define MECHA_PAL_BLOCK     124
+#define MECHA_PAL_BLOCK_TOP 130
+#define MECHA_PAL_HAZARD    193
 
 //-------------------------------------------------------------------------------------------------
 

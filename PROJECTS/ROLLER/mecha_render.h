@@ -63,6 +63,26 @@ bool mecha_render_project(const tMechaCamera *pCamera, int iWidth, int iHeight,
                           float fX, float fY, float fZ,
                           int *piScreenX, int *piScreenY);
 
+/*
+ * Fills a 256-entry palette with the colours the arena mode paints in.
+ *
+ * The mode generates all of its own geometry and never loads the retail
+ * data, so it cannot rely on the game's palette being present either --
+ * pal_addr is only populated by the states that load assets, and presenting
+ * an indexed frame through an empty palette turns every pixel black. This is
+ * the authoritative table; mecha_mode.c installs it on entry and the
+ * headless render test asserts against it.
+ *
+ * Values are the game's 6-bit levels (0..63), matching tColor everywhere
+ * else in the engine.
+ */
+void mecha_render_build_palette(tColor *paPalette);
+
+/* True when index byIndex has a colour of its own in the table above rather
+ * than the neutral fill. Lets the render test catch a quad that paints with
+ * an index nobody gave a colour to. */
+bool mecha_render_palette_defines(int iIndex);
+
 /* Five-by-seven text, scaled by iScale. Returns the x coordinate just past
  * the string. Unknown characters render as blanks. */
 int mecha_render_text(uint8 *pScrBuf, int iWidth, int iHeight,

@@ -84,16 +84,16 @@ static const uint8 s_aabyFont[][MECHA_GLYPH_H] = {
 
 //-------------------------------------------------------------------------------------------------
 /* HUD palette. Named here for the same reason as the arena's colours. */
-#define MECHA_HUD_FRAME   16
-#define MECHA_HUD_TEXT    255
-#define MECHA_HUD_ARMOUR  195
-#define MECHA_HUD_ARMOUR_LOW 243
-#define MECHA_HUD_BOOST   183
-#define MECHA_HUD_BOOST_LOCKED 243
-#define MECHA_HUD_AMMO    219
-#define MECHA_HUD_EMPTY   130
-#define MECHA_HUD_LOCK    231
-#define MECHA_HUD_ENEMY   243
+#define MECHA_HUD_FRAME   115
+#define MECHA_HUD_TEXT    143
+#define MECHA_HUD_ARMOUR  148
+#define MECHA_HUD_ARMOUR_LOW 231
+#define MECHA_HUD_BOOST   218
+#define MECHA_HUD_BOOST_LOCKED 231
+#define MECHA_HUD_AMMO    194
+#define MECHA_HUD_EMPTY   119
+#define MECHA_HUD_LOCK    183
+#define MECHA_HUD_ENEMY   231
 
 /* Camera framing, in metres. */
 #define MECHA_CAM_BACK_NEAR  24.0f
@@ -889,4 +889,101 @@ void mecha_render_frame(GameRenderer *pRenderer, const tMechaWorld *pWorld,
   mecha_render_scene(pRenderer, pWorld, pCamera, iViewMech, paScratch,
                      iScratchCapacity);
   mecha_render_hud(pScrBuf, iWidth, iHeight, pWorld, pCamera, iViewMech);
+}
+
+//-------------------------------------------------------------------------------------------------
+/* Palette */
+
+/*
+ * Every index the arena mode paints with, and the colour it means.
+ *
+ * The names live next to the code that uses them (mecha_arena.c,
+ * mecha_defs.c, mecha_mesh.c and the HUD block above); this is where those
+ * indices get colours for the case where no palette has been loaded at all.
+ *
+ * The indices themselves were chosen by matching these intended colours
+ * against the retail palette, so that a player who has the game data sees
+ * roughly the same picture from their own PALETTE.PAL rather than whatever
+ * happened to sit at an arbitrary index. That palette is mostly a grey ramp
+ * between 115 and 143 with saturated primaries higher up, which is why the
+ * arena reads as grey structure with coloured tracers. Some indices are
+ * deliberately shared -- a tracer and a HUD accent -- because the mode is
+ * painting into a palette it does not own the whole of.
+ */
+static const struct
+{
+  uint8 byIndex;
+  uint8 byR;
+  uint8 byG;
+  uint8 byB;
+} s_aArenaPalette[] = {
+  {  11,  8, 10, 26 },   /* sky                                         */
+  {  18, 45, 39, 30 },   /* iron trim                                   */
+  {  35, 44, 20, 60 },   /* violet tracer                               */
+  {  67, 58, 52, 30 },   /* sand tracer                                 */
+  { 105, 22, 22, 25 },   /* mech joints                                 */
+  { 115,  5,  5,  7 },   /* HUD frame, the darkest tone used            */
+  { 119, 13, 13, 17 },   /* dark hull, empty HUD socket                 */
+  { 120, 15, 15, 17 },   /* arena wall                                  */
+  { 123, 20, 20, 22 },   /* floor tile A                                */
+  { 124, 29, 25, 20 },   /* arena block                                 */
+  { 125, 31, 26, 21 },   /* iron hull                                   */
+  { 126, 27, 27, 29 },   /* floor tile B                                */
+  { 127, 30, 30, 35 },   /* dark trim                                   */
+  { 128, 30, 32, 37 },   /* steel hull                                  */
+  { 129, 33, 33, 35 },   /* floor grid tile                             */
+  { 130, 41, 37, 30 },   /* block top                                   */
+  { 136, 45, 47, 51 },   /* steel trim                                  */
+  { 137, 47, 49, 53 },   /* pale hull                                   */
+  { 141, 58, 58, 61 },   /* pale trim                                   */
+  { 143, 63, 63, 63 },   /* white tracer, HUD text                      */
+  { 148, 16, 60, 24 },   /* green tracer, armour bar                    */
+  { 183, 63, 40,  8 },   /* orange tracer, lock reticle                 */
+  { 193, 60, 45, 10 },   /* hazard trim                                 */
+  { 194, 63, 52, 10 },   /* amber tracer, ammo pips                     */
+  { 218, 16, 52, 63 },   /* cyan tracer, boost gauge                    */
+  { 231, 63, 12, 12 },   /* red tracer, low armour, enemy bar           */
+};
+
+#define MECHA_PALETTE_COUNT \
+  ((int)(sizeof(s_aArenaPalette) / sizeof(s_aArenaPalette[0])))
+
+//-------------------------------------------------------------------------------------------------
+
+void mecha_render_build_palette(tColor *paPalette)
+{
+  int i;
+
+  if (!paPalette)
+    return;
+
+  /* Anything the mode never paints with gets one neutral dark tone. Leaving
+   * it black would make an unnoticed index look like a hole in the world;
+   * this way a stray colour reads as a flat grey and is obvious. */
+  for (i = 0; i < 256; i++) {
+    paPalette[i].byR = 6;
+    paPalette[i].byG = 6;
+    paPalette[i].byB = 7;
+  }
+
+  for (i = 0; i < MECHA_PALETTE_COUNT; i++) {
+    tColor *pEntry = &paPalette[s_aArenaPalette[i].byIndex];
+
+    pEntry->byR = s_aArenaPalette[i].byR;
+    pEntry->byG = s_aArenaPalette[i].byG;
+    pEntry->byB = s_aArenaPalette[i].byB;
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+
+bool mecha_render_palette_defines(int iIndex)
+{
+  int i;
+
+  for (i = 0; i < MECHA_PALETTE_COUNT; i++) {
+    if ((int)s_aArenaPalette[i].byIndex == iIndex)
+      return true;
+  }
+  return false;
 }

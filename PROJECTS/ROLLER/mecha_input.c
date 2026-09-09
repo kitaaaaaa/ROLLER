@@ -64,6 +64,27 @@ static int mecha_key(int iScancode)
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * Live keyboard state, straight from SDL, for the keys the engine's own
+ * buffer never sees held down.
+ *
+ * SHIFT is the one that matters here. The event pump deliberately withholds
+ * a SHIFT key-down -- it stashes it and returns, so it can tell SHIFT+TAB
+ * from a bare SHIFT that should skip the intro -- and only replays it on
+ * release. So keys[WHIP_SCANCODE_LSHIFT] is never set while the key is
+ * actually down, which is exactly the state a held dash button has to be
+ * read in. Reading SDL directly gets the real thing without changing what
+ * the pump does for the rest of the game.
+ */
+static int mecha_raw_key(SDL_Scancode eScancode)
+{
+  const bool *pbState = SDL_GetKeyboardState(NULL);
+
+  return (pbState && pbState[eScancode]) ? 1 : 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 void mecha_input_poll(tMechaInput *pInput)
 {
   SDL_Gamepad *pPad;
@@ -83,7 +104,9 @@ void mecha_input_poll(tMechaInput *pInput)
   iMoveZ += 100 * (mecha_key(WHIP_SCANCODE_W) - mecha_key(WHIP_SCANCODE_S));
   iTurn  += 100 * (mecha_key(WHIP_SCANCODE_E) - mecha_key(WHIP_SCANCODE_Q));
 
-  pInput->bDash        = mecha_key(WHIP_SCANCODE_LSHIFT) != 0;
+  pInput->bDash        = mecha_key(WHIP_SCANCODE_LSHIFT) != 0
+                      || mecha_raw_key(SDL_SCANCODE_LSHIFT) != 0
+                      || mecha_raw_key(SDL_SCANCODE_RSHIFT) != 0;
   pInput->bJump        = mecha_key(WHIP_SCANCODE_SPACE) != 0;
   pInput->bGuard      = mecha_key(WHIP_SCANCODE_LCTRL) != 0
                       || mecha_key(WHIP_SCANCODE_C) != 0;

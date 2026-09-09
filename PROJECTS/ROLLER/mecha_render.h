@@ -111,6 +111,20 @@ int mecha_render_text(uint8 *pScrBuf, int iWidth, int iHeight,
                       const char *szText);
 int mecha_render_text_width(int iScale, const char *szText);
 
+/*
+ * The same, in the game's larger sprite face.
+ *
+ * There are two retail fonts and they are not interchangeable: minitext.bm
+ * is the restricted set the race HUD labels things with, and font6.bm is
+ * what the game announces things in. Titles and round banners want the
+ * second. With no retail data both fall back to the built-in font, the
+ * large one simply drawn at twice the scale.
+ */
+int mecha_render_text_large(uint8 *pScrBuf, int iWidth, int iHeight,
+                            int iX, int iY, int iScale, uint8 byColour,
+                            const char *szText);
+int mecha_render_text_large_width(int iScale, const char *szText);
+
 void mecha_render_fill(uint8 *pScrBuf, int iWidth, int iHeight,
                        int iX, int iY, int iW, int iH, uint8 byColour);
 

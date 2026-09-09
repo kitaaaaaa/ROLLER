@@ -159,6 +159,12 @@ Both are read every frame, so either works at any time.
   to: retail tiles are drawn in the retail palette's indices, so resolving
   them through a table that defines thirty colours turns tarmac into static.
 
+- **Two retail fonts, not one.** minitext.bm is the restricted set the race
+  HUD labels driver names and speed with, and it is what the small rows use.
+  The title and the round banners use font6.bm, the larger sprite face the
+  game announces things in. That one takes a colour, so a banner can still
+  go green for a win and red for a loss.
+
 ## Layout
 
 The mode is split so that the half worth testing has no engine dependencies at

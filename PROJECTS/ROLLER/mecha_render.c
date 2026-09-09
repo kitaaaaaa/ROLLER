@@ -145,7 +145,9 @@ static const uint8 s_aabyFont[][MECHA_GLYPH_H] = {
  * by the text and quad routines above them.
  */
 static tBlockHeader *s_pFont;
+static tBlockHeader *s_pFontBig;
 static int mecha_font_advance(char cChar);
+static int mecha_font_big_advance(char cChar);
 static bool mecha_bank_ensure(GameRenderer *pRenderer, int iBank);
 static TextureHandle mecha_bank_handle(int iBank);
 static bool mecha_bank_has_tile(int iBank, int iTile);
@@ -207,6 +209,54 @@ int mecha_render_text_width(int iScale, const char *szText)
     return iTotal * iScale;
   }
   return (int)strlen(szText) * MECHA_GLYPH_ADVANCE * iScale;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+int mecha_render_text_large_width(int iScale, const char *szText)
+{
+  if (!szText || iScale < 1)
+    return 0;
+
+  if (s_pFontBig) {
+    const char *pChar;
+    int iTotal = 0;
+
+    for (pChar = szText; *pChar; pChar++)
+      iTotal += mecha_font_big_advance(*pChar);
+    return iTotal * iScale;
+  }
+  /* The built-in font has one size, so a large string is the small one
+   * drawn at twice the scale -- which is what this used to do everywhere. */
+  return (int)strlen(szText) * MECHA_GLYPH_ADVANCE * iScale * 2;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+int mecha_render_text_large(uint8 *pScrBuf, int iWidth, int iHeight,
+                            int iX, int iY, int iScale, uint8 byColour,
+                            const char *szText)
+{
+  if (!pScrBuf || !szText)
+    return iX;
+  if (iScale < 1)
+    iScale = 1;
+
+  if (s_pFontBig) {
+    int iSavedScrSize = scr_size;
+    uint8 *pSavedScreen = screen_pointer;
+
+    /* prt_stringcol takes a colour, unlike the small font's printer, so the
+     * banner can still go green for a win and red for a loss. */
+    screen_pointer = pScrBuf;
+    scr_size = 64 * iScale;
+    prt_stringcol(s_pFontBig, szText, iX / iScale, iY / iScale, byColour);
+    scr_size = iSavedScrSize;
+    screen_pointer = pSavedScreen;
+    return iX + mecha_render_text_large_width(iScale, szText);
+  }
+  return mecha_render_text(pScrBuf, iWidth, iHeight, iX, iY, iScale * 2,
+                           byColour, szText);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -999,10 +1049,15 @@ static void mecha_render_hud(uint8 *pScrBuf, int iWidth, int iHeight,
 
   szBanner = mecha_phase_banner(pWorld, iViewMech);
   if (szBanner) {
-    mecha_render_text(pScrBuf, iWidth, iHeight,
-                      iWidth / 2
-                        - mecha_render_text_width(iScale * 4, szBanner) / 2,
-                      iHeight / 3, iScale * 4, MECHA_HUD_TEXT, szBanner);
+    /* READY, ROUND LOST, VICTORY -- the things the screen is announcing
+     * rather than labelling, so the large face rather than the restricted
+     * one the small labels use. */
+    mecha_render_text_large(pScrBuf, iWidth, iHeight,
+                            iWidth / 2
+                              - mecha_render_text_large_width(iScale * 2,
+                                                              szBanner) / 2,
+                            iHeight / 3, iScale * 2, MECHA_HUD_TEXT,
+                            szBanner);
   }
 }
 
@@ -1110,8 +1165,8 @@ void mecha_render_briefing(const tMechaBriefing *pBrief, uint8 *pScrBuf,
   mecha_render_fill(pScrBuf, iWidth, iHeight, 0, 0, iWidth, iHeight,
                     MECHA_BRIEF_GROUND);
 
-  mecha_render_text(pScrBuf, iWidth, iHeight, iX, iY, iScale * 2,
-                    MECHA_BRIEF_TITLE, "ARENA");
+  mecha_render_text_large(pScrBuf, iWidth, iHeight, iX, iY, iScale,
+                          MECHA_BRIEF_TITLE, "ARENA");
   iY += iLine * 2;
 
   /* Only after a match; on the way in there is nothing to report, and the
@@ -1189,13 +1244,42 @@ static bool mecha_font_ensure(GameRenderer *pRenderer)
     return false;
   s_bFontTried = true;
 
+  /*
+   * Two fonts, because the game has two and they are not
+   * interchangeable. minitext.bm is the restricted set the race HUD prints
+   * driver names and speed with -- right for a row of small labels, wrong
+   * for anything that has to carry a screen. font6.bm is the larger sprite
+   * face the game announces things in, and it is what the title and the
+   * round banners want.
+   */
   s_pFont = (tBlockHeader *)try_load_picture("minitext.bm");
-  if (s_pFont && pRenderer) {
-    /* Registered the way play_game_init registers it, so the GPU path has
-     * it too rather than only the software one this mode forces. */
-    game_render_load_blocks(pRenderer, 0, s_pFont, pal_addr);
+  s_pFontBig = (tBlockHeader *)try_load_picture("font6.bm");
+  if (pRenderer) {
+    /* Registered the way play_game_init registers them, so the GPU path has
+     * them too rather than only the software one this mode forces. */
+    if (s_pFont)
+      game_render_load_blocks(pRenderer, 0, s_pFont, pal_addr);
+    if (s_pFontBig)
+      game_render_load_blocks(pRenderer, 1, s_pFontBig, pal_addr);
   }
-  return s_pFont != NULL;
+  return s_pFont != NULL || s_pFontBig != NULL;
+}
+
+/*
+ * Advance of one character in the large font, unscaled.
+ *
+ * prt_letter reaches for a different mapping depending on the font type it
+ * is handed -- font6_ascii for the large face, ascii_conv3 for the small one
+ * -- so measuring has to use the same table the drawing will. The 255
+ * sentinel means no glyph and costs a flat four either way.
+ */
+static int mecha_font_big_advance(char cChar)
+{
+  int iIndex = (uint8)font6_ascii[(uint8)cChar];
+
+  if (iIndex == 255)
+    return 4;
+  return s_pFontBig[iIndex].iWidth;
 }
 
 /* Advance of one character in the retail font, unscaled. */

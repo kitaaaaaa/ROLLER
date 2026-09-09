@@ -11,6 +11,7 @@
 #include "frontend.h"
 #include "func2.h"
 #include "game_render.h"
+#include "roller.h"
 #include "sound.h"
 
 #include <SDL3/SDL.h>
@@ -49,6 +50,9 @@ static bool s_bActive;
 /* Restored on exit so the frontend and the race find the screen globals the
  * way they left them. */
 static GameRenderMode s_ePreviousRenderMode;
+/* Set when this mode had to create the renderer itself, so exit knows
+ * whether to tear it down or just hand the old mode back. */
+static bool s_bCreatedRenderer;
 
 /*
  * The mode's own palette.
@@ -142,6 +146,24 @@ void mecha_mode_enter(void)
   s_iSavedXBase = xbase;
   s_iSavedYBase = ybase;
   s_pSavedScreenPointer = screen_pointer;
+
+  /*
+   * g_pGameRenderer is created by play_game_init(), which only runs once a
+   * race starts. Coming straight in on --arena leaves it NULL, and
+   * game_render_get_mode() dereferences it without a guard, so the mode has
+   * to stand one up itself the way play_game_init does.
+   */
+  s_bCreatedRenderer = false;
+  if (!g_pGameRenderer) {
+    g_pGameRenderer = game_render_create(ROLLERGetGPUDevice(),
+                                         ROLLERGetWindow());
+    s_bCreatedRenderer = g_pGameRenderer != NULL;
+  }
+  if (!g_pGameRenderer) {
+    SDL_Log("arena: could not create a renderer; returning to the menu");
+    eFrontendNextState = eFRONTEND_STATE_MAIN_MENU;
+    return;
+  }
 
   /* The mode is built around the software rasteriser: it sorts its own
    * geometry back to front because that path has no depth buffer, and it
@@ -262,7 +284,13 @@ void mecha_mode_exit(void)
     return;
 
   SDL_Log("arena: exiting");
-  game_render_set_mode(g_pGameRenderer, s_ePreviousRenderMode);
+  if (s_bCreatedRenderer) {
+    game_render_destroy(g_pGameRenderer);
+    g_pGameRenderer = NULL;
+    s_bCreatedRenderer = false;
+  } else if (g_pGameRenderer) {
+    game_render_set_mode(g_pGameRenderer, s_ePreviousRenderMode);
+  }
 
   if (s_bPaletteInstalled) {
     memcpy(palette, s_aSavedPalette, sizeof(palette));

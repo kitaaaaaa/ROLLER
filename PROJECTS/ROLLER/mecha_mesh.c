@@ -360,6 +360,11 @@ void mecha_mesh_mech(tMechaQuadList *pList, const tMechaWorld *pWorld,
   float fRadius;
   float fSwing;
   float fLegLength;
+  float fShoulder;
+  float fTorso;
+  float fLimb;
+  float fHead;
+  float fGun;
   float fVertical;
   float fLateral;
   int iRoll;
@@ -396,6 +401,14 @@ void mecha_mesh_mech(tMechaQuadList *pList, const tMechaWorld *pWorld,
     fLateral /= pDef->fDashSpeed;
   iRoll = (int)(pMech->fLeanRoll * mecha_clampf(fLateral, -1.0f, 1.0f));
 
+  /* Zero means one, so a machine that never declares a build still gets the
+   * proportions the mesh was originally written around. */
+  fShoulder = pDef->fBuildShoulder > 0.0f ? pDef->fBuildShoulder : 1.0f;
+  fTorso    = pDef->fBuildTorso    > 0.0f ? pDef->fBuildTorso    : 1.0f;
+  fLimb     = pDef->fBuildLimb     > 0.0f ? pDef->fBuildLimb     : 1.0f;
+  fHead     = pDef->fBuildHead     > 0.0f ? pDef->fBuildHead     : 1.0f;
+  fGun      = pDef->fBuildGun      > 0.0f ? pDef->fBuildGun      : 1.0f;
+
   fVertical = pMech->byMove == MECHA_MOVE_GUARD ? 0.66f : 1.0f;
   mecha_pose_build(&pose, pMech->iFacing, mecha_mesh_body_pitch(pMech), iRoll,
                    pMech->fX, pMech->fY, pMech->fZ, fVertical);
@@ -408,61 +421,68 @@ void mecha_mesh_mech(tMechaQuadList *pList, const tMechaWorld *pWorld,
     fSwing *= 0.3f;
 
   /* Legs and feet. */
-  mecha_add_box(pList, &pose, -0.42f * fRadius, fLegLength * fHeight * 0.5f,
-                fSwing * 0.35f * fRadius,
-                0.24f * fRadius, fLegLength * fHeight * 0.5f, 0.26f * fRadius,
-                byBody, byBody, 0);
-  mecha_add_box(pList, &pose, 0.42f * fRadius, fLegLength * fHeight * 0.5f,
-                -fSwing * 0.35f * fRadius,
-                0.24f * fRadius, fLegLength * fHeight * 0.5f, 0.26f * fRadius,
-                byBody, byBody, 0);
-  mecha_add_box(pList, &pose, -0.42f * fRadius, 0.035f * fHeight,
+  mecha_add_box(pList, &pose, -0.42f * fRadius * fLimb,
+                fLegLength * fHeight * 0.5f, fSwing * 0.35f * fRadius,
+                0.24f * fRadius * fLimb, fLegLength * fHeight * 0.5f,
+                0.26f * fRadius * fLimb, byBody, byBody, 0);
+  mecha_add_box(pList, &pose, 0.42f * fRadius * fLimb,
+                fLegLength * fHeight * 0.5f, -fSwing * 0.35f * fRadius,
+                0.24f * fRadius * fLimb, fLegLength * fHeight * 0.5f,
+                0.26f * fRadius * fLimb, byBody, byBody, 0);
+  mecha_add_box(pList, &pose, -0.42f * fRadius * fLimb, 0.035f * fHeight,
                 fSwing * 0.35f * fRadius + 0.10f * fRadius,
-                0.28f * fRadius, 0.035f * fHeight, 0.42f * fRadius,
-                byTrim, byTrim, 0);
-  mecha_add_box(pList, &pose, 0.42f * fRadius, 0.035f * fHeight,
+                0.28f * fRadius * fLimb, 0.035f * fHeight,
+                0.42f * fRadius * fLimb, byTrim, byTrim, 0);
+  mecha_add_box(pList, &pose, 0.42f * fRadius * fLimb, 0.035f * fHeight,
                 -fSwing * 0.35f * fRadius + 0.10f * fRadius,
-                0.28f * fRadius, 0.035f * fHeight, 0.42f * fRadius,
-                byTrim, byTrim, 0);
+                0.28f * fRadius * fLimb, 0.035f * fHeight,
+                0.42f * fRadius * fLimb, byTrim, byTrim, 0);
 
   /* Hips, torso, chest plate. */
   mecha_add_box(pList, &pose, 0.0f, 0.47f * fHeight, 0.0f,
-                0.62f * fRadius, 0.07f * fHeight, 0.42f * fRadius,
-                byJoint, byJoint, 0);
+                0.62f * fRadius * fTorso, 0.07f * fHeight,
+                0.42f * fRadius * fTorso, byJoint, byJoint, 0);
   mecha_add_box(pList, &pose, 0.0f, 0.64f * fHeight, 0.02f * fRadius,
-                0.72f * fRadius, 0.13f * fHeight, 0.50f * fRadius,
-                byBody, byTrim, 0);
-  mecha_add_box(pList, &pose, 0.0f, 0.66f * fHeight, 0.52f * fRadius,
-                0.50f * fRadius, 0.09f * fHeight, 0.06f * fRadius,
+                0.72f * fRadius * fTorso, 0.13f * fHeight,
+                0.50f * fRadius * fTorso, byBody, byTrim, 0);
+  mecha_add_box(pList, &pose, 0.0f, 0.66f * fHeight,
+                0.52f * fRadius * fTorso,
+                0.50f * fRadius * fTorso, 0.09f * fHeight, 0.06f * fRadius,
                 byTrim, byTrim, 0);
 
   /* Thruster pack. */
-  mecha_add_box(pList, &pose, 0.0f, 0.66f * fHeight, -0.56f * fRadius,
-                0.50f * fRadius, 0.11f * fHeight, 0.16f * fRadius,
+  mecha_add_box(pList, &pose, 0.0f, 0.66f * fHeight,
+                -0.56f * fRadius * fTorso,
+                0.50f * fRadius * fTorso, 0.11f * fHeight, 0.16f * fRadius,
                 byJoint, byJoint, 0);
 
-  /* Shoulders and the weapon each arm carries. */
-  mecha_add_box(pList, &pose, -1.00f * fRadius, 0.76f * fHeight, 0.0f,
-                0.30f * fRadius, 0.09f * fHeight, 0.36f * fRadius,
-                byTrim, byTrim, 0);
-  mecha_add_box(pList, &pose, 1.00f * fRadius, 0.76f * fHeight, 0.0f,
-                0.30f * fRadius, 0.09f * fHeight, 0.36f * fRadius,
-                byTrim, byTrim, 0);
-  mecha_add_box(pList, &pose, -1.05f * fRadius, 0.58f * fHeight,
+  /* Shoulders and the weapon each arm carries. The gun rides on the
+   * shoulder span, so a wide machine carries its weapons further out as
+   * well as carrying bigger ones. */
+  mecha_add_box(pList, &pose, -1.00f * fRadius * fShoulder, 0.76f * fHeight,
+                0.0f,
+                0.30f * fRadius * fShoulder, 0.09f * fHeight * fShoulder,
+                0.36f * fRadius * fShoulder, byTrim, byTrim, 0);
+  mecha_add_box(pList, &pose, 1.00f * fRadius * fShoulder, 0.76f * fHeight,
+                0.0f,
+                0.30f * fRadius * fShoulder, 0.09f * fHeight * fShoulder,
+                0.36f * fRadius * fShoulder, byTrim, byTrim, 0);
+  mecha_add_box(pList, &pose, -1.05f * fRadius * fShoulder, 0.58f * fHeight,
                 0.10f * fRadius,
-                0.22f * fRadius, 0.13f * fHeight, 0.26f * fRadius,
-                byBody, byBody, 0);
-  mecha_add_box(pList, &pose, 1.05f * fRadius, 0.58f * fHeight,
+                0.22f * fRadius * fGun, 0.13f * fHeight * fGun,
+                0.26f * fRadius * fGun, byBody, byBody, 0);
+  mecha_add_box(pList, &pose, 1.05f * fRadius * fShoulder, 0.58f * fHeight,
                 0.10f * fRadius,
-                0.22f * fRadius, 0.13f * fHeight, 0.26f * fRadius,
-                byBody, byBody, 0);
+                0.22f * fRadius * fGun, 0.13f * fHeight * fGun,
+                0.26f * fRadius * fGun, byBody, byBody, 0);
 
   /* Head and visor. */
   mecha_add_box(pList, &pose, 0.0f, 0.86f * fHeight, 0.05f * fRadius,
-                0.26f * fRadius, 0.05f * fHeight, 0.26f * fRadius,
-                byTrim, byTrim, 0);
-  mecha_add_box(pList, &pose, 0.0f, 0.87f * fHeight, 0.30f * fRadius,
-                0.20f * fRadius, 0.02f * fHeight, 0.03f * fRadius,
+                0.26f * fRadius * fHead, 0.05f * fHeight * fHead,
+                0.26f * fRadius * fHead, byTrim, byTrim, 0);
+  mecha_add_box(pList, &pose, 0.0f, 0.87f * fHeight,
+                0.30f * fRadius * fHead,
+                0.20f * fRadius * fHead, 0.02f * fHeight, 0.03f * fRadius,
                 byGlow, byGlow, MECHA_QUAD_GLOW);
 
   /* Thruster plume, whenever the mech is actually spending gauge. */

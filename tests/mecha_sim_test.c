@@ -1182,6 +1182,66 @@ static int test_mesh_geometry(void)
 
 //-------------------------------------------------------------------------------------------------
 
+/* Width across the shoulders over standing height, from the mesh itself. */
+static float build_aspect(int iDefIdx, tMechaQuad *paStorage)
+{
+    tMechaQuadList list;
+    tMechaWorld world;
+    float fMinX = 1e30f, fMaxX = -1e30f;
+    float fMinY = 1e30f, fMaxY = -1e30f;
+    int i;
+    int v;
+
+    start_duel(&world, 0, iDefIdx, 0, 77u, 1);
+    mecha_quads_reset(&list, paStorage, MECHA_QUAD_CAPACITY);
+    mecha_mesh_mech(&list, &world, 0);
+
+    for (i = 0; i < list.iCount; i++) {
+        for (v = 0; v < 4; v++) {
+            float fX = paStorage[i].afVert[v][0];
+            float fY = paStorage[i].afVert[v][1];
+
+            if (fX < fMinX) fMinX = fX;
+            if (fX > fMaxX) fMaxX = fX;
+            if (fY < fMinY) fMinY = fY;
+            if (fY > fMaxY) fMaxY = fY;
+        }
+    }
+    if (fMaxY - fMinY < 1.0f)
+        return 0.0f;
+    return (fMaxX - fMinX) / (fMaxY - fMinY);
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_builds_read_as_silhouettes(void)
+{
+    static tMechaQuad aStorage[MECHA_QUAD_CAPACITY];
+    float fLancer = build_aspect(0, aStorage);
+    float fBulwark = build_aspect(1, aStorage);
+    float fHalcyon = build_aspect(2, aStorage);
+
+    printf("   width/height  LANCER %.2f  BULWARK %.2f  HALCYON %.2f\n",
+           fLancer, fBulwark, fHalcyon);
+
+    /*
+     * The archetypes have to be visible, not just written in the stat block.
+     * Every machine is built from the same boxes scaled off fHeight and
+     * fRadius, so without the build multipliers these three come out the
+     * same shape at three sizes and a siege platform is indistinguishable
+     * from an interceptor at any distance where it matters.
+     *
+     * Aspect ratio rather than absolute size, because size alone is not
+     * silhouette: a machine that is merely bigger still reads as the same
+     * machine.
+     */
+    CHECK(fBulwark > fLancer * 1.2f);
+    CHECK(fHalcyon < fLancer * 0.85f);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static int test_mesh_survives_a_match(void)
 {
     static tMechaQuad aStorage[MECHA_QUAD_CAPACITY];
@@ -1244,6 +1304,7 @@ int main(void)
         { "round and match flow", test_round_and_match_flow },
         { "lobbed shots", test_lobbed_shots_reach_their_target },
         { "mesh geometry", test_mesh_geometry },
+        { "builds read as silhouettes", test_builds_read_as_silhouettes },
         { "mesh survives a match", test_mesh_survives_a_match },
         { "determinism", test_determinism },
         { "ai fights", test_ai_fights },

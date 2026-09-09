@@ -189,6 +189,23 @@ typedef struct
   const char *szName;
   const char *szClass;
 
+  /*
+   * Silhouette multipliers.
+   *
+   * Everything the mesh builds is scaled off fHeight and fRadius, which made
+   * every machine on the roster the same shape at a different size -- the
+   * archetypes existed only in the stat block. These let a siege platform
+   * read as one from across the arena: heavy shoulders, thick limbs, an
+   * oversized gun in each hand and a head sunk into the chest, against an
+   * interceptor that is all narrow torso and thin legs. Zero means one, so a
+   * machine that never sets them still builds.
+   */
+  float fBuildShoulder;
+  float fBuildTorso;
+  float fBuildLimb;
+  float fBuildHead;
+  float fBuildGun;
+
   float fHeight;            /* world units, ground to head */
   float fRadius;            /* collision cylinder */
   float fMass;              /* scales knockback taken */

@@ -796,6 +796,7 @@ static void mecha_render_hud(uint8 *pScrBuf, int iWidth, int iHeight,
   char szBuffer[32];
   int iScale = iWidth / 320;
   int iBarW;
+  int iBarX;
   int iTargetIdx;
   int iSeconds;
 
@@ -807,64 +808,82 @@ static void mecha_render_hud(uint8 *pScrBuf, int iWidth, int iHeight,
   if (!pMech->bActive)
     return;
   pDef = mecha_def_get((int)pMech->byDefIdx);
-  iBarW = 120 * iScale;
 
-  /* --- the player, bottom left ----------------------------------------- */
+  /*
+   * Both machines' condition sits together at the top, player over
+   * opponent, which is the arcade convention and it earns its place: the
+   * one comparison that decides how you play the next five seconds is
+   * whether you are ahead, and that is unreadable when the two bars are in
+   * opposite corners of the screen, as they were.
+   */
+  iBarW = 118 * iScale;
+  iBarX = (iWidth - iBarW) / 2;
 
-  mecha_render_text(pScrBuf, iWidth, iHeight, 10 * iScale,
-                    iHeight - 60 * iScale, iScale, MECHA_HUD_TEXT,
-                    pDef->szName);
-  mecha_hud_bar(pScrBuf, iWidth, iHeight, 10 * iScale,
-                iHeight - 50 * iScale, iBarW, 8 * iScale,
+  /* The clock lives in the bottom right rather than over the bars. It was
+   * centred above them, where it sat on top of the player's own name -- and
+   * the top of the screen is worth more to the two condition bars than to a
+   * number that is only read between exchanges. */
+  iSeconds = pWorld->match.iRoundTicks / MECHA_TICK_HZ;
+  snprintf(szBuffer, sizeof(szBuffer), "%d", iSeconds);
+  mecha_render_text(pScrBuf, iWidth, iHeight,
+                    iWidth - mecha_render_text_width(iScale * 2, szBuffer)
+                      - 12 * iScale,
+                    iHeight - 24 * iScale, iScale * 2, MECHA_HUD_TEXT,
+                    szBuffer);
+
+  snprintf(szBuffer, sizeof(szBuffer), "ROUND %d", pWorld->match.iRound);
+  mecha_render_text(pScrBuf, iWidth, iHeight,
+                    iBarX - mecha_render_text_width(iScale, szBuffer)
+                      - 5 * iScale,
+                    18 * iScale, iScale, MECHA_HUD_TEXT, szBuffer);
+
+  /* --- the player's own row --------------------------------------------- */
+
+  mecha_render_text(pScrBuf, iWidth, iHeight, iBarX, 10 * iScale, iScale,
+                    MECHA_HUD_TEXT, pDef->szName);
+  mecha_hud_bar(pScrBuf, iWidth, iHeight, iBarX, 18 * iScale,
+                iBarW, 6 * iScale,
                 mecha_mech_armour_fraction(pWorld, iViewMech),
                 mecha_mech_armour_fraction(pWorld, iViewMech) < 0.3f
                   ? MECHA_HUD_ARMOUR_LOW : MECHA_HUD_ARMOUR,
                 MECHA_HUD_EMPTY);
-  /* The boost gauge turns red while it is locked out, which is the one piece
-   * of state a player has to be able to read instantly. */
-  mecha_hud_bar(pScrBuf, iWidth, iHeight, 10 * iScale,
-                iHeight - 38 * iScale, iBarW, 5 * iScale,
+  /* The gauge rides directly under the armour it pays for. It turns red
+   * while locked out, which is the one piece of state a player has to be
+   * able to read instantly. */
+  mecha_hud_bar(pScrBuf, iWidth, iHeight, iBarX, 25 * iScale,
+                iBarW, 3 * iScale,
                 mecha_mech_boost_fraction(pWorld, iViewMech),
                 pMech->bBoostLocked ? MECHA_HUD_BOOST_LOCKED : MECHA_HUD_BOOST,
                 MECHA_HUD_EMPTY);
-  mecha_hud_weapons(pScrBuf, iWidth, iHeight, pWorld, iViewMech,
-                    10 * iScale, iHeight - 28 * iScale, iScale);
   mecha_hud_rounds(pScrBuf, iWidth, iHeight, pWorld, iViewMech,
-                   10 * iScale, iHeight - 70 * iScale, iScale);
+                   iBarX + iBarW + 5 * iScale, 18 * iScale, iScale);
 
-  /* --- the target, top right -------------------------------------------- */
+  /* --- the opponent, directly below ------------------------------------- */
 
   iTargetIdx = pMech->iTargetIdx;
   if (iTargetIdx >= 0 && iTargetIdx < MECHA_MAX_MECHS
       && pWorld->aMechs[iTargetIdx].bActive) {
     const tMechaMechDef *pTargetDef =
         mecha_def_get((int)pWorld->aMechs[iTargetIdx].byDefIdx);
-    int iRightX = iWidth - iBarW - 10 * iScale;
+    int iNameW = mecha_render_text_width(iScale, pTargetDef->szName);
 
-    mecha_render_text(pScrBuf, iWidth, iHeight, iRightX, 10 * iScale,
-                      iScale, MECHA_HUD_ENEMY, pTargetDef->szName);
-    mecha_hud_bar(pScrBuf, iWidth, iHeight, iRightX, 20 * iScale,
-                  iBarW, 8 * iScale,
+    mecha_render_text(pScrBuf, iWidth, iHeight, iBarX + iBarW - iNameW,
+                      31 * iScale, iScale, MECHA_HUD_ENEMY,
+                      pTargetDef->szName);
+    mecha_hud_bar(pScrBuf, iWidth, iHeight, iBarX, 39 * iScale,
+                  iBarW, 6 * iScale,
                   mecha_mech_armour_fraction(pWorld, iTargetIdx),
                   MECHA_HUD_ENEMY, MECHA_HUD_EMPTY);
     mecha_hud_rounds(pScrBuf, iWidth, iHeight, pWorld, iTargetIdx,
-                     iRightX, 32 * iScale, iScale);
+                     iBarX + iBarW + 5 * iScale, 39 * iScale, iScale);
     mecha_hud_reticle(pScrBuf, iWidth, iHeight, pCamera, pWorld, iTargetIdx,
                       (int)pMech->byLock, iScale);
   }
 
-  /* --- round clock, top centre ------------------------------------------ */
+  /* --- what each trigger is holding, along the bottom ------------------- */
 
-  iSeconds = pWorld->match.iRoundTicks / MECHA_TICK_HZ;
-  snprintf(szBuffer, sizeof(szBuffer), "%d", iSeconds);
-  mecha_render_text(pScrBuf, iWidth, iHeight,
-                    iWidth / 2 - mecha_render_text_width(iScale * 2, szBuffer) / 2,
-                    8 * iScale, iScale * 2, MECHA_HUD_TEXT, szBuffer);
-
-  snprintf(szBuffer, sizeof(szBuffer), "ROUND %d", pWorld->match.iRound);
-  mecha_render_text(pScrBuf, iWidth, iHeight,
-                    iWidth / 2 - mecha_render_text_width(iScale, szBuffer) / 2,
-                    26 * iScale, iScale, MECHA_HUD_TEXT, szBuffer);
+  mecha_hud_weapons(pScrBuf, iWidth, iHeight, pWorld, iViewMech,
+                    10 * iScale, iHeight - 30 * iScale, iScale);
 
   /* --- banner ----------------------------------------------------------- */
 

@@ -35,6 +35,8 @@ static const tMechaMechDef s_aMechDefs[] = {
 //-------------------------------------------------------------------------------------------------
 {
   .szName = "LANCER", .szClass = "LINE ASSAULT",
+  .fBuildShoulder = 1.00f, .fBuildTorso = 1.00f, .fBuildLimb = 1.00f,
+  .fBuildHead = 1.00f, .fBuildGun = 1.00f,
   .fHeight = MECHA_M(14.0f), .fRadius = MECHA_M(3.2f), .fMass = 1.0f,
   .fArmour = 1000.0f,
   .fWalkSpeed = MECHA_MPS(15.0f), .fDashSpeed = MECHA_MPS(42.0f),
@@ -132,6 +134,10 @@ static const tMechaMechDef s_aMechDefs[] = {
 //-------------------------------------------------------------------------------------------------
 {
   .szName = "BULWARK", .szClass = "SIEGE PLATFORM",
+  /* The bruiser: everything wide, everything heavy, and a gun on each
+   * arm you could not possibly run with. */
+  .fBuildShoulder = 1.50f, .fBuildTorso = 1.30f, .fBuildLimb = 1.34f,
+  .fBuildHead = 0.78f, .fBuildGun = 2.00f,
   .fHeight = MECHA_M(17.0f), .fRadius = MECHA_M(4.2f), .fMass = 1.7f,
   .fArmour = 1450.0f,
   .fWalkSpeed = MECHA_MPS(10.0f), .fDashSpeed = MECHA_MPS(32.0f),
@@ -230,6 +236,10 @@ static const tMechaMechDef s_aMechDefs[] = {
 //-------------------------------------------------------------------------------------------------
 {
   .szName = "HALCYON", .szClass = "FAST INTERCEPT",
+  /* All silhouette and no mass: narrow shoulders, thin legs, and a head
+   * that actually clears them. */
+  .fBuildShoulder = 0.78f, .fBuildTorso = 0.80f, .fBuildLimb = 0.72f,
+  .fBuildHead = 1.20f, .fBuildGun = 0.66f,
   .fHeight = MECHA_M(12.5f), .fRadius = MECHA_M(2.6f), .fMass = 0.7f,
   .fArmour = 780.0f,
   .fWalkSpeed = MECHA_MPS(19.0f), .fDashSpeed = MECHA_MPS(54.0f),
@@ -327,6 +337,8 @@ static const tMechaMechDef s_aMechDefs[] = {
 //-------------------------------------------------------------------------------------------------
 {
   .szName = "SABRE", .szClass = "CLOSE QUARTERS",
+  .fBuildShoulder = 0.90f, .fBuildTorso = 0.94f, .fBuildLimb = 0.84f,
+  .fBuildHead = 1.06f, .fBuildGun = 0.82f,
   .fHeight = MECHA_M(13.5f), .fRadius = MECHA_M(3.0f), .fMass = 0.9f,
   .fArmour = 900.0f,
   .fWalkSpeed = MECHA_MPS(17.0f), .fDashSpeed = MECHA_MPS(60.0f),

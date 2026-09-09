@@ -135,9 +135,15 @@ Both are read every frame, so either works at any time.
   height they span 0.46 to 1.11.
 - **Blasts throw debris.** A kill spawns a short flash plus a burst of
   particles that fly out, fall under gravity, shrink, and cool down a warm
-  palette ramp. This is how the race game draws its own smoke and flames --
-  a spray of camera-facing squares carrying velocity and a palette index,
-  not a sprite sheet -- so it needs no retail art of any kind.
+  palette ramp.
+- **Effects use the game's own frames when they are there.** `gentex.drh`
+  carries the retail explosion, flame and smoke animations as 64x64 tiles,
+  and the engine already decompresses that bank and uploads it as an atlas.
+  The mode checks the file exists, lets the existing loader do the work, and
+  points its effect quads at the right frames. With no retail data it draws
+  the flat-shaded particles instead and everything still runs -- the file
+  check is what makes that true, because the stock loader exits the process
+  on a missing bank rather than returning a failure.
 
 ## Layout
 

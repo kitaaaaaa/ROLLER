@@ -1106,6 +1106,31 @@ static int test_death_throws_debris(void)
     mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
     mecha_mesh_effects(&list, &world, 0);
     CHECK(list.iCount > 0);
+
+    /*
+     * Effects name a frame of the game's own explosion animation, which the
+     * renderer resolves against the retail texture bank when there is one.
+     * The mesh layer cannot check that the bank has the frame -- it has
+     * never heard of a texture -- so what it can check is that it only ever
+     * names frames inside the ranges it declares, and that everything else
+     * stays flat. A frame number that wandered would either sample the
+     * wrong tile or read off the end of the atlas.
+     */
+    for (i = 0; i < list.iCount; i++) {
+        int iFrame = aStorage[i].bySprite;
+
+        if (iFrame == MECHA_SPRITE_NONE)
+            continue;
+        CHECK(iFrame >= MECHA_SPRITE_FIRE_FIRST);
+        CHECK(iFrame <= MECHA_SPRITE_SMOKE_LAST);
+    }
+
+    /* Arena geometry is flat and has to stay that way: it has no business
+     * carrying an effect frame. */
+    mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
+    mecha_mesh_arena(&list, &world.arena);
+    for (i = 0; i < list.iCount; i++)
+        CHECK(aStorage[i].bySprite == MECHA_SPRITE_NONE);
     return 0;
 }
 

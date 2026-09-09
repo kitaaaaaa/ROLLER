@@ -6,6 +6,18 @@
 
 #include "3d.h"
 #include "func2.h"
+#include "graphics.h"
+#include "roller.h"
+#include "scene_render.h"
+
+#include <fcntl.h>
+#include <unistd.h>
+
+/* The retail sources open in binary mode explicitly; POSIX has no such flag
+ * because it never mangles the bytes. */
+#ifndef O_BINARY
+#define O_BINARY 0
+#endif
 
 #include <math.h>
 #include <stdio.h>
@@ -206,6 +218,15 @@ int mecha_render_text(uint8 *pScrBuf, int iWidth, int iHeight,
   }
   return iX;
 }
+
+//-------------------------------------------------------------------------------------------------
+
+/* Defined with the effect sprites further down, needed by the quad
+ * submission above them. */
+static bool mecha_sprites_ensure(GameRenderer *pRenderer);
+static bool mecha_sprite_uv(int iFrame, float *pfU0, float *pfV0,
+                            float *pfU1, float *pfV1);
+static TextureHandle s_hSprites;
 
 //-------------------------------------------------------------------------------------------------
 /* Camera */
@@ -598,9 +619,37 @@ static void mecha_render_scene(GameRenderer *pRenderer,
     if (pQuad->byFlags & MECHA_QUAD_SHADOW)
       iSurfaceFlags = SURFACE_FLAG_TRANSPARENT | (iSurfaceFlags & 0x0F);
 
+    /*
+     * An effect quad that named a frame gets the game's own animation, when
+     * the bank is there to give it one. Everything else -- and everything,
+     * when it is not -- rasterises flat, which is why the mesh still picks a
+     * palette index for every particle it makes.
+     */
+    if (pQuad->bySprite >= 0 && mecha_sprites_ensure(pRenderer)) {
+      float fU0;
+      float fV0;
+      float fU1;
+      float fV1;
+
+      if (mecha_sprite_uv((int)pQuad->bySprite, &fU0, &fV0, &fU1, &fV1)) {
+        /* Wound the way mecha_add_billboard builds its corners: bottom
+         * left, bottom right, top right, top left. */
+        aVerts[0].u = fU0; aVerts[0].v = fV1;
+        aVerts[1].u = fU1; aVerts[1].v = fV1;
+        aVerts[2].u = fU1; aVerts[2].v = fV0;
+        aVerts[3].u = fU0; aVerts[3].v = fV0;
+        /* Subdivision is what gives a textured polygon its perspective, so
+         * unlike the flat geometry these do want it: threshold zero. */
+        game_render_quad_world(pRenderer, aVerts, s_hSprites,
+                               iSurfaceFlags | SURFACE_FLAG_APPLY_TEXTURE,
+                               0.0f);
+        continue;
+      }
+    }
+
     /* A positive threshold below the near plane means every quad rasterises
      * directly instead of being subdivided: subdivision exists for texture
-     * perspective, and none of this geometry is textured. */
+     * perspective, and this geometry is flat. */
     game_render_quad_world(pRenderer, aVerts, TEXTURE_HANDLE_INVALID,
                            iSurfaceFlags, 1.0f);
   }
@@ -1052,6 +1101,92 @@ void mecha_render_briefing(const tMechaBriefing *pBrief, uint8 *pScrBuf,
   mecha_render_text(pScrBuf, iWidth, iHeight, iX, iY, iScale,
                     MECHA_BRIEF_DIM,
                     "W S CHOOSE   A D CHANGE   ENTER SELECT");
+}
+
+//-------------------------------------------------------------------------------------------------
+/* Effect sprites */
+
+/*
+ * The game's own explosion, flame and smoke frames.
+ *
+ * They live in the generic texture bank -- gentex.drh -- as 64x64 indexed
+ * tiles, and the engine already knows how to decompress that bank and upload
+ * it as a 256-pixel-wide atlas. So the mode does not parse anything: it
+ * checks the file is there, lets the existing loader do the work, and keeps
+ * the handle.
+ *
+ * The check matters. LoadGenericCarTextures calls ErrorBoxExit when the file
+ * is missing, which on a checkout with no retail data would take the process
+ * down instead of falling back -- and falling back is the whole point. Every
+ * effect still carries a palette index, so a mode with no bank draws exactly
+ * what it drew before.
+ */
+static int s_iSpriteTiles;
+static bool s_bSpritesTried;
+
+static bool mecha_sprites_ensure(GameRenderer *pRenderer)
+{
+  int iFileHandle;
+
+  if (s_hSprites != TEXTURE_HANDLE_INVALID)
+    return true;
+  if (!pRenderer)
+    return false;
+
+  /* Already loaded by the race, in which case it is simply ours to use. */
+  if (num_textures[TEXTURE_BANK_CARGEN] > 0) {
+    s_hSprites = game_render_get_texture_handle(pRenderer,
+                                                TEXTURE_BANK_CARGEN);
+    if (s_hSprites != TEXTURE_HANDLE_INVALID) {
+      s_iSpriteTiles = num_textures[TEXTURE_BANK_CARGEN];
+      return true;
+    }
+  }
+
+  /* One attempt. A missing bank is not going to appear later in the match,
+   * and retrying every frame would stat the filesystem sixty times a
+   * second for an answer that cannot change. */
+  if (s_bSpritesTried)
+    return false;
+  s_bSpritesTried = true;
+
+  iFileHandle = ROLLERopen(gencartex_name, O_RDONLY | O_BINARY);
+  if (iFileHandle == -1)
+    return false;
+  close(iFileHandle);
+
+  LoadGenericCarTextures();
+  s_hSprites = game_render_get_texture_handle(pRenderer, TEXTURE_BANK_CARGEN);
+  s_iSpriteTiles = num_textures[TEXTURE_BANK_CARGEN];
+  return s_hSprites != TEXTURE_HANDLE_INVALID && s_iSpriteTiles > 0;
+}
+
+/*
+ * Where one frame sits in the atlas.
+ *
+ * The bank is packed 256 pixels wide, so a 64-pixel tile gives four to a row
+ * and a 32-pixel one eight; gfx_size says which mode the game is running.
+ * Returns false for a frame the loaded bank does not actually contain.
+ */
+static bool mecha_sprite_uv(int iFrame, float *pfU0, float *pfV0,
+                            float *pfU1, float *pfV1)
+{
+  int iTile = gfx_size ? 32 : 64;
+  int iPerRow = 256 / iTile;
+  int iRows;
+  float fTileV;
+
+  if (iFrame < 0 || iFrame >= s_iSpriteTiles)
+    return false;
+
+  iRows = (s_iSpriteTiles + iPerRow - 1) / iPerRow;
+  fTileV = 1.0f / (float)iRows;
+
+  *pfU0 = (float)(iFrame % iPerRow) / (float)iPerRow;
+  *pfU1 = *pfU0 + 1.0f / (float)iPerRow;
+  *pfV0 = (float)(iFrame / iPerRow) * fTileV;
+  *pfV1 = *pfV0 + fTileV;
+  return true;
 }
 
 //-------------------------------------------------------------------------------------------------

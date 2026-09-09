@@ -65,6 +65,7 @@ bool mecha_quads_add(tMechaQuadList *pList, const float afVert[4][3],
   memcpy(pQuad->afVert, afVert, sizeof(pQuad->afVert));
   pQuad->byPalette = byPalette;
   pQuad->byFlags = byFlags;
+  pQuad->bySprite = MECHA_SPRITE_NONE;
 
   for (i = 0; i < 3; i++) {
     afEdge1[i] = afVert[1][i] - afVert[0][i];
@@ -536,6 +537,27 @@ void mecha_mesh_shadows(tMechaQuadList *pList, const tMechaWorld *pWorld)
 //-------------------------------------------------------------------------------------------------
 /* Camera-facing geometry */
 
+/* Tags the quad most recently added to the list. Every add appends exactly
+ * one, so this is simply "the billboard I just made". */
+static void mecha_tag_sprite(tMechaQuadList *pList, int iFrame)
+{
+  if (pList && pList->iCount > 0)
+    pList->paQuads[pList->iCount - 1].bySprite = (int8_t)iFrame;
+}
+
+/* Walks a frame range by an effect's age, clamped at both ends. */
+static int mecha_sprite_frame(int iFirst, int iLast, float fAge)
+{
+  int iCount = iLast - iFirst + 1;
+  int iStep = (int)(fAge * (float)iCount);
+
+  if (iStep < 0)
+    iStep = 0;
+  if (iStep >= iCount)
+    iStep = iCount - 1;
+  return iFirst + iStep;
+}
+
 static void mecha_add_billboard(tMechaQuadList *pList, int iCameraYaw,
                                 float fX, float fY, float fZ, float fSize,
                                 uint8_t byPalette)
@@ -708,6 +730,9 @@ void mecha_mesh_effects(tMechaQuadList *pList, const tMechaWorld *pWorld,
                                               / (1.0f - MECHA_FX_BURST_PEAK)));
       mecha_add_billboard(pList, iCameraYaw, pFx->fX, pFx->fY, pFx->fZ,
                           fSize, pFx->byPalette);
+      mecha_tag_sprite(pList, mecha_sprite_frame(MECHA_SPRITE_BLAST_FIRST,
+                                                 MECHA_SPRITE_BLAST_LAST,
+                                                 fAge));
       break;
 
     case MECHA_FX_EMBER: {
@@ -734,6 +759,15 @@ void mecha_mesh_effects(tMechaQuadList *pList, const tMechaWorld *pWorld,
       fSize = pFx->fScale * (1.0f - 0.55f * fAge);
       mecha_add_billboard(pList, iCameraYaw, pFx->fX, pFx->fY, pFx->fZ,
                           fSize, abyCool[iStep]);
+      /* Alight for the first half of its life, smoke for the rest. */
+      mecha_tag_sprite(pList,
+                       fAge < 0.5f
+                         ? mecha_sprite_frame(MECHA_SPRITE_FIRE_FIRST,
+                                              MECHA_SPRITE_FIRE_LAST,
+                                              fAge * 2.0f)
+                         : mecha_sprite_frame(MECHA_SPRITE_SMOKE_FIRST,
+                                              MECHA_SPRITE_SMOKE_LAST,
+                                              (fAge - 0.5f) * 2.0f));
       break;
     }
 

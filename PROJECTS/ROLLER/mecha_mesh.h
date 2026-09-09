@@ -43,7 +43,25 @@ typedef struct
   float   afNormal[3];    /* unit outward normal, for back-face rejection */
   uint8_t byPalette;
   uint8_t byFlags;
+  /* Which frame of the game's own effect animation this quad wants, or -1
+   * for a flat-shaded one. The mesh layer never sees a texture -- it names a
+   * frame and the renderer resolves it, which is what keeps this file free
+   * of the engine. A frame that cannot be resolved falls back to byPalette,
+   * so the same mesh works with or without the retail texture bank. */
+  int8_t  bySprite;
 } tMechaQuad;
+
+/*
+ * Frames in the game's generic texture bank. Sequences run start..end
+ * inclusive and are walked by an effect's age.
+ */
+#define MECHA_SPRITE_NONE       (-1)
+#define MECHA_SPRITE_FIRE_FIRST   4
+#define MECHA_SPRITE_FIRE_LAST    7
+#define MECHA_SPRITE_BLAST_FIRST 13
+#define MECHA_SPRITE_BLAST_LAST  20
+#define MECHA_SPRITE_SMOKE_FIRST 21
+#define MECHA_SPRITE_SMOKE_LAST  23
 
 //-------------------------------------------------------------------------------------------------
 /*

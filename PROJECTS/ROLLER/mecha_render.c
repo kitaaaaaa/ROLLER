@@ -103,7 +103,7 @@ static const uint8 s_aabyFont[][MECHA_GLYPH_H] = {
 
 /* The projection reference frame the software rasteriser works in: it
  * projects into a 320x200 space and then scales by scr_size >> 6. */
-#define MECHA_PROJ_VIEWDIST 270
+#define MECHA_PROJ_VIEWDIST 200
 #define MECHA_PROJ_CENTRE_X 159
 #define MECHA_PROJ_CENTRE_Y 100
 #define MECHA_PROJ_NEAR     90.0f
@@ -821,6 +821,166 @@ static void mecha_render_hud(uint8 *pScrBuf, int iWidth, int iHeight,
                         - mecha_render_text_width(iScale * 4, szBanner) / 2,
                       iHeight / 3, iScale * 4, MECHA_HUD_TEXT, szBanner);
   }
+}
+
+//-------------------------------------------------------------------------------------------------
+/* Briefing */
+
+/*
+ * The briefing's own colours, out of the same table as everything else. The
+ * ground is the darkest tone the mode defines, which leaves the two text
+ * weights and the selection bar room to separate against it.
+ */
+#define MECHA_BRIEF_GROUND    MECHA_HUD_FRAME
+#define MECHA_BRIEF_BAR       MECHA_HUD_EMPTY
+#define MECHA_BRIEF_TITLE     MECHA_HUD_LOCK
+#define MECHA_BRIEF_HEADING   MECHA_HUD_AMMO
+#define MECHA_BRIEF_DIM       137
+#define MECHA_BRIEF_BRIGHT    MECHA_HUD_TEXT
+#define MECHA_BRIEF_WIN       MECHA_HUD_ARMOUR
+#define MECHA_BRIEF_LOSS      MECHA_HUD_ARMOUR_LOW
+
+/* Keyboard before the slash, pad after it. Kept to the glyphs the font
+ * actually has: no plus sign, which is why both triggers reads as BOTH. */
+static const char *const s_aaszControls[][2] = {
+  { "MOVE",        "W A S D  /  LEFT STICK" },
+  { "TURN",        "Q E  /  RIGHT STICK" },
+  { "DASH",        "SHIFT  /  B OR LB" },
+  { "JUMP",        "SPACE  /  A" },
+  { "CROUCH",      "C OR CTRL  /  X" },
+  { "FIRE L C R",  "J K L  /  LT  BOTH  RT" },
+  { "CHANGE LOCK", "TAB  /  Y OR RB" },
+  { "LEAVE MATCH", "ESC" },
+};
+
+#define MECHA_BRIEF_CONTROLS \
+  ((int)(sizeof(s_aaszControls) / sizeof(s_aaszControls[0])))
+
+/*
+ * Column widths in characters, shared by the controls and the rows so the
+ * two blocks line up down the screen. The label column has to clear the
+ * longest label on either side of it -- OPPONENT SKILL, at fourteen -- or a
+ * setting's value is drawn straight over its own name.
+ */
+#define MECHA_BRIEF_LABEL_CHARS 16
+#define MECHA_BRIEF_VALUE_CHARS 24
+
+/*
+ * Lines the screen occupies besides the rows, which vary: two for the
+ * double-height title, one each for the strapline and the result, a blank,
+ * the controls heading, one per control, a blank either side of the rows,
+ * the footer, and one more as the margin the footer's own glyphs need.
+ *
+ * The budget matters because the game's smaller video mode gives this a
+ * 320x200 buffer, and at 200 pixels there is room for exactly twenty-five
+ * lines. Anything that does not fit is lost off the bottom, and the bottom
+ * is where the exit row lives.
+ */
+#define MECHA_BRIEF_FIXED_LINES 18
+
+void mecha_render_briefing(const tMechaBriefing *pBrief, uint8 *pScrBuf,
+                           int iWidth, int iHeight)
+{
+  int iScale = iWidth / 320;
+  int iLine;
+  int iLabelW;
+  int iBlockW;
+  int iRows;
+  int iTotalH;
+  int iX;
+  int iY;
+  int i;
+
+  if (!pBrief || !pScrBuf || iWidth <= 0 || iHeight <= 0)
+    return;
+  if (iScale < 1)
+    iScale = 1;
+
+  iRows = pBrief->iRowCount;
+  if (iRows > MECHA_BRIEF_MAX_ROWS)
+    iRows = MECHA_BRIEF_MAX_ROWS;
+  if (iRows < 0)
+    iRows = 0;
+
+  /* Back the scale off until the whole screen fits. A briefing that runs off
+   * the bottom loses the exit, which is the one row a player has to be able
+   * to find. */
+  while (iScale > 1
+         && (MECHA_BRIEF_FIXED_LINES + iRows) * (MECHA_GLYPH_H + 1) * iScale
+            > iHeight) {
+    iScale--;
+  }
+
+  iLine = (MECHA_GLYPH_H + 1) * iScale;
+  iLabelW = MECHA_BRIEF_LABEL_CHARS * MECHA_GLYPH_ADVANCE * iScale;
+  iBlockW = iLabelW + MECHA_BRIEF_VALUE_CHARS * MECHA_GLYPH_ADVANCE * iScale;
+
+  iTotalH = (MECHA_BRIEF_FIXED_LINES + iRows) * iLine;
+  iX = (iWidth - iBlockW) / 2;
+  iY = (iHeight - iTotalH) / 2;
+  if (iX < iScale)
+    iX = iScale;
+  if (iY < iScale)
+    iY = iScale;
+
+  mecha_render_fill(pScrBuf, iWidth, iHeight, 0, 0, iWidth, iHeight,
+                    MECHA_BRIEF_GROUND);
+
+  mecha_render_text(pScrBuf, iWidth, iHeight, iX, iY, iScale * 2,
+                    MECHA_BRIEF_TITLE, "ARENA");
+  iY += iLine * 2;
+  mecha_render_text(pScrBuf, iWidth, iHeight, iX, iY, iScale,
+                    MECHA_BRIEF_DIM, "MECH DUEL ON THE WHIPLASH ENGINE");
+  iY += iLine;
+
+  /* Only after a match; on the way in there is nothing to report, and the
+   * line is left blank rather than closed up so the screen does not shift
+   * under the player the first time a match ends. */
+  if (pBrief->szResult) {
+    mecha_render_text(pScrBuf, iWidth, iHeight, iX, iY, iScale,
+                      pBrief->bResultWin ? MECHA_BRIEF_WIN
+                                         : MECHA_BRIEF_LOSS,
+                      pBrief->szResult);
+  }
+  iY += iLine * 2;
+
+  mecha_render_text(pScrBuf, iWidth, iHeight, iX, iY, iScale,
+                    MECHA_BRIEF_HEADING, "CONTROLS");
+  iY += iLine;
+  for (i = 0; i < MECHA_BRIEF_CONTROLS; i++) {
+    mecha_render_text(pScrBuf, iWidth, iHeight, iX, iY, iScale,
+                      MECHA_BRIEF_DIM, s_aaszControls[i][0]);
+    mecha_render_text(pScrBuf, iWidth, iHeight, iX + iLabelW, iY, iScale,
+                      MECHA_BRIEF_BRIGHT, s_aaszControls[i][1]);
+    iY += iLine;
+  }
+  iY += iLine;
+
+  for (i = 0; i < iRows; i++) {
+    const tMechaBriefRow *pRow = &pBrief->aRows[i];
+    bool bSelected = i == pBrief->iSelection;
+
+    if (bSelected) {
+      /* A bar rather than a cursor glyph: the font has no arrow, and a bar
+       * reads at a glance on a screen this dense. */
+      mecha_render_fill(pScrBuf, iWidth, iHeight, iX - 3 * iScale,
+                        iY - iScale, iBlockW + 6 * iScale,
+                        (MECHA_GLYPH_H + 2) * iScale, MECHA_BRIEF_BAR);
+    }
+    mecha_render_text(pScrBuf, iWidth, iHeight, iX, iY, iScale,
+                      bSelected ? MECHA_BRIEF_HEADING : MECHA_BRIEF_DIM,
+                      pRow->szLabel ? pRow->szLabel : "");
+    if (pRow->szValue) {
+      mecha_render_text(pScrBuf, iWidth, iHeight, iX + iLabelW, iY, iScale,
+                        MECHA_BRIEF_BRIGHT, pRow->szValue);
+    }
+    iY += iLine;
+  }
+  iY += iLine;
+
+  mecha_render_text(pScrBuf, iWidth, iHeight, iX, iY, iScale,
+                    MECHA_BRIEF_DIM,
+                    "W S CHOOSE   A D CHANGE   ENTER SELECT");
 }
 
 //-------------------------------------------------------------------------------------------------

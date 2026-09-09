@@ -657,6 +657,126 @@ static int test_ai_fights(void)
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * One fixed-length duel against a scripted opponent that walks in and fires
+ * on a timer and never dodges anything -- a stand-in for a player who cannot
+ * read incoming shots. Rounds to win is set high enough that the match
+ * cannot end inside the window, so a knockdown starts another round and both
+ * totals keep accumulating instead of being capped by an early finish.
+ */
+static void run_skill_probe_world(tMechaWorld *pWorld, int iSkill,
+                                  uint32_t uiSeed)
+{
+    tMechaInput aInputs[MECHA_MAX_MECHS];
+    int i;
+
+    mecha_sim_init(pWorld, 0, uiSeed, 9);
+    mecha_sim_set_ai_skill(pWorld, iSkill);
+    mecha_sim_add_mech(pWorld, 0, MECHA_CONTROL_HUMAN, 0);
+    mecha_sim_add_mech(pWorld, 1, MECHA_CONTROL_AI, 1);
+    mecha_sim_begin_match(pWorld);
+
+    for (i = 0; i < MECHA_TICK_HZ * 20; i++) {
+        memset(aInputs, 0, sizeof(aInputs));
+        aInputs[0].iMoveZ = 100;
+        aInputs[0].bFireLeft   = (i % 17) < 2;
+        aInputs[0].bFireCenter = (i % 41) < 2;
+        aInputs[0].bFireRight  = (i % 67) < 2;
+        mecha_sim_tick(pWorld, aInputs, MECHA_MAX_MECHS);
+    }
+}
+
+static void run_skill_probe(int iSkill, uint32_t uiSeed,
+                            float *pfAiDealt, float *pfAiAbsorbed)
+{
+    static tMechaWorld world;
+
+    run_skill_probe_world(&world, iSkill, uiSeed);
+    *pfAiDealt = world.aMechs[1].fDamageDealt;
+    *pfAiAbsorbed = world.aMechs[0].fDamageDealt;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_ai_skill_ladder(void)
+{
+    static const uint32_t auiSeeds[] = { 0x5C1Du, 0x1234u, 0xA5A5u,
+                                         0x77E1u, 0xBEEFu, 0x0F0Fu,
+                                         0x3141u, 0x2718u, 0x9E37u,
+                                         0x4D2Bu, 0x6A09u, 0xBB67u };
+    float afDealt[MECHA_AI_SKILL_COUNT];
+    float afAbsorbed[MECHA_AI_SKILL_COUNT];
+    int iSkill;
+    size_t iSeed;
+
+    /* Named, and never off the end of the ladder. */
+    CHECK(strcmp(mecha_sim_ai_skill_name(MECHA_AI_ROOKIE), "ROOKIE") == 0);
+    CHECK(strcmp(mecha_sim_ai_skill_name(MECHA_AI_ACE), "ACE") == 0);
+
+    for (iSkill = 0; iSkill < MECHA_AI_SKILL_COUNT; iSkill++) {
+        afDealt[iSkill] = 0.0f;
+        afAbsorbed[iSkill] = 0.0f;
+        for (iSeed = 0; iSeed < sizeof(auiSeeds) / sizeof(auiSeeds[0]);
+             iSeed++) {
+            float fDealt;
+            float fAbsorbed;
+
+            run_skill_probe(iSkill, auiSeeds[iSeed], &fDealt, &fAbsorbed);
+            afDealt[iSkill] += fDealt;
+            afAbsorbed[iSkill] += fAbsorbed;
+        }
+        printf("   skill %-7s dealt %8.0f  absorbed %8.0f\n",
+               mecha_sim_ai_skill_name(iSkill), afDealt[iSkill],
+               afAbsorbed[iSkill]);
+    }
+
+    /*
+     * The ladder has to run the right way round. Damage dealt is the
+     * assertion that carries weight: it falls off with aim error, which is
+     * the one lever measurement showed actually works, so all three rungs
+     * are ordered on it. Damage absorbed is noisier -- it depends on how
+     * long the pilot leaves its target alive to shoot back -- so only the
+     * two ends are compared. Orderings, never figures: the numbers move
+     * whenever the roster, the weapons or the arena are touched.
+     */
+    CHECK(afDealt[MECHA_AI_ACE] > afDealt[MECHA_AI_VETERAN]);
+    CHECK(afDealt[MECHA_AI_VETERAN] > afDealt[MECHA_AI_ROOKIE]);
+    CHECK(afAbsorbed[MECHA_AI_ACE] < afAbsorbed[MECHA_AI_ROOKIE]);
+
+    /* And the gap has to be worth having. A rookie that plays within a few
+     * percent of an ace is not a difficulty setting. */
+    CHECK(afDealt[MECHA_AI_ROOKIE] < afDealt[MECHA_AI_ACE] * 0.85f);
+
+    /* A rookie still has to be a fight rather than a target. */
+    CHECK(afDealt[MECHA_AI_ROOKIE] > 0.0f);
+
+    /* A fresh world starts somewhere sane, and out-of-range values clamp
+     * rather than reading off the end of the profile table. */
+    {
+        tMechaWorld world;
+
+        mecha_sim_init(&world, 0, 1u, 1);
+        CHECK(world.byAiSkill == MECHA_AI_VETERAN);
+        mecha_sim_set_ai_skill(&world, -5);
+        CHECK(world.byAiSkill == 0);
+        mecha_sim_set_ai_skill(&world, 999);
+        CHECK(world.byAiSkill == MECHA_AI_SKILL_COUNT - 1);
+    }
+
+    /* And a chosen skill still replays byte for byte from its seed. */
+    {
+        tMechaWorld a;
+        tMechaWorld b;
+
+        run_skill_probe_world(&a, MECHA_AI_ROOKIE, 0x2468u);
+        run_skill_probe_world(&b, MECHA_AI_ROOKIE, 0x2468u);
+        CHECK(memcmp(&a, &b, sizeof(a)) == 0);
+    }
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static int test_lobbed_shots_reach_their_target(void)
 {
     tMechaWorld world;
@@ -847,6 +967,7 @@ int main(void)
         { "mesh survives a match", test_mesh_survives_a_match },
         { "determinism", test_determinism },
         { "ai fights", test_ai_fights },
+        { "ai skill ladder", test_ai_skill_ladder },
     };
     size_t i;
 

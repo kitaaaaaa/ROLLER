@@ -149,3 +149,46 @@ bool mecha_input_quit_pressed(void)
 {
   return mecha_key(WHIP_SCANCODE_ESCAPE) != 0;
 }
+
+//-------------------------------------------------------------------------------------------------
+
+void mecha_input_poll_menu(tMechaMenuInput *pMenu)
+{
+  SDL_Gamepad *pPad;
+
+  if (!pMenu)
+    return;
+  SDL_memset(pMenu, 0, sizeof(*pMenu));
+
+  pMenu->bUp      = mecha_key(WHIP_SCANCODE_UP) || mecha_key(WHIP_SCANCODE_W);
+  pMenu->bDown    = mecha_key(WHIP_SCANCODE_DOWN) || mecha_key(WHIP_SCANCODE_S);
+  pMenu->bLeft    = mecha_key(WHIP_SCANCODE_LEFT) || mecha_key(WHIP_SCANCODE_A);
+  pMenu->bRight   = mecha_key(WHIP_SCANCODE_RIGHT) || mecha_key(WHIP_SCANCODE_D);
+  pMenu->bConfirm = mecha_key(WHIP_SCANCODE_RETURN)
+                 || mecha_key(WHIP_SCANCODE_SPACE);
+  pMenu->bBack    = mecha_key(WHIP_SCANCODE_ESCAPE) != 0;
+
+  pPad = mecha_first_gamepad();
+  if (pPad) {
+    /* The stick counts as well as the pad, at a deflection well past the
+     * dead zone so a resting stick never walks the selection. */
+    int iPadX = mecha_axis_to_percent(
+        SDL_GetGamepadAxis(pPad, SDL_GAMEPAD_AXIS_LEFTX));
+    int iPadY = mecha_axis_to_percent(
+        SDL_GetGamepadAxis(pPad, SDL_GAMEPAD_AXIS_LEFTY));
+
+    if (SDL_GetGamepadButton(pPad, SDL_GAMEPAD_BUTTON_DPAD_UP) || iPadY < -55)
+      pMenu->bUp = true;
+    if (SDL_GetGamepadButton(pPad, SDL_GAMEPAD_BUTTON_DPAD_DOWN) || iPadY > 55)
+      pMenu->bDown = true;
+    if (SDL_GetGamepadButton(pPad, SDL_GAMEPAD_BUTTON_DPAD_LEFT) || iPadX < -55)
+      pMenu->bLeft = true;
+    if (SDL_GetGamepadButton(pPad, SDL_GAMEPAD_BUTTON_DPAD_RIGHT) || iPadX > 55)
+      pMenu->bRight = true;
+    if (SDL_GetGamepadButton(pPad, SDL_GAMEPAD_BUTTON_SOUTH)
+        || SDL_GetGamepadButton(pPad, SDL_GAMEPAD_BUTTON_START))
+      pMenu->bConfirm = true;
+    if (SDL_GetGamepadButton(pPad, SDL_GAMEPAD_BUTTON_EAST))
+      pMenu->bBack = true;
+  }
+}

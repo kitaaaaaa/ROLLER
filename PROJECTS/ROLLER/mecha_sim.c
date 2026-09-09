@@ -293,10 +293,16 @@ void mecha_sim_damage(tMechaWorld *pWorld, int iVictimIdx, int iAttackerIdx,
     pVictim->iStunTicks = 0;
     pVictim->fVelX = 0.0f;
     pVictim->fVelZ = 0.0f;
+    /* A quarter of the mech's height, because the effect's scale is a
+     * billboard half-extent: the blast is that much again on every side, so
+     * this already paints a square about half as wide as the machine is
+     * tall. Passing a figure near the height itself -- as this did -- puts a
+     * flat opaque slab wider than the mech across the middle of the screen
+     * on the one frame the player most needs to see what happened. */
     mecha_sim_spawn_effect(pWorld, MECHA_FX_EXPLOSION, pVictim->fX,
                            pVictim->fY + pDef->fHeight * 0.5f, pVictim->fZ,
-                           pDef->fHeight * 0.7f, pDef->abyPalette[3],
-                           MECHA_SEC(1.2f));
+                           pDef->fHeight * 0.25f, pDef->abyPalette[3],
+                           MECHA_SEC(0.9f));
     return;
   }
 
@@ -959,6 +965,11 @@ static void mecha_fire_weapon(tMechaWorld *pWorld, int iMechIdx, int iSlot)
                          fOriginZ, pDef->fRadius * 0.5f, pWeapon->byPalette,
                          MECHA_SEC(0.12f));
 
+  /* Whatever the solution came out as, the pilot still has to hit with it.
+   * Applied after the aim and before the spread so a wide burst is scattered
+   * about the mistake rather than about the target. */
+  iBaseYaw = mecha_angle_wrap(iBaseYaw + pMech->iAimError);
+
   for (iShot = 0; iShot < (int)pWeapon->byCount; iShot++) {
     tMechaProjectile *pShot = mecha_alloc_projectile(pWorld);
     /* Spread fans symmetrically about the aim: with one shot the offset is
@@ -1221,6 +1232,7 @@ static void mecha_update_projectiles(tMechaWorld *pWorld)
 
     if (pShot->iArmTicks > 0)
       pShot->iArmTicks--;
+    pShot->iAge++;
 
     if (pShot->byKind == MECHA_PROJ_HOMING)
       mecha_home_projectile(pWorld, pShot);
@@ -1511,6 +1523,7 @@ static void mecha_reset_round(tMechaWorld *pWorld)
   pWorld->match.iWinnerIdx = -1;
 }
 
+
 //-------------------------------------------------------------------------------------------------
 
 /* Survivors, and the strongest survivor, for one team. */
@@ -1703,6 +1716,35 @@ void mecha_sim_init(tMechaWorld *pWorld, int iArenaIdx, uint32_t uiSeed,
   pWorld->match.byPhase = MECHA_PHASE_READY;
   pWorld->match.iPhaseTicks = MECHA_READY_TICKS;
   pWorld->match.iWinnerIdx = -1;
+
+  /* Not the top of the ladder. ACE is the pilot with no reaction time and no
+   * aim error, and a first-time player has no answer to it. */
+  pWorld->byAiSkill = MECHA_AI_VETERAN;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+void mecha_sim_set_ai_skill(tMechaWorld *pWorld, int iSkill)
+{
+  if (!pWorld)
+    return;
+  if (iSkill < 0)
+    iSkill = 0;
+  if (iSkill >= MECHA_AI_SKILL_COUNT)
+    iSkill = MECHA_AI_SKILL_COUNT - 1;
+  pWorld->byAiSkill = (uint8_t)iSkill;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+const char *mecha_sim_ai_skill_name(int iSkill)
+{
+  switch (iSkill) {
+  case MECHA_AI_ROOKIE:  return "ROOKIE";
+  case MECHA_AI_VETERAN: return "VETERAN";
+  case MECHA_AI_ACE:     return "ACE";
+  default:               return "?";
+  }
 }
 
 //-------------------------------------------------------------------------------------------------

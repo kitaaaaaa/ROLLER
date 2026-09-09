@@ -23,4 +23,24 @@ void mecha_input_poll(tMechaInput *pInput);
 bool mecha_input_quit_pressed(void);
 
 //-------------------------------------------------------------------------------------------------
+
+/*
+ * The briefing screen's input, on the same two devices. Every field is the
+ * held state rather than a press, so the caller decides what counts as a
+ * repeat -- a menu that stepped once per polled frame would be unusable at
+ * sixty hertz.
+ */
+typedef struct
+{
+  bool bUp;
+  bool bDown;
+  bool bLeft;
+  bool bRight;
+  bool bConfirm;
+  bool bBack;
+} tMechaMenuInput;
+
+void mecha_input_poll_menu(tMechaMenuInput *pMenu);
+
+//-------------------------------------------------------------------------------------------------
 #endif

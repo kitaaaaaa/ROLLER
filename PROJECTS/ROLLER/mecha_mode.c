@@ -30,6 +30,36 @@
 #define MECHA_TICK_NS (1000000000ull / (uint64)MECHA_TICK_HZ)
 #define MECHA_MAX_CATCHUP_TICKS 5
 
+/* How long VICTORY or DEFEAT is left on screen before the briefing comes
+ * back, and how a held direction repeats on the briefing itself. */
+#define MECHA_RESULT_HOLD_NS   2500000000ull
+#define MECHA_MENU_DELAY_NS     350000000ull
+#define MECHA_MENU_REPEAT_NS    110000000ull
+
+//-------------------------------------------------------------------------------------------------
+/*
+ * The mode has two screens. The briefing is where it starts and where every
+ * match returns to: it lists the controls, lets the match be set up, and is
+ * the only way out to the rest of the game. The match is the fight.
+ */
+typedef enum
+{
+  MECHA_SCREEN_BRIEFING = 0,
+  MECHA_SCREEN_MATCH    = 1
+} eMechaScreen;
+
+/* Briefing rows, in the order they are drawn. */
+typedef enum
+{
+  MECHA_ROW_START = 0,
+  MECHA_ROW_MECH,
+  MECHA_ROW_OPPONENT,
+  MECHA_ROW_ARENA,
+  MECHA_ROW_SKILL,
+  MECHA_ROW_EXIT,
+  MECHA_ROW_COUNT
+} eMechaBriefRowId;
+
 //-------------------------------------------------------------------------------------------------
 
 static tMechaWorld s_World;
@@ -40,12 +70,35 @@ static int s_iPlayerDef = 0;
 static int s_iOpponentDef = 2;
 static int s_iArenaIdx = 0;
 static int s_iRoundsToWin = 2;
+static int s_iAiSkill = MECHA_AI_VETERAN;
 
 static int s_iPlayerIdx = -1;
 static uint64 s_ullLastTimeNs;
 static uint64 s_ullAccumulatorNs;
 static bool s_bQuitHeld;
 static bool s_bActive;
+
+static eMechaScreen s_eScreen;
+static int s_iBriefSelection;
+static const char *s_szLastResult;
+static bool s_bLastResultWin;
+/* Counts down from MECHA_RESULT_HOLD_NS once the match is decided. */
+static uint64 s_ullResultHoldNs;
+
+/* Held-to-repeat state for the briefing's four directions, plus plain edge
+ * detection for the two buttons. */
+typedef struct
+{
+  bool   bHeld;
+  uint64 ullNextNs;
+} tMechaRepeat;
+
+static tMechaRepeat s_Up;
+static tMechaRepeat s_Down;
+static tMechaRepeat s_Left;
+static tMechaRepeat s_Right;
+static bool s_bConfirmHeld;
+static bool s_bBackHeld;
 
 /* Restored on exit so the frontend and the race find the screen globals the
  * way they left them. */
@@ -108,6 +161,17 @@ void mecha_mode_configure(int iPlayerDef, int iOpponentDef, int iArenaIdx,
 
 //-------------------------------------------------------------------------------------------------
 
+void mecha_mode_set_ai_skill(int iSkill)
+{
+  if (iSkill < 0)
+    iSkill = 0;
+  if (iSkill >= MECHA_AI_SKILL_COUNT)
+    iSkill = MECHA_AI_SKILL_COUNT - 1;
+  s_iAiSkill = iSkill;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 const char *mecha_mode_mech_name(int iDefIdx)
 {
   return mecha_def_get(iDefIdx)->szName;
@@ -132,6 +196,127 @@ int mecha_mode_mech_count(void)
 int mecha_mode_arena_count(void)
 {
   return mecha_arena_count();
+}
+
+//-------------------------------------------------------------------------------------------------
+
+const char *mecha_mode_skill_name(int iSkill)
+{
+  return mecha_sim_ai_skill_name(iSkill);
+}
+
+//-------------------------------------------------------------------------------------------------
+
+int mecha_mode_skill_count(void)
+{
+  return MECHA_AI_SKILL_COUNT;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/* True on the frame a direction goes down, and again every repeat interval
+ * while it stays down. */
+static bool mecha_mode_repeat(tMechaRepeat *pRepeat, bool bDown,
+                              uint64 ullNowNs)
+{
+  if (!bDown) {
+    pRepeat->bHeld = false;
+    return false;
+  }
+  if (!pRepeat->bHeld) {
+    pRepeat->bHeld = true;
+    pRepeat->ullNextNs = ullNowNs + MECHA_MENU_DELAY_NS;
+    return true;
+  }
+  if (ullNowNs >= pRepeat->ullNextNs) {
+    pRepeat->ullNextNs = ullNowNs + MECHA_MENU_REPEAT_NS;
+    return true;
+  }
+  return false;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int mecha_mode_wrap(int iValue, int iCount)
+{
+  if (iCount <= 0)
+    return 0;
+  iValue %= iCount;
+  return iValue < 0 ? iValue + iCount : iValue;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/* Builds the briefing exactly as it will be drawn. Kept here rather than in
+ * the renderer so the mode owns what its own settings are called. */
+static void mecha_mode_build_briefing(tMechaBriefing *pBrief)
+{
+  memset(pBrief, 0, sizeof(*pBrief));
+  pBrief->szResult = s_szLastResult;
+  pBrief->bResultWin = s_bLastResultWin;
+  pBrief->iSelection = s_iBriefSelection;
+  pBrief->iRowCount = MECHA_ROW_COUNT;
+
+  pBrief->aRows[MECHA_ROW_START].szLabel = "START MATCH";
+  pBrief->aRows[MECHA_ROW_MECH].szLabel = "YOUR MECH";
+  pBrief->aRows[MECHA_ROW_MECH].szValue = mecha_mode_mech_name(s_iPlayerDef);
+  pBrief->aRows[MECHA_ROW_OPPONENT].szLabel = "OPPONENT";
+  pBrief->aRows[MECHA_ROW_OPPONENT].szValue =
+      mecha_mode_mech_name(s_iOpponentDef);
+  pBrief->aRows[MECHA_ROW_ARENA].szLabel = "ARENA";
+  pBrief->aRows[MECHA_ROW_ARENA].szValue = mecha_mode_arena_name(s_iArenaIdx);
+  pBrief->aRows[MECHA_ROW_SKILL].szLabel = "OPPONENT SKILL";
+  pBrief->aRows[MECHA_ROW_SKILL].szValue = mecha_mode_skill_name(s_iAiSkill);
+  pBrief->aRows[MECHA_ROW_EXIT].szLabel = "EXIT TO WHIPLASH";
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static void mecha_mode_start_match(void)
+{
+  mecha_sim_init(&s_World, s_iArenaIdx, (uint32)SDL_GetTicksNS() | 1u,
+                 s_iRoundsToWin);
+  mecha_sim_set_ai_skill(&s_World, s_iAiSkill);
+  s_iPlayerIdx = mecha_sim_add_mech(&s_World, s_iPlayerDef,
+                                    MECHA_CONTROL_HUMAN, 0);
+  mecha_sim_add_mech(&s_World, s_iOpponentDef, MECHA_CONTROL_AI, 1);
+  mecha_sim_begin_match(&s_World);
+
+  mecha_camera_reset(&s_Camera);
+  if (s_iPlayerIdx >= 0)
+    mecha_camera_update(&s_Camera, &s_World, s_iPlayerIdx);
+
+  s_ullResultHoldNs = 0;
+  s_ullLastTimeNs = SDL_GetTicksNS();
+  s_ullAccumulatorNs = 0;
+  s_eScreen = MECHA_SCREEN_MATCH;
+  /* Whichever key or button started the match is still down. */
+  s_bQuitHeld = true;
+
+  SDL_Log("arena: match started (%s vs %s, %s, skill %s, first to %d)",
+          mecha_mode_mech_name(s_iPlayerDef),
+          mecha_mode_mech_name(s_iOpponentDef),
+          mecha_mode_arena_name(s_iArenaIdx),
+          mecha_sim_ai_skill_name(s_iAiSkill), s_iRoundsToWin);
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/* Back to the briefing, carrying how the match ended. */
+static void mecha_mode_return_to_briefing(const char *szResult, bool bWin)
+{
+  s_szLastResult = szResult;
+  s_bLastResultWin = bWin;
+  s_eScreen = MECHA_SCREEN_BRIEFING;
+  s_iBriefSelection = MECHA_ROW_START;
+  s_ullResultHoldNs = 0;
+  /* Whatever ended the match is still held. */
+  s_bConfirmHeld = true;
+  s_bBackHeld = true;
+  memset(&s_Up, 0, sizeof(s_Up));
+  memset(&s_Down, 0, sizeof(s_Down));
+  memset(&s_Left, 0, sizeof(s_Left));
+  memset(&s_Right, 0, sizeof(s_Right));
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -191,27 +376,100 @@ void mecha_mode_enter(void)
     s_bPaletteInstalled = true;
   }
 
-  mecha_sim_init(&s_World, s_iArenaIdx, (uint32)SDL_GetTicks() | 1u,
-                 s_iRoundsToWin);
-  s_iPlayerIdx = mecha_sim_add_mech(&s_World, s_iPlayerDef,
-                                    MECHA_CONTROL_HUMAN, 0);
-  mecha_sim_add_mech(&s_World, s_iOpponentDef, MECHA_CONTROL_AI, 1);
-  mecha_sim_begin_match(&s_World);
+  /* The briefing first, always. Coming straight in on --arena would
+   * otherwise drop a player into a fight without ever having been told
+   * which keys do what, and leave no way back to the race but the window
+   * close button. */
+  s_eScreen = MECHA_SCREEN_BRIEFING;
+  s_iBriefSelection = MECHA_ROW_START;
+  s_szLastResult = NULL;
+  s_bLastResultWin = false;
+  s_ullResultHoldNs = 0;
+  s_iPlayerIdx = -1;
+  memset(&s_World, 0, sizeof(s_World));
+  memset(&s_Up, 0, sizeof(s_Up));
+  memset(&s_Down, 0, sizeof(s_Down));
+  memset(&s_Left, 0, sizeof(s_Left));
+  memset(&s_Right, 0, sizeof(s_Right));
 
-  mecha_camera_reset(&s_Camera);
-  if (s_iPlayerIdx >= 0)
-    mecha_camera_update(&s_Camera, &s_World, s_iPlayerIdx);
-
-  SDL_Log("arena: entered (renderer=%p scrbuf=%p frame=%dx%d player=%d "
-          "palette=%s)",
-          (void *)g_pGameRenderer, (void *)scrbuf, XMAX, YMAX, s_iPlayerIdx,
+  SDL_Log("arena: entered (renderer=%p scrbuf=%p frame=%dx%d palette=%s)",
+          (void *)g_pGameRenderer, (void *)scrbuf, XMAX, YMAX,
           s_bPaletteInstalled ? "built-in fallback" : "game's own");
 
   s_ullLastTimeNs = SDL_GetTicksNS();
   s_ullAccumulatorNs = 0;
-  /* Whatever key sent us here may still be down. */
+  /* Whatever key or button sent us here may still be down. */
   s_bQuitHeld = true;
+  s_bConfirmHeld = true;
+  s_bBackHeld = true;
   s_bActive = true;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/* The briefing: choose the match, or leave. */
+static void mecha_mode_update_briefing(uint64 ullNowNs)
+{
+  tMechaMenuInput menu;
+  bool bConfirm;
+  bool bBack;
+  int iStep = 0;
+
+  mecha_input_poll_menu(&menu);
+
+  if (mecha_mode_repeat(&s_Up, menu.bUp, ullNowNs))
+    s_iBriefSelection = mecha_mode_wrap(s_iBriefSelection - 1,
+                                        MECHA_ROW_COUNT);
+  if (mecha_mode_repeat(&s_Down, menu.bDown, ullNowNs))
+    s_iBriefSelection = mecha_mode_wrap(s_iBriefSelection + 1,
+                                        MECHA_ROW_COUNT);
+  if (mecha_mode_repeat(&s_Left, menu.bLeft, ullNowNs))
+    iStep -= 1;
+  if (mecha_mode_repeat(&s_Right, menu.bRight, ullNowNs))
+    iStep += 1;
+
+  if (iStep != 0) {
+    switch (s_iBriefSelection) {
+    case MECHA_ROW_MECH:
+      s_iPlayerDef = mecha_mode_wrap(s_iPlayerDef + iStep,
+                                     mecha_mode_mech_count());
+      break;
+    case MECHA_ROW_OPPONENT:
+      s_iOpponentDef = mecha_mode_wrap(s_iOpponentDef + iStep,
+                                       mecha_mode_mech_count());
+      break;
+    case MECHA_ROW_ARENA:
+      s_iArenaIdx = mecha_mode_wrap(s_iArenaIdx + iStep,
+                                    mecha_mode_arena_count());
+      break;
+    case MECHA_ROW_SKILL:
+      s_iAiSkill = mecha_mode_wrap(s_iAiSkill + iStep, MECHA_AI_SKILL_COUNT);
+      break;
+    default:
+      break;
+    }
+  }
+
+  bConfirm = menu.bConfirm;
+  bBack = menu.bBack;
+
+  /* Escape leaves the arena from here, which is the same thing the exit row
+   * does -- there is nothing above this screen to back out to. */
+  if ((bBack && !s_bBackHeld)
+      || (bConfirm && !s_bConfirmHeld
+          && s_iBriefSelection == MECHA_ROW_EXIT)) {
+    s_bBackHeld = bBack;
+    s_bConfirmHeld = bConfirm;
+    SDL_Log("arena: leaving for the main menu");
+    frontend_set_state(eFRONTEND_STATE_MAIN_MENU);
+    return;
+  }
+
+  if (bConfirm && !s_bConfirmHeld && s_iBriefSelection == MECHA_ROW_START)
+    mecha_mode_start_match();
+
+  s_bConfirmHeld = bConfirm;
+  s_bBackHeld = bBack;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -228,10 +486,21 @@ void mecha_mode_update(void)
   if (!s_bActive)
     return;
 
+  if (s_eScreen == MECHA_SCREEN_BRIEFING) {
+    mecha_mode_update_briefing(SDL_GetTicksNS());
+    /* The clock keeps moving while the briefing is up; without this the
+     * first frame of the match would try to catch up on all of it. */
+    s_ullLastTimeNs = SDL_GetTicksNS();
+    s_ullAccumulatorNs = 0;
+    return;
+  }
+
+  /* Escape backs out of a match to the briefing rather than all the way to
+   * the race, which is where the exit actually lives. */
   bQuit = mecha_input_quit_pressed();
   if (bQuit && !s_bQuitHeld) {
-    frontend_set_state(eFRONTEND_STATE_MAIN_MENU);
     s_bQuitHeld = true;
+    mecha_mode_return_to_briefing(NULL, false);
     return;
   }
   s_bQuitHeld = bQuit;
@@ -261,13 +530,41 @@ void mecha_mode_update(void)
 
   if (s_iPlayerIdx >= 0)
     mecha_camera_update(&s_Camera, &s_World, s_iPlayerIdx);
+
+  /* A decided match holds on VICTORY or DEFEAT long enough to be read, then
+   * hands the player back to the briefing. The simulation keeps ticking
+   * through it so the last blast plays out. */
+  if (s_World.match.byPhase == MECHA_PHASE_MATCH_OVER) {
+    s_ullResultHoldNs += ullElapsed;
+    if (s_ullResultHoldNs >= MECHA_RESULT_HOLD_NS) {
+      bool bWin = s_World.match.iWinnerIdx == s_iPlayerIdx;
+
+      mecha_mode_return_to_briefing(
+          s_World.match.iWinnerIdx < 0 ? "LAST MATCH:  DRAW"
+            : bWin ? "LAST MATCH:  VICTORY" : "LAST MATCH:  DEFEAT",
+          bWin);
+    }
+  }
 }
 
 //-------------------------------------------------------------------------------------------------
 
 void mecha_mode_draw(void)
 {
-  if (!s_bActive || s_iPlayerIdx < 0 || !scrbuf)
+  if (!s_bActive || !scrbuf)
+    return;
+
+  if (s_eScreen == MECHA_SCREEN_BRIEFING) {
+    tMechaBriefing brief;
+
+    mecha_mode_build_briefing(&brief);
+    game_render_begin_frame(g_pGameRenderer);
+    mecha_render_briefing(&brief, scrbuf, XMAX, YMAX);
+    game_render_end_frame(g_pGameRenderer);
+    return;
+  }
+
+  if (s_iPlayerIdx < 0)
     return;
 
   game_render_begin_frame(g_pGameRenderer);

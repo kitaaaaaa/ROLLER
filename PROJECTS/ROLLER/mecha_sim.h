@@ -31,6 +31,18 @@ int mecha_sim_add_mech(tMechaWorld *pWorld, int iDefIdx,
 /* Places everyone on the spawn ring and starts round one. */
 void mecha_sim_begin_match(tMechaWorld *pWorld);
 
+/*
+ * How hard the computer pilots play, as an eMechaAiSkill. Out-of-range
+ * values clamp onto the ladder. Call it after mecha_sim_init, which starts
+ * every world on MECHA_AI_VETERAN; it applies to every AI-controlled mech
+ * in the world and is part of the world state, so a match still replays
+ * exactly from its seed.
+ */
+void mecha_sim_set_ai_skill(tMechaWorld *pWorld, int iSkill);
+
+/* Display name for a skill level. Never NULL. */
+const char *mecha_sim_ai_skill_name(int iSkill);
+
 //-------------------------------------------------------------------------------------------------
 /* Simulation */
 

@@ -106,6 +106,27 @@ typedef enum
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * How good the computer pilot is.
+ *
+ * The pilot has perfect information -- it is reading the same world struct
+ * the simulation ticks -- so the levels are not degrees of knowledge but
+ * degrees of human limitation put back in: how long it takes to react to a
+ * shot, how sure it has to be that a shot will hit before it spends boost
+ * dodging, how straight it shoots, and how readily it pulls the trigger.
+ * ACE is the pilot with no limitations at all, which is what the mode
+ * shipped with and what turned out to be unplayable as a default.
+ */
+typedef enum
+{
+  MECHA_AI_ROOKIE  = 0,
+  MECHA_AI_VETERAN = 1,
+  MECHA_AI_ACE     = 2,
+  MECHA_AI_SKILL_COUNT
+} eMechaAiSkill;
+
+//-------------------------------------------------------------------------------------------------
+
 typedef enum
 {
   MECHA_PHASE_READY      = 0,  /* round announcement, controls locked */
@@ -259,6 +280,12 @@ typedef struct
 
   int   iTargetIdx;         /* -1 when nothing is locked */
 
+  /* Angular error added to the firing solution, in the shared 14-bit
+   * circle. Weapons aim themselves at whatever is locked, so this is the
+   * only thing separating a pilot who can shoot from one who cannot; the
+   * computer pilot rolls it per shot and the player leaves it at zero. */
+  int   iAimError;
+
   int   iRoundsWon;
   float fDamageDealt;
 
@@ -287,6 +314,7 @@ typedef struct
   float fArcGravity;
 
   int   iLife;
+  int   iAge;               /* ticks since launch, for reaction timing */
   int   iHomingRate;
   int   iTarget;            /* -1 for unguided */
   int   iArmTicks;          /* mines ignore everything until this reaches zero */
@@ -362,6 +390,7 @@ typedef struct
   uint32_t          uiSeed;
   int               iTick;      /* ticks since the match started */
   int               iMechCount;
+  uint8_t           byAiSkill;  /* eMechaAiSkill, applies to every AI mech */
 } tMechaWorld;
 
 //-------------------------------------------------------------------------------------------------

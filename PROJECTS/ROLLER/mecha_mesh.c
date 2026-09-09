@@ -648,6 +648,9 @@ void mecha_mesh_projectiles(tMechaQuadList *pList, const tMechaWorld *pWorld,
 
 //-------------------------------------------------------------------------------------------------
 
+/* Where in an explosion's life it is at its widest, as a fraction. */
+#define MECHA_FX_BURST_PEAK 0.33f
+
 void mecha_mesh_effects(tMechaQuadList *pList, const tMechaWorld *pWorld,
                         int iCameraYaw)
 {
@@ -667,9 +670,19 @@ void mecha_mesh_effects(tMechaQuadList *pList, const tMechaWorld *pWorld,
 
     switch (pFx->byKind) {
     case MECHA_FX_EXPLOSION:
-      /* Expands over its life. Without alpha in an indexed frame buffer,
-       * growth is the only way a blast reads as dissipating. */
-      fSize = pFx->fScale * (0.25f + 0.75f * fAge);
+      /*
+       * Opens fast, then collapses. There is no alpha in an indexed frame
+       * buffer, so size is the only thing carrying the shape of the blast --
+       * and the earlier curve grew all the way to fScale at the end of its
+       * life, which meant a blast covered the most screen on the last frame
+       * before it vanished. That reads as the arena being blanked and then
+       * restored rather than as something exploding. Peaking a third of the
+       * way in and shrinking from there reads as a burst.
+       */
+      fSize = fAge < MECHA_FX_BURST_PEAK
+              ? pFx->fScale * (0.35f + 0.65f * (fAge / MECHA_FX_BURST_PEAK))
+              : pFx->fScale * (1.0f - 0.7f * ((fAge - MECHA_FX_BURST_PEAK)
+                                              / (1.0f - MECHA_FX_BURST_PEAK)));
       mecha_add_billboard(pList, iCameraYaw, pFx->fX, pFx->fY, pFx->fZ,
                           fSize, pFx->byPalette);
       break;

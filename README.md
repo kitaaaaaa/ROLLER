@@ -33,7 +33,9 @@ ROLLER also ships an arena mode: a 3D mecha duel on the same software
 rasteriser, reached with `--arena`. It is an original game built on the engine's
 renderer and math rather than a track, and it needs no extra assets -- the
 machines, the arenas and the HUD font are all generated at runtime. See
-[docs/arena-mode.md](./docs/arena-mode.md) for the controls and the layout.
+[docs/arena-mode.md](./docs/arena-mode.md) for the controls and the layout. It
+opens on a briefing screen that lists the controls, sets up the match and has
+the way back out to the race game.
 
 ```bash
 zig build run -- --arena

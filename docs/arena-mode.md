@@ -16,11 +16,36 @@ this project.
 ```sh
 zig build run -- --arena
 zig build run -- --arena-mech 3 --arena-foe 1 --arena-map 2 --arena-rounds 3
+zig build run -- --arena --arena-skill 0
 ```
 
 Naming any `--arena-*` option implies `--arena`. Indices wrap, so an
-out-of-range machine or arena picks a real one rather than failing. Escape
-returns to the main menu.
+out-of-range machine or arena picks a real one rather than failing.
+
+`--arena-skill` takes 0 (rookie), 1 (veteran, the default) or 2 (ace).
+
+## The briefing
+
+`--arena` opens on a briefing screen rather than dropping straight into a
+fight. It lists the controls, and its rows set up the match:
+
+| Row              | Does                                                |
+| ---------------- | --------------------------------------------------- |
+| Start match      | Begins the fight                                     |
+| Your mech        | Left / right cycles the roster                       |
+| Opponent         | Left / right cycles the roster                       |
+| Arena            | Left / right cycles the arenas                       |
+| Opponent skill   | Rookie, veteran or ace                               |
+| Exit to Whiplash | Leaves the arena for the main menu and the race game |
+
+`W`/`S` or up/down move between rows, `A`/`D` or left/right change a setting,
+and `Enter` or `Space` selects. A pad works throughout: d-pad or left stick to
+move, A to select, B to leave.
+
+Escape leaves a match and returns here; escape on the briefing itself leaves
+for the main menu. Every match returns here when it is decided, after holding
+on the result for a couple of seconds, so the settings can be changed and
+another fought without restarting.
 
 Arena mode needs no retail assets beyond whatever the rest of the game needs to
 boot: every mech, every arena and the HUD font are generated at runtime.
@@ -41,6 +66,7 @@ each, and the pad mapping keeps that shape.
 | Centre weapon         | `K`                | Both triggers      |
 | Right weapon          | `L`                | Right trigger      |
 | Cycle target          | `Tab`              | Y / right shoulder |
+| Leave the match       | `Escape`           | --                 |
 
 Both are read every frame, so either works at any time.
 
@@ -61,6 +87,16 @@ Both are read every frame, so either works at any time.
   invulnerability, so a knockdown cannot be chained.
 - **Rounds.** Best of whatever `--arena-rounds` asks for, 90 seconds each,
   decided on remaining armour if the clock runs out.
+- **The opponent's skill is mostly its aim.** Every weapon aims itself at
+  whatever is locked, so the computer pilot fires a perfect solution unless it
+  is given an angular error to miss by. That error is what the three levels
+  really set: measured over twelve duels the pilot lands about a third less
+  damage at rookie than at ace, and absorbs about a third more. Its reaction
+  time to incoming fire varies too, but that turned out not to change the
+  outcome measurably -- a pilot that answers every shot instantly also dashes
+  constantly, which swings it off its own firing cone and drains the boost it
+  needs to dodge with. The comment above `s_aAiProfiles` in `mecha_ai.c` has
+  the figures.
 
 ## Layout
 

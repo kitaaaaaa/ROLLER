@@ -61,6 +61,37 @@ static void histogram(const uint8 *pFrame, int aiCounts[256])
         aiCounts[pFrame[i]]++;
 }
 
+/* True when any pixel on this row is something other than the background
+ * the briefing fills with. */
+static bool row_has_ink(const uint8 *pFrame, int iWidth, int iY)
+{
+    uint8 byGround = pFrame[0];
+    int x;
+
+    for (x = 0; x < iWidth; x++) {
+        if (pFrame[iY * iWidth + x] != byGround)
+            return true;
+    }
+    return false;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/* The last row carrying anything, or -1 for an empty frame. */
+static int last_ink_row(const uint8 *pFrame, int iWidth, int iHeight)
+{
+    int iLast = -1;
+    int y;
+
+    for (y = 0; y < iHeight; y++) {
+        if (row_has_ink(pFrame, iWidth, y))
+            iLast = y;
+    }
+    return iLast;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static int distinct_colours(const int aiCounts[256])
 {
     int iCount = 0;
@@ -97,6 +128,18 @@ static void dump_frame(const char *szOutDir, const char *szName)
     else
         fprintf(stderr, "   FAILED to write %s\n", szPath);
 }
+
+/* Ticks past the READY announcement so the controls are live. */
+static void run_to_fight(tMechaInput *paInputs)
+{
+    int i;
+
+    for (i = 0; i < MECHA_TICK_HZ * 4
+                && s_World.match.byPhase != MECHA_PHASE_FIGHT; i++)
+        mecha_sim_tick(&s_World, paInputs, MECHA_MAX_MECHS);
+}
+
+//-------------------------------------------------------------------------------------------------
 
 static void render_now(GameRenderer *pRenderer, int iViewMech)
 {
@@ -232,6 +275,53 @@ int main(int argc, char **argv)
         CHECK(memcmp(aiCounts, aiLater, sizeof(aiCounts)) != 0);
     }
 
+    /*
+     * --- the death blast is a burst, not a wall --------------------------
+     *
+     * The explosion is an opaque billboard and its scale is a half-extent,
+     * so an over-large figure paints a flat slab across the middle of the
+     * screen on the one frame the player most needs to read. Measured
+     * against a recorded match, the original covered 17% of the play area
+     * at its widest. This pins it well under that.
+     */
+    {
+        /* Machine 2's accent is the one colour on the roster that no HUD
+         * element also paints in, so the blast can simply be counted across
+         * the whole frame with nothing to subtract. */
+        tMechaInput aInputs[MECHA_MAX_MECHS];
+        uint8 byBlast = mecha_def_get(2)->abyPalette[3];
+        int aiPeak[256];
+        int iPeak = 0;
+        int i;
+
+        mecha_sim_init(&s_World, 0, 0xB1A57u, 2);
+        iPlayer = mecha_sim_add_mech(&s_World, 2, MECHA_CONTROL_HUMAN, 0);
+        CHECK(mecha_sim_add_mech(&s_World, 0, MECHA_CONTROL_AI, 1) >= 0);
+        mecha_sim_begin_match(&s_World);
+        mecha_camera_reset(&s_Camera);
+        memset(aInputs, 0, sizeof(aInputs));
+        run_to_fight(aInputs);
+
+        /* Straight to zero armour, which is what spawns the death blast. */
+        mecha_sim_damage(&s_World, iPlayer, 1, 100000.0f, 0.0f, 0.0f, 0.0f);
+
+        /* Walk the blast's whole life and keep its widest frame. */
+        for (i = 0; i < MECHA_TICK_HZ; i++) {
+            render_now(pRenderer, iPlayer);
+            histogram(s_aFrame, aiPeak);
+            if (aiPeak[byBlast] > iPeak) {
+                iPeak = aiPeak[byBlast];
+                dump_frame(szOutDir, "arena_blast.png");
+            }
+            mecha_sim_tick(&s_World, aInputs, MECHA_MAX_MECHS);
+        }
+
+        printf("   death blast peaks at %d px, %.1f%% of the frame\n",
+               iPeak, 100.0 * iPeak / (double)(FRAME_W * FRAME_H));
+        CHECK(iPeak > 0);
+        CHECK(iPeak < FRAME_W * FRAME_H / 16);   /* under 6.25% */
+    }
+
     /* --- a knocked-down mech still renders ------------------------------- */
     {
         tMechaInput aInputs[MECHA_MAX_MECHS];
@@ -246,6 +336,75 @@ int main(int argc, char **argv)
         histogram(s_aFrame, aiCounts);
         dump_frame(szOutDir, "arena_down.png");
         CHECK(aiCounts[s_World.arena.bySkyPalette] != FRAME_W * FRAME_H);
+    }
+
+    /* --- the briefing screen draws ---------------------------------------
+     *
+     * It is the first thing the mode shows and the thing every match returns
+     * to, so a blank one strands the player with no way back to the race.
+     */
+    {
+        tMechaBriefing brief;
+        int aiBrief[256];
+        int i;
+
+        memset(&brief, 0, sizeof(brief));
+        brief.szResult = "LAST MATCH:  VICTORY";
+        brief.bResultWin = true;
+        brief.iSelection = 1;
+        brief.iRowCount = 6;
+        brief.aRows[0].szLabel = "START MATCH";
+        brief.aRows[1].szLabel = "YOUR MECH";
+        brief.aRows[1].szValue = mecha_def_get(0)->szName;
+        brief.aRows[2].szLabel = "OPPONENT";
+        brief.aRows[2].szValue = mecha_def_get(2)->szName;
+        brief.aRows[3].szLabel = "ARENA";
+        brief.aRows[3].szValue = mecha_arena_name(0);
+        brief.aRows[4].szLabel = "OPPONENT SKILL";
+        brief.aRows[4].szValue = mecha_sim_ai_skill_name(MECHA_AI_VETERAN);
+        brief.aRows[5].szLabel = "EXIT TO WHIPLASH";
+
+        memset(s_aFrame, 0xFF, sizeof(s_aFrame));
+        mecha_render_briefing(&brief, s_aFrame, FRAME_W, FRAME_H);
+        histogram(s_aFrame, aiBrief);
+        dump_frame(szOutDir, "arena_briefing.png");
+
+        /* Nothing left over from the frame before, and more than a fill. */
+        CHECK(aiBrief[255] == 0);
+        CHECK(distinct_colours(aiBrief) >= 4);
+
+        /*
+         * The screen has to fit, in both of the game's video modes. The
+         * footer is the last thing drawn, so anything that ran off the
+         * bottom took it first -- and the exit row sits just above it. The
+         * 320x200 case is the one that actually binds: twenty-five lines of
+         * this font is the entire buffer.
+         */
+        {
+            static uint8 aSmall[320 * 200];
+            int iLast = last_ink_row(s_aFrame, FRAME_W, FRAME_H);
+
+            CHECK(iLast > 0);
+            CHECK(iLast < FRAME_H - 2);
+
+            memset(aSmall, 0xFF, sizeof(aSmall));
+            mecha_render_briefing(&brief, aSmall, 320, 200);
+            iLast = last_ink_row(aSmall, 320, 200);
+            CHECK(iLast > 0);
+            CHECK(iLast < 198);
+            /* And it still drew the whole thing rather than shrinking to
+             * nothing: the rows have to be down there. */
+            CHECK(iLast > 150);
+        }
+
+        /* Every colour it paints with has to be one the mode's palette
+         * defines, or the screen presents as holes. Unlike the arena this
+         * can be checked backwards from the frame: the briefing draws no
+         * shaded geometry, so nothing else can put an index on screen. */
+        for (i = 0; i < 256; i++) {
+            if (aiBrief[i] > 0)
+                CHECK(mecha_render_palette_defines(i));
+        }
     }
 
     game_render_destroy(pRenderer);

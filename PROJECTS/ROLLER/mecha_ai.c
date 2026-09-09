@@ -22,9 +22,73 @@
 /* How long the pilot commits to a strafe direction before reconsidering. */
 #define MECHA_AI_STRAFE_TICKS 48
 
-/* A shot this close to passing through us is worth spending boost to avoid. */
-#define MECHA_AI_DODGE_MARGIN (4.0f * MECHA_METRE)
 #define MECHA_AI_DODGE_LOOKAHEAD 0.9f
+
+/*
+ * A shot this close to passing through us is worth spending boost to avoid.
+ *
+ * The same at every skill level, and deliberately so: scaling it with skill
+ * was tried and made the ladder run backwards. A pilot that dodges more
+ * dashes more, a dash changes its stance and swings it off the firing cone,
+ * and the boost it burns eventually locks out -- at which point it cannot
+ * dodge at all. Measured over five duels the wide-margin pilot both dealt
+ * less and absorbed more than the middle rung. Reaction time is the honest
+ * lever here; how near a miss has to be to be worth answering is not.
+ */
+#define MECHA_AI_DODGE_MARGIN (4.0f * MECHA_METRE)
+
+//-------------------------------------------------------------------------------------------------
+/*
+ * What separates the skill levels.
+ *
+ * The pilot reads the same world struct the simulation ticks, so it cannot
+ * be made worse by hiding things from it -- only by putting human limits
+ * back in. The numbers below were picked by measuring, not by taste, and
+ * what the measurements say is worth recording because it is not what the
+ * obvious design would predict.
+ *
+ * iAimError is the lever that works. Every weapon aims itself at whatever is
+ * locked, so with no error term the pilot fires a perfect solution every
+ * time; adding one makes it miss, and over twelve duels the damage it lands
+ * falls off cleanly once the error clears the target's own width -- about
+ * 23400 at zero, 19100 at nine degrees, 15500 at fourteen. Below roughly
+ * four degrees nothing happens at all: the shot radius and the target radius
+ * swallow the error. Past about fourteen the curve flattens again.
+ *
+ * iReactionTicks is not a strength lever, however much it looks like one.
+ * Sweeping it from zero to six tenths of a second moved the totals around
+ * inside the run-to-run variance and never in a consistent direction: a
+ * pilot that answers every shot the instant it is fired also dashes
+ * constantly, and dashing swings it off its own firing cone and drains the
+ * boost it needs to dodge with. It is kept because it changes how the pilot
+ * reads -- a rookie visibly flinches late -- not because it is what makes
+ * one harder to beat than another.
+ *
+ * iTriggerOdds barely touches the damage the pilot deals, but hesitating
+ * measurably raises what it absorbs, which is the half a losing player
+ * actually feels.
+ */
+typedef struct
+{
+  int iReactionTicks;  /* a shot is invisible to the pilot until this old */
+  int iAimError;       /* peak error either side of the firing solution */
+  int iTriggerOdds;    /* 1-in-N per tick of committing to a shot */
+} tMechaAiProfile;
+
+static const tMechaAiProfile s_aAiProfiles[MECHA_AI_SKILL_COUNT] = {
+  [MECHA_AI_ROOKIE]  = { MECHA_SEC(0.30f), MECHA_DEG(14), 8 },
+  [MECHA_AI_VETERAN] = { MECHA_SEC(0.20f), MECHA_DEG(9),  3 },
+  [MECHA_AI_ACE]     = { MECHA_SEC(0.15f), 0,             1 },
+};
+
+static const tMechaAiProfile *mecha_ai_profile(const tMechaWorld *pWorld)
+{
+  int iSkill = (int)pWorld->byAiSkill;
+
+  if (iSkill < 0 || iSkill >= MECHA_AI_SKILL_COUNT)
+    iSkill = MECHA_AI_VETERAN;
+  return &s_aAiProfiles[iSkill];
+}
 
 /* Only shoot when the shoulders are roughly square to the target; the lock
  * turns the mech at a fixed rate and firing early just sprays. */
@@ -76,7 +140,8 @@ static bool mecha_ai_has_line(const tMechaWorld *pWorld, int iMechIdx,
 
 /* Is anything hostile about to pass through us? Returns the sign of the
  * evasive strafe (-1 left, +1 right), or 0 when nothing needs dodging. */
-static int mecha_ai_incoming(const tMechaWorld *pWorld, int iMechIdx)
+static int mecha_ai_incoming(const tMechaWorld *pWorld, int iMechIdx,
+                             const tMechaAiProfile *pProfile)
 {
   const tMechaMech *pSelf = &pWorld->aMechs[iMechIdx];
   const tMechaMechDef *pDef = mecha_def_get((int)pSelf->byDefIdx);
@@ -99,6 +164,11 @@ static int mecha_ai_incoming(const tMechaWorld *pWorld, int iMechIdx)
     if (!pShot->bActive || (int)pShot->byOwner == iMechIdx)
       continue;
     if (pWorld->aMechs[pShot->byOwner].byTeam == pSelf->byTeam)
+      continue;
+    /* Nobody sees a shot the instant it leaves the muzzle. Without this the
+     * pilot is already stepping aside on the tick it was fired, which is
+     * what made it untouchable. */
+    if (pShot->iAge < pProfile->iReactionTicks)
       continue;
 
     fRelX = pSelf->fX - pShot->fX;
@@ -191,6 +261,7 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
   int iSlot;
   int iBearing;
   int iOff;
+  const tMechaAiProfile *pProfile;
   float fDistance;
   float fPreferred;
   float fBoost;
@@ -207,6 +278,7 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
   if (!mecha_mech_alive(pSelf))
     return;
   pDef = mecha_def_get((int)pSelf->byDefIdx);
+  pProfile = mecha_ai_profile(pWorld);
 
   /* The lock is refreshed after the pilot has already decided, so on the
    * opening tick it is still unset. */
@@ -273,7 +345,7 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
 
   /* --- evasion ---------------------------------------------------------- */
 
-  iDodge = mecha_ai_incoming(pWorld, iMechIdx);
+  iDodge = mecha_ai_incoming(pWorld, iMechIdx, pProfile);
   if (iDodge != 0 && fBoost > 0.2f) {
     pOut->iMoveX = iDodge * 100;
     pOut->iMoveZ = 0;
@@ -291,7 +363,23 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
 
   iSlot = mecha_ai_choose_weapon(pWorld, iMechIdx, fDistance, bHasLine);
   if (iSlot >= 0 && pSelf->iRecovery <= 0 && iOff <= MECHA_AI_FIRE_CONE
-      && !pSelf->abFireHeld[iSlot]) {
+      && !pSelf->abFireHeld[iSlot]
+      /* A moment's hesitation on the shot rather than the trigger coming
+       * down the instant the solution is good. */
+      && mecha_rng_range(&pWorld->rng, pProfile->iTriggerOdds) == 0) {
+    /*
+     * How badly this pilot is about to shoot. Rolled once per shot, on the
+     * shared RNG so the match still replays from its seed, and read by
+     * mecha_sim_fire after it has worked out where the target will be --
+     * every weapon aims itself at the lock, so this is the only thing that
+     * makes a computer pilot miss.
+     */
+    pWorld->aMechs[iMechIdx].iAimError =
+        pProfile->iAimError > 0
+          ? mecha_rng_range(&pWorld->rng, 2 * pProfile->iAimError + 1)
+            - pProfile->iAimError
+          : 0;
+
     switch (iSlot) {
     case MECHA_SLOT_LEFT:   pOut->bFireLeft = true; break;
     case MECHA_SLOT_CENTER: pOut->bFireCenter = true; break;

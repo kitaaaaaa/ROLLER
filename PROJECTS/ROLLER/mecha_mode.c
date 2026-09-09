@@ -11,8 +11,16 @@
 #include "frontend.h"
 #include "func2.h"
 #include "game_render.h"
+#include "graphics.h"
 #include "roller.h"
 #include "sound.h"
+
+#include <fcntl.h>
+#include <unistd.h>
+
+#ifndef O_BINARY
+#define O_BINARY 0
+#endif
 
 #include <SDL3/SDL.h>
 #include <string.h>
@@ -214,6 +222,35 @@ int mecha_mode_skill_count(void)
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * Whether the retail data is present, and so whether there is a game to
+ * leave for.
+ *
+ * The arena runs on its own -- that is the point of it -- but the menus it
+ * would hand control back to do not, and offering a way out that lands in a
+ * game which cannot load is worse than not offering one. Probed once: a
+ * missing install is not going to appear mid-match.
+ */
+static bool mecha_mode_retail_present(void)
+{
+  static bool s_bChecked;
+  static bool s_bPresent;
+  int iFile;
+
+  if (s_bChecked)
+    return s_bPresent;
+  s_bChecked = true;
+
+  iFile = ROLLERopen(gencartex_name, O_RDONLY | O_BINARY);
+  if (iFile != -1) {
+    close(iFile);
+    s_bPresent = true;
+  }
+  return s_bPresent;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 /* True on the frame a direction goes down, and again every repeat interval
  * while it stays down. */
 static bool mecha_mode_repeat(tMechaRepeat *pRepeat, bool bDown,
@@ -267,7 +304,8 @@ static void mecha_mode_build_briefing(tMechaBriefing *pBrief)
   pBrief->aRows[MECHA_ROW_ARENA].szValue = mecha_mode_arena_name(s_iArenaIdx);
   pBrief->aRows[MECHA_ROW_SKILL].szLabel = "OPPONENT SKILL";
   pBrief->aRows[MECHA_ROW_SKILL].szValue = mecha_mode_skill_name(s_iAiSkill);
-  pBrief->aRows[MECHA_ROW_EXIT].szLabel = "EXIT TO WHIPLASH";
+  pBrief->aRows[MECHA_ROW_EXIT].szLabel = mecha_mode_retail_present()
+                                           ? "EXIT TO WHIPLASH" : "QUIT";
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -460,8 +498,16 @@ static void mecha_mode_update_briefing(uint64 ullNowNs)
           && s_iBriefSelection == MECHA_ROW_EXIT)) {
     s_bBackHeld = bBack;
     s_bConfirmHeld = bConfirm;
-    SDL_Log("arena: leaving for the main menu");
-    frontend_set_state(eFRONTEND_STATE_MAIN_MENU);
+    /* Back to the game when there is one, and out of the process when there
+     * is not -- the menus cannot come up without the retail data, so sending
+     * anyone there would only crash somewhere less obvious. */
+    if (mecha_mode_retail_present()) {
+      SDL_Log("arena: leaving for the main menu");
+      frontend_set_state(eFRONTEND_STATE_MAIN_MENU);
+    } else {
+      SDL_Log("arena: no retail data present, quitting");
+      frontend_set_state(eFRONTEND_STATE_QUIT);
+    }
     return;
   }
 
@@ -581,13 +627,17 @@ void mecha_mode_exit(void)
     return;
 
   SDL_Log("arena: exiting");
-  if (s_bCreatedRenderer) {
-    game_render_destroy(g_pGameRenderer);
-    g_pGameRenderer = NULL;
-    s_bCreatedRenderer = false;
-  } else if (g_pGameRenderer) {
+  /*
+   * The renderer stays. This mode creates one when it is entered before any
+   * race has, and tearing it down on the way out used to null g_pGameRenderer
+   * -- which is the renderer the menus and the race then reach for, so
+   * leaving the arena crashed the moment anything else tried to draw. It is
+   * the same renderer play_game_init would have built; handing it on is the
+   * whole point of having built it.
+   */
+  s_bCreatedRenderer = false;
+  if (g_pGameRenderer)
     game_render_set_mode(g_pGameRenderer, s_ePreviousRenderMode);
-  }
 
   if (s_bPaletteInstalled) {
     memcpy(palette, s_aSavedPalette, sizeof(palette));

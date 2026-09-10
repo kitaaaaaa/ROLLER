@@ -408,6 +408,14 @@ typedef struct
   float fLeanRoll;
   float fStepPhase;
   /*
+   * How much of a fight the machine thinks it is in, 0 to 1. Held while it
+   * has a lock or is shooting, and let go of otherwise. Everything above the
+   * hips reads it: the stance settles and blades, and the guns come up.
+   * Nothing in the simulation reads it back, so a machine animating its way
+   * out of a fighting stance is never a machine that has stopped fighting.
+   */
+  float fCombat;
+  /*
    * Where the feet are pointed, which is not where the machine is pointed.
    * The torso holds the aim while the legs follow the line of travel, so a
    * mech strafing across your guns is walking sideways rather than sliding

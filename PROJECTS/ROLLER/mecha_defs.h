@@ -222,7 +222,14 @@
 
 #define MECHA_RAMP_LAUNCH_CLIMB MECHA_MPS(18.0f)
 
-#define MECHA_STRIDE_METRES     MECHA_M(3.6f)
+#define MECHA_STRIDE_METRES     MECHA_M(5.2f)
+
+/*
+ * How fast the machine brings its guns up and how slowly it puts them down,
+ * in fractions of the way there per second. See tMechaMech::fCombat.
+ */
+#define MECHA_COMBAT_RAISE      7.0f
+#define MECHA_COMBAT_LOWER      1.6f
 
 #define MECHA_DASH_COAST_TICKS  MECHA_SEC(0.55f)
 #define MECHA_COAST_ACCEL_SCALE 0.22f
@@ -251,6 +258,13 @@
 #define MECHA_ARM_PITCH_LIMIT  MECHA_DEG(38)
 #define MECHA_ARM_DROOP        MECHA_DEG(22)
 #define MECHA_ARM_RECOIL       MECHA_DEG(14)
+/*
+ * At rest the whole arm unfolds and hangs: the shoulder stops tracking, the
+ * elbow gives up all but this much of its right angle, and the gun ends up
+ * pointed at the floor beside the machine's own foot. It is the clearest
+ * read in the game for "this one is not shooting at you".
+ */
+#define MECHA_ARM_REST_ELBOW   MECHA_DEG(11)
 #define MECHA_HEAD_YAW_LIMIT   MECHA_DEG(38)
 #define MECHA_HEAD_PITCH_LIMIT MECHA_DEG(20)
 

@@ -1292,6 +1292,21 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
       fLean = (float)MECHA_DEG(3);
     pMech->fLeanRoll = mecha_approachf(pMech->fLeanRoll, fLean,
                                        (float)MECHA_DEG(40) * MECHA_DT);
+
+    /*
+     * Guns up, guns down. Bringing a weapon to bear is a snap and putting it
+     * away is not, so the two rates are nothing like each other: a machine
+     * that has just been shot at must not spend half a second raising its
+     * arms, and a machine that has merely lost sight of someone must not
+     * drop them the instant the lock breaks or the whole roster twitches.
+     */
+    {
+      bool bReady = pMech->byLock == MECHA_LOCK_HELD || pMech->iRecovery > 0;
+
+      pMech->fCombat = mecha_approachf(
+          pMech->fCombat, bReady ? 1.0f : 0.0f,
+          (bReady ? MECHA_COMBAT_RAISE : MECHA_COMBAT_LOWER) * MECHA_DT);
+    }
     /*
      * Metres per stride, and it is deliberately long. The machines cover
      * ground faster than they used to and a cycle tied tightly to distance
@@ -2301,6 +2316,7 @@ static void mecha_reset_mech_for_round(tMechaWorld *pWorld, int iMechIdx,
   pMech->bCycleHeld = false;
 
   pMech->fLeanRoll = 0.0f;
+  pMech->fCombat = 0.0f;
   pMech->fStepPhase = 0.0f;
   pMech->iLegYaw = pMech->iFacing;
   pMech->bLegsBackward = false;

@@ -1110,9 +1110,9 @@ static int test_guard_turns_melee_aside(void)
 //-------------------------------------------------------------------------------------------------
 
 /* How far apart the feet are, front to back, in the mech's own frame. */
-static void mesh_foot_span(const tMechaQuadList *pList,
-                           const tMechaMech *pMech, float fAnkle,
-                           float *pfLowZ, float *pfHighZ)
+static void mesh_foot_extent(const tMechaQuadList *pList,
+                             const tMechaMech *pMech, float fAnkle,
+                             bool bAcross, float *pfLow, float *pfHigh)
 {
     float fCos = mecha_cos(pMech->iFacing);
     float fSin = mecha_sin(pMech->iFacing);
@@ -1126,18 +1126,29 @@ static void mesh_foot_span(const tMechaQuadList *pList,
             float fY = pList->paQuads[i].afVert[v][1] - pMech->fY;
             float fDx = pList->paQuads[i].afVert[v][0] - pMech->fX;
             float fDz = pList->paQuads[i].afVert[v][2] - pMech->fZ;
-            float fLocalZ = fDx * fSin + fDz * fCos;
+            float fLocal = bAcross ? fDx * fCos - fDz * fSin
+                                   : fDx * fSin + fDz * fCos;
 
             if (fY > fAnkle)
                 continue;
-            if (fLocalZ < fLow)
-                fLow = fLocalZ;
-            if (fLocalZ > fHigh)
-                fHigh = fLocalZ;
+            if (fLocal < fLow)
+                fLow = fLocal;
+            if (fLocal > fHigh)
+                fHigh = fLocal;
         }
     }
-    *pfLowZ = fLow;
-    *pfHighZ = fHigh;
+    *pfLow = fLow;
+    *pfHigh = fHigh;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/* Fore and aft, which is the one the walk cycle is measured on. */
+static void mesh_foot_span(const tMechaQuadList *pList,
+                           const tMechaMech *pMech, float fAnkle,
+                           float *pfLowZ, float *pfHighZ)
+{
+    mesh_foot_extent(pList, pMech, fAnkle, false, pfLowZ, pfHighZ);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1274,8 +1285,15 @@ static int test_legs_walk_on_jointed_knees(void)
         CHECK(fBendDrop > -0.01f * pDef->fHeight);
     }
 
-    /* A stride that never opens is a pair of planks pivoting at the hip. */
-    CHECK(fStride > 0.35f * pDef->fRadius);
+    /*
+     * A stride that never opens is a pair of planks pivoting at the hip,
+     * and a short one is a big machine mincing. Measured against the
+     * machine's own height rather than a number, because that is what makes
+     * it read as a stride at all: two thirds of its height between its feet
+     * at full reach, which the mincing version it replaced could not make.
+     */
+    printf("   stride is %.2f of standing height\n", fStride / pDef->fHeight);
+    CHECK(fStride > 0.70f * pDef->fHeight);
 
     /*
      * And the knee bends the way a person's does. At phase zero the left
@@ -1343,7 +1361,7 @@ static bool clear_runway(tMechaWorld *pWorld, int iFacing);
 
 /* Widest fore-and-aft spread the feet reach anywhere in a cycle. */
 static float gait_reach(tMechaWorld *pWorld, int iMechIdx,
-                        tMechaQuad *paStorage)
+                        tMechaQuad *paStorage, bool bAcross)
 {
     const tMechaMechDef *pDef =
         mecha_def_get((int)pWorld->aMechs[iMechIdx].byDefIdx);
@@ -1352,18 +1370,18 @@ static float gait_reach(tMechaWorld *pWorld, int iMechIdx,
     int iStep;
 
     for (iStep = 0; iStep < 16; iStep++) {
-        float fLowZ;
-        float fHighZ;
+        float fLow;
+        float fHigh;
 
         pWorld->aMechs[iMechIdx].fStepPhase = (float)iStep / 16.0f;
         pWorld->iTick = iStep * 3;
         mecha_quads_reset(&list, paStorage, MECHA_QUAD_CAPACITY);
         mecha_mesh_mech(&list, pWorld, iMechIdx);
-        mesh_foot_span(&list, &pWorld->aMechs[iMechIdx],
-                       pWorld->aMechs[iMechIdx].fY + 0.16f * pDef->fHeight,
-                       &fLowZ, &fHighZ);
-        if (fHighZ - fLowZ > fWidest)
-            fWidest = fHighZ - fLowZ;
+        mesh_foot_extent(&list, &pWorld->aMechs[iMechIdx],
+                         pWorld->aMechs[iMechIdx].fY + 0.16f * pDef->fHeight,
+                         bAcross, &fLow, &fHigh);
+        if (fHigh - fLow > fWidest)
+            fWidest = fHigh - fLow;
     }
     return fWidest;
 }
@@ -1434,17 +1452,172 @@ static float gait_apart(const float *pafA, const float *pafB, int iCount)
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * The boxes the arm chain emits, in the order the builder emits them: two
+ * legs of four boxes each, four for the torso, then five a side for the
+ * arms -- pauldron, upper, elbow, forearm, gun. Taking the gun by its place
+ * in that order is the same trick gait_capture uses and rests on the same
+ * thing: the builder emits a fixed skeleton in a fixed order, so a box can
+ * be named by counting.
+ */
+#define MESH_BOX_GUN_LEFT  16
+#define MESH_BOX_GUN_RIGHT 21
+
+/* Where a named box sits, in the machine's own frame. */
+static void mesh_box_centre(const tMechaQuadList *pList,
+                            const tMechaMech *pMech, int iBox, float *pfY,
+                            float *pfForward)
+{
+    float fCos = mecha_cos(pMech->iFacing);
+    float fSin = mecha_sin(pMech->iFacing);
+    float fY = 0.0f;
+    float fZ = 0.0f;
+    int i;
+    int v;
+
+    for (i = iBox * 6; i < iBox * 6 + 6 && i < pList->iCount; i++) {
+        for (v = 0; v < 4; v++) {
+            float fDx = pList->paQuads[i].afVert[v][0] - pMech->fX;
+            float fDz = pList->paQuads[i].afVert[v][2] - pMech->fZ;
+
+            fY += pList->paQuads[i].afVert[v][1] - pMech->fY;
+            fZ += fDx * fSin + fDz * fCos;
+        }
+    }
+    *pfY = fY / 24.0f;
+    *pfForward = fZ / 24.0f;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_a_machine_at_ease_lowers_its_arms(void)
+{
+    static tMechaQuad aStorage[MECHA_QUAD_CAPACITY];
+    tMechaQuadList list;
+    tMechaWorld world;
+    const tMechaMechDef *pDef;
+    float afY[2];
+    float afForward[2];
+    int iPass;
+
+    start_duel(&world, 0, 0, 0, 0x4A11u, 1);
+    pDef = mecha_def_get((int)world.aMechs[0].byDefIdx);
+    world.aMechs[0].byMove = MECHA_MOVE_STAND;
+    world.aMechs[0].byLock = MECHA_LOCK_HELD;
+    world.aMechs[0].iTargetIdx = 1;
+
+    for (iPass = 0; iPass < 2; iPass++) {
+        float afLeft[2];
+
+        /* Guns up, then guns down; nothing else about the machine changes. */
+        world.aMechs[0].fCombat = iPass == 0 ? 1.0f : 0.0f;
+        mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
+        mecha_mesh_mech(&list, &world, 0);
+        CHECK(list.iCount > MESH_BOX_GUN_RIGHT * 6 + 6);
+        mesh_box_centre(&list, &world.aMechs[0], MESH_BOX_GUN_LEFT,
+                        &afLeft[0], &afLeft[1]);
+        mesh_box_centre(&list, &world.aMechs[0], MESH_BOX_GUN_RIGHT,
+                        &afY[iPass], &afForward[iPass]);
+        afY[iPass] = 0.5f * (afY[iPass] + afLeft[0]);
+        afForward[iPass] = 0.5f * (afForward[iPass] + afLeft[1]);
+    }
+
+    printf("   guns: %.2f high and %.2f forward ready, %.2f and %.2f at"
+           " ease (of height)\n", afY[0] / pDef->fHeight,
+           afForward[0] / pDef->fHeight, afY[1] / pDef->fHeight,
+           afForward[1] / pDef->fHeight);
+    /*
+     * Down, and in. A machine that is neither locked on nor shooting drops
+     * the whole chain -- the shoulder stops tracking, the elbow unfolds --
+     * so the guns end up beside its own knees instead of levelled at you.
+     * That is the read the player gets from across an arena.
+     */
+    CHECK(afY[1] < afY[0] - 0.12f * pDef->fHeight);
+    CHECK(afForward[1] < afForward[0] - 0.10f * pDef->fHeight);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_a_machine_with_a_lock_settles_into_it(void)
+{
+    static tMechaQuad aStorage[MECHA_QUAD_CAPACITY];
+    tMechaQuadList list;
+    tMechaWorld world;
+    const tMechaMechDef *pDef;
+    float afHead[2];
+    float afAcross[2];
+    int iPass;
+
+    start_duel(&world, 0, 0, 0, 0x57A0u, 1);
+    pDef = mecha_def_get((int)world.aMechs[0].byDefIdx);
+    world.aMechs[0].byMove = MECHA_MOVE_STAND;
+
+    for (iPass = 0; iPass < 2; iPass++) {
+        float fLow;
+        float fHigh;
+        float fX;
+        float fZ;
+        float fMinY;
+        int iTick;
+        int iFrames = 0;
+
+        world.aMechs[0].fCombat = iPass == 0 ? 0.0f : 1.0f;
+        afHead[iPass] = 0.0f;
+        afAcross[iPass] = 0.0f;
+        /* Over a whole breath, since the stance is a pose with a slow rock
+         * in it rather than a still frame. */
+        for (iTick = 0; iTick < 120; iTick += 5) {
+            world.iTick = iTick;
+            mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
+            mecha_mesh_mech(&list, &world, 0);
+            mesh_foot_extent(&list, &world.aMechs[0],
+                             world.aMechs[0].fY + 0.09f * pDef->fHeight,
+                             true, &fLow, &fHigh);
+            if (fHigh - fLow > afAcross[iPass])
+                afAcross[iPass] = fHigh - fLow;
+            afHead[iPass] += mesh_highest(&list) - world.aMechs[0].fY;
+            iFrames++;
+
+            /*
+             * And it never stands on one foot to do it. The stance is the
+             * one pose in the game where both feet are meant to be planted
+             * at once, which is the whole reason the hips take up the slack
+             * in roll rather than the knees.
+             */
+            mesh_band_centroid(&list, &world.aMechs[0], 0.0f,
+                               0.09f * pDef->fHeight, &fX, &fZ, &fMinY);
+            CHECK(fMinY > -0.01f * pDef->fHeight);
+            CHECK(fMinY < 0.02f * pDef->fHeight);
+        }
+        afHead[iPass] /= (float)iFrames;
+    }
+
+    printf("   stance: head %.0f at ease and %.0f squared up, feet %.0f"
+           " across and %.0f\n", afHead[0], afHead[1], afAcross[0],
+           afAcross[1]);
+    /* Lower and wider with someone to fight: it settles rather than
+     * standing to attention. */
+    CHECK(afHead[1] < afHead[0] * 0.97f);
+    CHECK(afAcross[1] > afAcross[0] * 1.12f);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static int test_the_legs_have_four_gaits(void)
 {
     static tMechaQuad aStorage[MECHA_QUAD_CAPACITY];
     static float aafPose[4][4096];
-    static const char *const kaszGait[4] = { "walk", "sprint", "air",
+    static const char *const kaszGait[4] = { "walk", "glide", "air",
                                              "air dash" };
     tMechaWorld world;
     const tMechaMechDef *pDef;
     int aiCount[4];
     float fWalkReach;
-    float fSprintReach;
+    float fWalkAcross;
+    float fGlideReach;
+    float fGlideAcross;
     int iGait;
     int iOther;
 
@@ -1455,7 +1628,7 @@ static int test_the_legs_have_four_gaits(void)
     world.iTick = 7;
 
     for (iGait = 0; iGait < 4; iGait++) {
-        /* Walk, sprint, hang, air dash -- the last two off the ground. */
+        /* Walk, glide, hang, air dash -- the last two off the ground. */
         world.aMechs[0].fY = iGait >= 2 ? MECHA_M(12.0f) : 0.0f;
         world.aMechs[0].byMove = (iGait == 1 || iGait == 3)
                                  ? MECHA_MOVE_DASH
@@ -1484,15 +1657,26 @@ static int test_the_legs_have_four_gaits(void)
         }
     }
 
-    /* And a sprint reaches further than a walk does. */
+    /*
+     * And a boost on the ground is a glide, not a run. That is not a
+     * subjective claim about how it looks: a runner's feet pass each other
+     * fore and aft and a skater's go out to the side, so the glide has to
+     * come out narrower than the walk down the line of travel and wider
+     * than it across.
+     */
     world.aMechs[0].fY = 0.0f;
     world.aMechs[0].byMove = MECHA_MOVE_WALK;
-    fWalkReach = gait_reach(&world, 0, aStorage);
+    fWalkReach = gait_reach(&world, 0, aStorage, false);
+    fWalkAcross = gait_reach(&world, 0, aStorage, true);
     world.aMechs[0].byMove = MECHA_MOVE_DASH;
-    fSprintReach = gait_reach(&world, 0, aStorage);
-    printf("   foot spread: walk %.1f m, sprint %.1f m\n",
-           fWalkReach / MECHA_METRE, fSprintReach / MECHA_METRE);
-    CHECK(fSprintReach > fWalkReach * 1.25f);
+    fGlideReach = gait_reach(&world, 0, aStorage, false);
+    fGlideAcross = gait_reach(&world, 0, aStorage, true);
+    printf("   walk: %.1f m along, %.1f m across; glide: %.1f m along,"
+           " %.1f m across\n", fWalkReach / MECHA_METRE,
+           fWalkAcross / MECHA_METRE, fGlideReach / MECHA_METRE,
+           fGlideAcross / MECHA_METRE);
+    CHECK(fGlideReach < fWalkReach * 0.8f);
+    CHECK(fGlideAcross > fWalkAcross * 1.15f);
     return 0;
 }
 
@@ -3816,6 +4000,10 @@ int main(void)
         { "guard turns melee aside", test_guard_turns_melee_aside },
         { "legs walk on jointed knees", test_legs_walk_on_jointed_knees },
         { "the legs have four gaits", test_the_legs_have_four_gaits },
+        { "a machine at ease lowers its arms",
+          test_a_machine_at_ease_lowers_its_arms },
+        { "a machine with a lock settles into it",
+          test_a_machine_with_a_lock_settles_into_it },
         { "dashing squares the legs to the burst",
           test_dashing_squares_the_legs_to_the_burst },
         { "a cancel drops like a stone", test_a_cancel_drops_like_a_stone },

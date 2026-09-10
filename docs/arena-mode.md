@@ -173,6 +173,48 @@ Both are read every frame, so either works at any time.
   needs to dodge with. The comment above `s_aAiProfiles` in `mecha_ai.c` has
   the figures.
 
+- **Standing is a pose, not a default.** A machine with nobody to fight
+  stands with its feet apart and its knees off the lock; give it a lock to
+  hold and it settles into the fight -- lower, wider, one foot forward.
+  Neither is animated as such: the two are the ends of one blend that
+  `tMechaMech::fCombat` drives, and the only movement in either is a slow
+  rock of the weight from one foot to the other. Measured off the mesh, the
+  fighting stance stands five per cent lower and thirty per cent wider than
+  the neutral one.
+- **Guns come up fast and go down slowly.** An arm that is neither locked on
+  nor shooting unfolds and hangs: the shoulder stops tracking, the elbow
+  gives up its right angle, and the gun ends up beside the machine's own
+  knee -- half the height and a sixth of the reach it has when levelled at
+  you. It is the clearest read in the game for which of two machines across
+  the arena is about to shoot. Raising takes about an eighth of a second and
+  lowering the better part of one, because a machine that has just been shot
+  at must not spend half a second getting ready and a machine that has
+  merely lost sight of someone must not drop its guard the instant the lock
+  breaks.
+- **Boosting on the ground is a glide, not a run.** The thrusters are doing
+  the work, so the legs are not driving the machine anywhere -- they hold it
+  up and steer it, which is a skater's problem and not a runner's. Both
+  knees stay bent, the weight stays low, and one leg at a time reaches out
+  to the side and back in a long push while the other glides underneath.
+  Measured against the walk it is a fifth narrower fore and aft and half
+  again as wide across, which is the difference between feet that pass each
+  other and feet that go out to the side.
+- **Both feet stay on the floor, and the hips are what pay for it.** A
+  stance and a glide are poses the machine holds rather than cycles it steps
+  through, so neither may leave a foot hanging in the air. The leg that
+  reaches further takes the difference out in hip roll -- it splays until
+  its foot is back down -- which is not a fudge but the shape itself: a
+  skater at full stretch has its pushing leg out to the side precisely
+  because that leg is straight. The roll is a frame of its own above the
+  thigh, because rolled-then-swung puts the foot exactly `cos(roll)` of the
+  way down and swung-then-rolled does not, and the ankle takes the same roll
+  back so the sole stays flat instead of driving its inner corner through
+  the ground.
+- **Joints stand proud of the limbs they join.** A knee the same width as
+  the shin below it has coplanar side faces with it the moment the joint
+  passes through straight, and with no depth buffer there is nothing to sort
+  that out; a knee that bulges is both the fix and what the reference art
+  draws anyway.
 - **Machines read by silhouette.** Each carries build multipliers for
   shoulder, torso, limb, head and gun, so a siege platform is wide and
   thick-limbed with an oversized gun on each arm while an interceptor is a
@@ -212,10 +254,11 @@ Both are read every frame, so either works at any time.
   length of the call and puts it back. The nine-band sunset gradient this
   replaced was the mode inventing a sky the engine already had.
 - **The machines move faster than they animate.** Speeds went up by about a
-  third across the roster, and a stride is 3.6 metres of ground rather than
+  third across the roster, and a stride is 5.2 metres of ground rather than
   two: tying the cycle tightly to distance turned the extra speed into a
   sprint of little steps, where a longer stride reads as something heavy
-  moving quickly.
+  moving quickly. The legs reach to match -- at full stretch there is
+  seven tenths of the machine's own standing height between its feet.
 - **A boost is a committed act.** The button starts a burst and does not
   hold it up: once it is running, only the clock, an empty gauge, a jump or
   a wall ends it. Letting go does nothing, which is what makes a dash
@@ -261,23 +304,24 @@ Both are read every frame, so either works at any time.
   has to squat deep to lower anything at all, because the knee travels
   forward as far as the hip drops and the two cosines all but cancel until
   the angles get large.
-- **Four gaits, not one.** Walking and sprinting are cycles; hanging in the
-  air and driving through it are poses with a slow sway in them. A sprint
-  reaches half again as far as a walk and folds the knee twice as hard,
-  including the leg that is pushing. Hanging is not a tuck -- a tuck is what
-  you do to clear something -- but a machine with its weight off its feet:
-  one leg reaching a little, one trailing, both knees soft. An air dash is
-  half of each, the lead leg reaching the way a sprint's does because the
-  machine is being driven somewhere, the other hanging because there is
-  nothing under it to push against. Measured pose against pose, the six
-  pairings are between one and four metres apart at their furthest point.
-- **A sprint is timed, not paced.** Every other cycle here runs on ground
+- **Six gaits, not one.** Standing and gliding are poses the machine holds;
+  walking is a cycle it steps through; hanging in the air and driving
+  through it are poses with a slow sway in them. Hanging is not a tuck -- a
+  tuck is what you do to clear something -- but a machine with its weight
+  off its feet: one leg reaching a little, one trailing, both knees soft. An
+  air dash is half of each: the lead leg holds a glide's edge because the
+  machine is being driven somewhere, the other hangs because there is
+  nothing under either of them to push against. Measured pose against pose,
+  the pairings are between one and four metres apart at their furthest
+  point, which is what says they are actually different shapes rather than
+  the same shape at different speeds.
+- **A glide is timed, not paced.** Every other cycle here runs on ground
   covered, which is what makes a heavy machine take slow steps without
-  anything having to say so. A boost breaks that: at fifty metres a second a
-  stride every 3.6 metres is fifteen cycles a second, and legs moving that
-  fast are a grey blur. So the sprint runs on its own clock at a shade over
-  three strides a second, and reads as running flat out whatever the
-  thrusters are giving.
+  anything having to say so. A boost breaks that: at seventy metres a second
+  a stroke every five metres is fourteen cycles a second, and legs moving
+  that fast are a grey blur. So the glide runs on its own clock -- one long
+  push every two thirds of a second, which is most of what makes it read as
+  gliding rather than sprinting.
 - **A boost squares the legs to itself.** Strafing is held to 52 degrees off
   the shoulders, because feet pointed further round than that are not
   strafing. A dash is not a strafe -- the machine is being driven bodily one

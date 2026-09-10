@@ -623,10 +623,19 @@ void mecha_mesh_arena(tMechaQuadList *pList, const tMechaArena *pArena)
 /* How far the body is tipped over. Falling and getting up are both driven
  * off the simulation's own timers, so the animation can never disagree with
  * when the mech is actually helpless. */
+/* One angle towards another, for poses that are held rather than cycled. */
+static int mecha_blend_angle(int iFrom, int iTo, float fAmount)
+{
+  return iFrom + (int)((float)(iTo - iFrom) * mecha_clampf(fAmount, 0.0f,
+                                                           1.0f));
+}
+
+//-------------------------------------------------------------------------------------------------
+
 /*
  * The walk cycle.
  *
- * fStepPhase counts distance rather than time -- one cycle every two metres
+ * fStepPhase counts distance rather than time -- one cycle every five metres
  * -- so a machine that stops mid-stride stops mid-stride, and a heavy one
  * that covers ground slowly takes slow steps without anything having to say
  * so. The thigh swings as a sine of the phase; the knee bends through the
@@ -637,12 +646,40 @@ void mecha_mesh_arena(tMechaQuadList *pList, const tMechaArena *pArena)
  * Angles are positive forward, and the caller negates them for the pose,
  * because a positive pitch in the pose matrix swings a limb backwards.
  */
-#define MECHA_LEG_SWING   MECHA_DEG(27)
-#define MECHA_LEG_KNEE    MECHA_DEG(48)
-/* A sprint is the walk with everything turned up: the thigh reaches
- * further, the knee folds harder, and even the pushing leg bends. */
-#define MECHA_LEG_RUN     MECHA_DEG(46)
-#define MECHA_LEG_RUNKNEE MECHA_DEG(78)
+#define MECHA_LEG_SWING   MECHA_DEG(41)
+#define MECHA_LEG_KNEE    MECHA_DEG(56)
+/*
+ * Standing, and standing with someone to fight.
+ *
+ * A machine at ease has its feet apart and its knees off the lock; give it a
+ * lock to hold and it settles -- lower, wider, one foot forward -- without
+ * any of it being animated as such. The lead angle breathes, which rocks the
+ * weight slowly from one foot to the other, and that breath is the only
+ * movement in either pose.
+ */
+#define MECHA_STAND_LEAD   MECHA_DEG(5)
+#define MECHA_STAND_KNEE   MECHA_DEG(9)
+#define MECHA_STAND_SPLAY  MECHA_DEG(5)
+#define MECHA_FIGHT_LEAD   MECHA_DEG(13)
+#define MECHA_FIGHT_KNEE   MECHA_DEG(25)
+#define MECHA_FIGHT_SPLAY  MECHA_DEG(11)
+#define MECHA_STANCE_BREATH MECHA_DEG(3)
+/*
+ * Boosting on the ground is not running.
+ *
+ * The thrusters are doing the work, so the legs are not driving the machine
+ * anywhere -- they are holding it up and steering it, which is a skater's
+ * problem and not a runner's. So: both knees bent through the whole cycle,
+ * the weight low, and one leg at a time reaching out to the side and back in
+ * a long push while the other glides underneath. The pushing leg straightens
+ * as it goes out, exactly as a skater's does, and that is what lets it stay
+ * on the floor at full stretch.
+ */
+#define MECHA_SKATE_KNEE    MECHA_DEG(34)
+#define MECHA_SKATE_PUSH    MECHA_DEG(20)
+#define MECHA_SKATE_GATHER  MECHA_DEG(11)
+#define MECHA_SKATE_EDGE    MECHA_DEG(9)
+#define MECHA_SKATE_TICKS   40
 /*
  * Hanging. Not a tuck -- a tuck is what you do to clear something -- but a
  * machine with its weight off its feet: one leg reaching a little, the
@@ -655,35 +692,51 @@ void mecha_mesh_arena(tMechaQuadList *pList, const tMechaArena *pArena)
 /* A guard is a squat, and a human squat has to be deep to lower anything:
  * the knee travels forward as far as the hip drops, so the two cosines all
  * but cancel until the angles get large. Bird-legged, half of this was
- * enough; on a knee that bends the right way it is not. */
-#define MECHA_LEG_SQUAT   MECHA_DEG(45)
-#define MECHA_LEG_SQKNEE  MECHA_DEG(90)
+ * enough; on a knee that bends the right way it is not -- and it went
+ * deeper again once standing stopped being a machine on locked knees, since
+ * a crouch is only a crouch relative to whatever the machine does the rest
+ * of the time. */
+#define MECHA_LEG_SQUAT   MECHA_DEG(54)
+#define MECHA_LEG_SQKNEE  MECHA_DEG(108)
 
 /*
  * What the legs are doing, which is not the same question as what the
- * machine is doing. Walking and sprinting are cycles; the two airborne
- * shapes and the squat are poses with a little movement in them.
+ * machine is doing. Walking is a cycle; a stance, a glide, the two
+ * airborne shapes and the squat are poses with a little movement in them.
  */
 #define MECHA_GAIT_WALK    0
-#define MECHA_GAIT_SPRINT  1
+#define MECHA_GAIT_SKATE   1
 #define MECHA_GAIT_AIR     2
 #define MECHA_GAIT_AIRDASH 3
 #define MECHA_GAIT_GUARD   4
+#define MECHA_GAIT_STANCE  5
 
 /*
- * A sprint runs on its own clock rather than on ground covered.
+ * A glide runs on its own clock rather than on ground covered.
  *
  * Every other cycle here is paced by distance, which is what makes a heavy
  * machine take slow steps without anything having to say so. A boost breaks
- * that: at fifty metres a second, a stride every 3.6 metres is fifteen
- * cycles a second, and legs moving that fast are a grey blur. So the sprint
- * is timed instead -- a shade over three strides a second, which reads as
- * running flat out at whatever speed the thrusters happen to be giving.
+ * that: at seventy metres a second, one stroke every five metres is fourteen
+ * cycles a second, and legs moving that fast are a grey blur. So the glide
+ * is timed instead -- one long push every two thirds of a second, which is
+ * what makes it read as gliding rather than as sprinting.
  */
-#define MECHA_SPRINT_TICKS 18
 
+/* Whether both feet are meant to be on the floor throughout. A stance and a
+ * glide are poses the machine holds; a walk is a cycle it steps through, and
+ * a leg that never leaves the floor is not a leg that is walking. */
+static bool mecha_gait_plants(int iGait)
+{
+  return iGait == MECHA_GAIT_STANCE || iGait == MECHA_GAIT_SKATE;
+}
+
+/*
+ * iSide 0 is the left leg. piRoll comes back positive for a hip rolled
+ * outwards, which the caller signs for the side it is building.
+ */
 static void mecha_leg_angles(int iGait, float fPhase, int iSide, int iTick,
-                             int *piThigh, int *piKnee)
+                             float fCombat, int *piThigh, int *piKnee,
+                             int *piRoll)
 {
   int iAngle = (int)(fPhase * (float)MECHA_ANGLE_FULL) & (MECHA_ANGLE_FULL - 1);
   float fCos = mecha_cos(iAngle);
@@ -693,7 +746,47 @@ static void mecha_leg_angles(int iGait, float fPhase, int iSide, int iTick,
                     * mecha_sin(mecha_angle_wrap(iTick * 90
                                                  + iSide * MECHA_ANGLE_HALF)));
 
+  *piRoll = 0;
   switch (iGait) {
+  case MECHA_GAIT_STANCE: {
+    /*
+     * The lead angle breathes rather than the knees, so the machine rocks
+     * its weight between its feet instead of bobbing on the spot, and the
+     * left foot is the one that leads.
+     */
+    float fLead = iSide == 0 ? 1.0f : -1.0f;
+    int iBreath = (int)((float)MECHA_STANCE_BREATH
+                        * mecha_sin(mecha_angle_wrap(iTick * 70)));
+
+    *piThigh = (int)(fLead * (float)(mecha_blend_angle(MECHA_STAND_LEAD,
+                                                       MECHA_FIGHT_LEAD,
+                                                       fCombat)
+                                     + iBreath));
+    *piKnee = mecha_blend_angle(MECHA_STAND_KNEE, MECHA_FIGHT_KNEE, fCombat);
+    *piRoll = mecha_blend_angle(MECHA_STAND_SPLAY, MECHA_FIGHT_SPLAY,
+                                fCombat);
+    return;
+  }
+
+  case MECHA_GAIT_SKATE: {
+    /*
+     * One stroke a cycle, the two legs opposite each other: the pushing leg
+     * swings back and straightens while the gliding leg gathers underneath
+     * and folds. The push also rolls the hip out; how far it ends up rolled
+     * is not decided here, because the foot has to finish on the floor.
+     */
+    float fPush = mecha_sin(iAngle);
+    float fOut = fPush > 0.0f ? fPush : 0.0f;
+    float fIn = fPush < 0.0f ? -fPush : 0.0f;
+
+    *piThigh = (int)((float)MECHA_SKATE_GATHER * fIn
+                     - (float)MECHA_SKATE_PUSH * fOut);
+    *piKnee = (int)((float)MECHA_SKATE_KNEE * (1.0f - 0.6f * fOut)
+                    + (float)MECHA_SKATE_KNEE * 0.45f * fIn);
+    *piRoll = MECHA_SKATE_EDGE;
+    return;
+  }
+
   case MECHA_GAIT_GUARD:
     *piThigh = MECHA_LEG_SQUAT;
     *piKnee = MECHA_LEG_SQKNEE;
@@ -711,26 +804,19 @@ static void mecha_leg_angles(int iGait, float fPhase, int iSide, int iTick,
 
   case MECHA_GAIT_AIRDASH:
     /*
-     * Half of each. The lead leg reaches the way a sprint's does, because
-     * the machine is being driven somewhere; the other hangs, because there
-     * is nothing under it to push against.
+     * Half of each. The lead leg holds a glide's edge, because the machine
+     * is being driven somewhere and is braced against it; the other hangs,
+     * because there is nothing under either of them to push against.
      */
     if (iSide == 0) {
-      *piThigh = MECHA_LEG_RUN * 3 / 4 + iSway;
-      *piKnee = MECHA_LEG_RUNKNEE / 2;
+      *piThigh = -MECHA_SKATE_PUSH + iSway;
+      *piKnee = MECHA_SKATE_KNEE / 2;
+      *piRoll = MECHA_SKATE_EDGE * 2;
     } else {
-      *piThigh = -MECHA_LEG_TRAIL - MECHA_DEG(6) + iSway;
+      *piThigh = MECHA_LEG_TRAIL + MECHA_DEG(6) + iSway;
       *piKnee = MECHA_LEG_TRAILKNEE + MECHA_DEG(10);
+      *piRoll = MECHA_SKATE_EDGE;
     }
-    return;
-
-  case MECHA_GAIT_SPRINT:
-    *piThigh = (int)((float)MECHA_LEG_RUN * mecha_sin(iAngle));
-    /* Even the pushing leg folds a little at a run, where a walk leaves it
-     * straight through the whole of its stance. */
-    *piKnee = fCos > 0.0f
-              ? (int)((float)MECHA_LEG_RUNKNEE * fCos)
-              : (int)((float)MECHA_LEG_RUNKNEE * -0.18f * fCos);
     return;
 
   default:
@@ -877,6 +963,7 @@ void mecha_mesh_mech(tMechaQuadList *pList, const tMechaWorld *pWorld,
   float fLift = 0.0f;
   int aiThigh[2];
   int aiKnee[2];
+  int aiRoll[2];
   int iSide;
   int iRoll;
   bool bAirborne;
@@ -943,34 +1030,64 @@ void mecha_mesh_mech(tMechaQuadList *pList, const tMechaWorld *pWorld,
     else if (bDash && bAirborne)
       iGait = MECHA_GAIT_AIRDASH;
     else if (bDash)
-      iGait = MECHA_GAIT_SPRINT;
+      iGait = MECHA_GAIT_SKATE;
     else if (bAirborne)
       iGait = MECHA_GAIT_AIR;
-    else
+    else if (pMech->byMove == MECHA_MOVE_WALK)
       iGait = MECHA_GAIT_WALK;
+    else
+      iGait = MECHA_GAIT_STANCE;
 
     if (pMech->bLegsBackward)
       fPhase = 1.0f - fPhase;
-    /* The sprint is timed rather than paced by the ground it covers; see
-     * MECHA_SPRINT_TICKS. */
-    if (iGait == MECHA_GAIT_SPRINT)
-      fPhase = (float)(pWorld->iTick % MECHA_SPRINT_TICKS)
-               / (float)MECHA_SPRINT_TICKS;
+    /* The glide is timed rather than paced by the ground it covers; see
+     * MECHA_SKATE_TICKS. */
+    if (iGait == MECHA_GAIT_SKATE)
+      fPhase = (float)(pWorld->iTick % MECHA_SKATE_TICKS)
+               / (float)MECHA_SKATE_TICKS;
     fLegSpan = 0.47f * fHeight - fAnkle;
     fThighLen = 0.52f * fLegSpan;
     fShinLen = fLegSpan - fThighLen;
 
-    mecha_leg_angles(iGait, fPhase, 0, pWorld->iTick, &aiThigh[0],
-                     &aiKnee[0]);
-    mecha_leg_angles(iGait, fPhase + 0.5f, 1, pWorld->iTick, &aiThigh[1],
-                     &aiKnee[1]);
+    mecha_leg_angles(iGait, fPhase, 0, pWorld->iTick, pMech->fCombat,
+                     &aiThigh[0], &aiKnee[0], &aiRoll[0]);
+    mecha_leg_angles(iGait, fPhase + 0.5f, 1, pWorld->iTick, pMech->fCombat,
+                     &aiThigh[1], &aiKnee[1], &aiRoll[1]);
     if (!bAirborne) {
-      float fLeft = mecha_leg_reach(aiThigh[0], aiKnee[0], fThighLen,
-                                    fShinLen);
-      float fRight = mecha_leg_reach(aiThigh[1], aiKnee[1], fThighLen,
-                                     fShinLen);
+      float afReach[2];
 
-      fLift = (fLeft > fRight ? fLeft : fRight) - fLegSpan;
+      for (iSide = 0; iSide < 2; iSide++)
+        afReach[iSide] = mecha_leg_reach(aiThigh[iSide], aiKnee[iSide],
+                                         fThighLen, fShinLen);
+
+      if (mecha_gait_plants(iGait)) {
+        /*
+         * Both feet down. The floor is as far as the shorter leg can reach
+         * once its own hip roll is counted, and the other leg makes up the
+         * difference by rolling further out -- which is not a fudge, it is
+         * how the pose works: a skater at full stretch has its pushing leg
+         * out to the side precisely because it is straight, and a machine
+         * standing with its feet apart has its hips open for the same
+         * reason. Take the difference out of the knees instead and the
+         * stance has no width to it.
+         */
+        float fFloor = afReach[0] * mecha_cos(aiRoll[0]);
+        float fOther = afReach[1] * mecha_cos(aiRoll[1]);
+
+        if (fOther < fFloor)
+          fFloor = fOther;
+        for (iSide = 0; iSide < 2; iSide++) {
+          float fWant = afReach[iSide] > 0.0f ? fFloor / afReach[iSide]
+                                              : 1.0f;
+
+          aiRoll[iSide] = (int)(acosf(mecha_clampf(fWant, -1.0f, 1.0f))
+                                * (float)MECHA_ANGLE_FULL / 6.28318531f);
+        }
+        fLift = fFloor - fLegSpan;
+      } else {
+        fLift = (afReach[0] > afReach[1] ? afReach[0] : afReach[1])
+                - fLegSpan;
+      }
     }
   }
 
@@ -986,20 +1103,42 @@ void mecha_mesh_mech(tMechaQuadList *pList, const tMechaWorld *pWorld,
   /* --- legs -------------------------------------------------------------- */
   for (iSide = 0; iSide < 2; iSide++) {
     float fSide = iSide == 0 ? -1.0f : 1.0f;
+    tMechaPose hip;
     tMechaPose thigh;
     tMechaPose shin;
     tMechaPose foot;
 
-    mecha_pose_child(&thigh, &pose, fSide * 0.42f * fRadius * fLimb,
-                     0.47f * fHeight, 0.0f, 0, -aiThigh[iSide], 0);
+    /*
+     * Rolled out at the hip, so a stance has width and a glide has an edge
+     * to push off. Positive roll walks the limb towards +x, so the side it
+     * is on decides the sign.
+     *
+     * It is a frame of its own rather than a roll on the thigh, and that is
+     * not tidiness: rolled first and swung afterwards, the whole leg tips
+     * outwards as one and its foot lands exactly cos(roll) of the way down,
+     * which is what lets the planting solve above pick a roll and be right.
+     * Roll the thigh itself and the swing happens in the unrolled plane, the
+     * two rotations no longer commute, and the feet miss the floor.
+     */
+    mecha_pose_child(&hip, &pose, fSide * 0.42f * fRadius * fLimb,
+                     0.47f * fHeight, 0.0f, 0, 0,
+                     (int)(fSide * (float)aiRoll[iSide]));
+    mecha_pose_child(&thigh, &hip, 0.0f, 0.0f, 0.0f, 0, -aiThigh[iSide], 0);
     mecha_add_box(pList, &thigh, 0.0f, -0.5f * fThighLen, 0.0f,
                   0.23f * fRadius * fLimb, 0.5f * fThighLen,
                   0.24f * fRadius * fLimb, byBody, byBody, 0);
-    /* The knee itself, so the joint reads as a joint from any angle rather
-     * than as two boxes that happen to meet. */
+    /*
+     * The knee itself, so the joint reads as a joint from any angle rather
+     * than as two boxes that happen to meet. It stands proud of both the
+     * thigh above it and the shin below, which is how the reference art
+     * draws a knee anyway and is also the only thing keeping its faces out
+     * of their planes: a joint the same width as the limb it sits on has
+     * coplanar sides with it the moment the joint angle passes through
+     * straight, and there is no depth buffer here to sort that out.
+     */
     mecha_add_box(pList, &thigh, 0.0f, -fThighLen, 0.0f,
-                  0.19f * fRadius * fLimb, 0.05f * fHeight,
-                  0.19f * fRadius * fLimb, byJoint, byJoint, 0);
+                  0.26f * fRadius * fLimb, 0.05f * fHeight,
+                  0.27f * fRadius * fLimb, byJoint, byJoint, 0);
 
     /*
      * The knee bends backwards, the way a person's does: a positive pose
@@ -1014,10 +1153,18 @@ void mecha_mesh_mech(tMechaQuadList *pList, const tMechaWorld *pWorld,
                   0.19f * fRadius * fLimb, 0.5f * fShinLen,
                   0.20f * fRadius * fLimb, byBody, byBody, 0);
 
-    /* The foot stays flat to the floor whatever the leg above it is doing,
-     * which is the whole reason it gets a joint of its own. */
+    /*
+     * The foot stays flat to the floor whatever the leg above it is doing,
+     * which is the whole reason it gets a joint of its own -- and that now
+     * means flat both ways. The three pitches up the chain cancel to
+     * nothing by construction, so what is left of the hip above the ankle
+     * is the roll alone, and giving the ankle the same roll back undoes it
+     * exactly. Without it a splayed leg lands on the outer edge of its foot
+     * and drives the inner corner through the floor.
+     */
     mecha_pose_child(&foot, &shin, 0.0f, -fShinLen, 0.0f, 0,
-                     aiThigh[iSide] - aiKnee[iSide], 0);
+                     aiThigh[iSide] - aiKnee[iSide],
+                     -(int)(fSide * (float)aiRoll[iSide]));
     mecha_add_box(pList, &foot, 0.0f, -0.5f * fAnkle, 0.10f * fRadius,
                   0.27f * fRadius * fLimb, 0.5f * fAnkle,
                   0.42f * fRadius * fLimb, byTrim, byTrim, 0);
@@ -1062,6 +1209,7 @@ void mecha_mesh_mech(tMechaQuadList *pList, const tMechaWorld *pWorld,
     int iAimYaw;
     int iAimPitch;
     int iArmYaw;
+    float fReady = mecha_clampf(pMech->fCombat, 0.0f, 1.0f);
     float fUpper = 0.20f * fHeight;
     float fFore = 0.17f * fHeight;
 
@@ -1090,22 +1238,37 @@ void mecha_mesh_mech(tMechaQuadList *pList, const tMechaWorld *pWorld,
                     0.30f * fRadius * fShoulder, 0.09f * fHeight * fShoulder,
                     0.36f * fRadius * fShoulder, byTrim, byTrim, 0);
 
+      /*
+       * And whether it is holding them up at all. A machine with nothing
+       * locked and nothing in flight lets the whole chain unfold: the
+       * shoulder stops tracking, the elbow gives up its right angle, and
+       * the guns end up pointed at the floor. It is the only way to tell at
+       * a glance which of two machines across the arena is about to shoot
+       * you, and it costs nothing to read.
+       */
       mecha_pose_child(&shoulder, &torso,
                        fSide * 0.98f * fRadius * fShoulder, 0.27f * fHeight,
-                       0.0f, iArmYaw, -iAimPitch + iKick, 0);
+                       0.0f, (int)((float)iArmYaw * fReady),
+                       (int)((float)(-iAimPitch + iKick) * fReady), 0);
       mecha_pose_child(&upper, &shoulder, 0.0f, 0.0f, 0.0f, 0,
-                       -MECHA_ARM_DROOP, 0);
+                       (int)(-(float)MECHA_ARM_DROOP * fReady), 0);
       mecha_add_box(pList, &upper, 0.0f, -0.5f * fUpper, 0.0f,
                     0.16f * fRadius * fLimb, 0.5f * fUpper,
                     0.16f * fRadius * fLimb, byBody, byBody, 0);
+      /* Proud of both the upper arm and the forearm, for the reason the
+       * knee is. */
       mecha_add_box(pList, &upper, 0.0f, -fUpper, 0.0f,
-                    0.14f * fRadius * fLimb, 0.04f * fHeight,
-                    0.14f * fRadius * fLimb, byJoint, byJoint, 0);
+                    0.19f * fRadius * fLimb, 0.04f * fHeight,
+                    0.20f * fRadius * fLimb, byJoint, byJoint, 0);
 
       /* The elbow makes up the rest of the right angle, so the forearm and
-       * the gun on the end of it come out level along the line of aim. */
+       * the gun on the end of it come out level along the line of aim --
+       * and gives all but a bend of it back when the arm comes down. */
       mecha_pose_child(&fore, &upper, 0.0f, -fUpper, 0.0f, 0,
-                       -(MECHA_ANGLE_QUARTER - MECHA_ARM_DROOP), 0);
+                       (int)(-(float)(MECHA_ANGLE_QUARTER - MECHA_ARM_DROOP)
+                                 * fReady
+                             - (float)MECHA_ARM_REST_ELBOW
+                                   * (1.0f - fReady)), 0);
       mecha_add_box(pList, &fore, 0.0f, -0.5f * fFore, 0.0f,
                     0.14f * fRadius * fLimb, 0.5f * fFore,
                     0.14f * fRadius * fLimb, byTrim, byTrim, 0);
@@ -1125,6 +1288,8 @@ void mecha_mesh_mech(tMechaQuadList *pList, const tMechaWorld *pWorld,
       tMechaPose head;
       int iHeadYaw = mecha_clampi(iArmYaw, -MECHA_HEAD_YAW_LIMIT,
                                   MECHA_HEAD_YAW_LIMIT);
+      /* The head goes on watching after the guns have come down -- it is the
+       * arms that say whether the machine means it, not the eyes. */
       int iHeadPitch = mecha_clampi(iAimPitch, -MECHA_HEAD_PITCH_LIMIT,
                                     MECHA_HEAD_PITCH_LIMIT);
 

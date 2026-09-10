@@ -335,20 +335,25 @@ int main(int argc, char **argv)
             snprintf(szName, sizeof(szName), "arena_rig%d.png", iStep);
             dump_frame(szOutDir, szName);
         }
-        /* One frame per gait, from the same camera: walking, sprinting,
-         * hanging, and driving through the air. */
+        /* One frame per gait, from the same camera: standing at ease,
+         * standing with a lock to hold, walking, gliding, hanging, and
+         * driving through the air. */
         {
-            static const uint8 abyMove[4] = {
-                MECHA_MOVE_WALK, MECHA_MOVE_DASH, MECHA_MOVE_JUMP,
-                MECHA_MOVE_DASH
+            static const uint8 abyMove[6] = {
+                MECHA_MOVE_STAND, MECHA_MOVE_STAND, MECHA_MOVE_WALK,
+                MECHA_MOVE_DASH, MECHA_MOVE_JUMP, MECHA_MOVE_DASH
+            };
+            static const float afCombat[6] = {
+                0.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f
             };
             int iGait;
 
-            for (iGait = 0; iGait < 4; iGait++) {
+            for (iGait = 0; iGait < 6; iGait++) {
                 char szName[32];
 
                 pRig->byMove = abyMove[iGait];
-                pRig->fY = iGait >= 2 ? MECHA_M(9.0f) : 0.0f;
+                pRig->fCombat = afCombat[iGait];
+                pRig->fY = iGait >= 4 ? MECHA_M(9.0f) : 0.0f;
                 pRig->fStepPhase = 0.12f;
                 pRig->iLegYaw = mecha_angle_wrap(pRig->iFacing
                                                  + MECHA_DEG(40));
@@ -359,6 +364,7 @@ int main(int argc, char **argv)
                 dump_frame(szOutDir, szName);
             }
             pRig->byMove = MECHA_MOVE_WALK;
+            pRig->fCombat = 1.0f;
             pRig->fY = 0.0f;
         }
 

@@ -442,6 +442,13 @@ zig build test-mecha-render -Dmecha-frames=/tmp/frames
   `mecha_mesh.c` or `mecha_render.c`, so retuning against a different palette
   stays a small edit.
 
+- **Leaving for the race is a tested path.** `--snapshot-scene arena-exit`
+  boots into the arena, takes the exit, and draws the main menu, all
+  headless -- which is how the crash behind "exit to Whiplash" was finally
+  caught. It is not in the byte-exact baseline set, because what it is for
+  is surviving the transition rather than any particular pixel; run it with
+  `--frames 1 --out DIR` against a copy of the retail data.
+
 ## Known rough edges
 
 - At point-blank range the player's own machine overlaps the target on screen.

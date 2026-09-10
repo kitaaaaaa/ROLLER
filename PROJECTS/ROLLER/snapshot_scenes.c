@@ -2,6 +2,7 @@
 #include "snapshot.h"
 #include "3d.h"
 #include "frontend.h"
+#include "mecha_mode.h"
 #include "func3.h"
 #include <stdio.h>
 #include <string.h>
@@ -14,6 +15,10 @@ static int SnapshotSceneCapturedAll(void)
 
 int SnapshotRunScene(void)
 {
+  if (strcmp(g_SnapshotConfig.szSceneName, "arena-exit") == 0) {
+    snapshot_render_arena_exit();
+    return SnapshotSceneCapturedAll();
+  }
   if (strcmp(g_SnapshotConfig.szSceneName, "menu-main") == 0) {
     snapshot_render_menu_main();
     return SnapshotSceneCapturedAll();

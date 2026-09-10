@@ -128,6 +128,9 @@ static bool s_bCreatedRenderer;
 static tColor s_aArenaPalette[256];
 static tColor s_aSavedPalette[256];
 static tColor *s_pSavedPalAddr;
+/* Whose memory pal_addr points at, in the engine's own terms: negative
+ * means nobody's, and setpal leaves it alone. */
+static void *s_pSavedPalSelector;
 static bool s_bPaletteInstalled;
 
 /* A palette counts as loaded once any entry is non-black; an all-zero table
@@ -421,19 +424,40 @@ void mecha_mode_enter(void)
    * like themselves rather than like static.
    */
   if (!mecha_mode_palette_loaded() && mecha_file_present("palette.pal")) {
+    /*
+     * setpal owns pal_addr: it frees whatever was there, loads the file,
+     * and points pal_addr and pal_selector at the buffer it just read. This
+     * used to point pal_addr at the static palette[] array afterwards, on
+     * the strength of a note in the GPU renderer saying setpal leaves it
+     * alone -- which is true of the original and not of this one. The cost
+     * was not a wrong colour: the loaded buffer leaked, and the next setpal
+     * anybody called -- the main menu's, on the way out of the arena --
+     * took the static array's address to free() and aborted the process.
+     * That was the crash on "exit to whiplash".
+     */
     setpal("palette.pal");
-    /* setpal fills palette[] and leaves pal_addr alone -- the GPU renderer
-     * says as much in its own notes, and presentation reads pal_addr. Point
-     * it at the array setpal actually wrote, or the frame is presented
-     * through whatever was there before and comes out black. */
-    pal_addr = palette;
     FindShades();
   }
   if (!mecha_mode_palette_loaded()) {
+    /* Whatever is current now, which is not necessarily what was current on
+     * the way in: a setpal that got as far as freeing and then failed to
+     * load leaves the old pointer dangling, and putting that back on the
+     * way out would hand the next setpal a pointer to free twice. */
+    s_pSavedPalAddr = pal_addr;
     memcpy(s_aSavedPalette, palette, sizeof(s_aSavedPalette));
     mecha_render_build_palette(s_aArenaPalette);
     memcpy(palette, s_aArenaPalette, sizeof(palette));
+    /*
+     * Presentation reads pal_addr, so the mode's own table has to go there
+     * -- and that table is static, which setpal would try to free. The
+     * selector is how the engine says whose memory this is: setpal only
+     * frees pal_addr when the selector is non-negative, so marking it -1
+     * while the arena's table is installed makes the static safe to leave
+     * there. Both go back on the way out.
+     */
+    s_pSavedPalSelector = pal_selector;
     pal_addr = s_aArenaPalette;
+    pal_selector = (void *)-1;
     /* Derives shade_palette from palette[], which is what shadow_poly reads
      * for mech shadows and ground dust. */
     FindShades();
@@ -650,6 +674,23 @@ void mecha_mode_draw(void)
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * The exit path, as a headless scene: boot into the arena the way --arena
+ * does, take the way out, and hand over to the menus. Leaving the arena is
+ * the one thing in this mode that cannot be tested from the mode's own
+ * side, because what it has to work is somebody else's screen.
+ */
+void snapshot_render_arena_exit(void)
+{
+  mecha_mode_enter();
+  mecha_mode_exit();
+  frontend_menu_enter();
+  frontend_menu_update();
+  snapshot_render_menu_main();
+}
+
+//-------------------------------------------------------------------------------------------------
+
 void mecha_mode_exit(void)
 {
   if (!s_bActive)
@@ -671,6 +712,7 @@ void mecha_mode_exit(void)
   if (s_bPaletteInstalled) {
     memcpy(palette, s_aSavedPalette, sizeof(palette));
     pal_addr = s_pSavedPalAddr;
+    pal_selector = s_pSavedPalSelector;
     s_bPaletteInstalled = false;
   }
 

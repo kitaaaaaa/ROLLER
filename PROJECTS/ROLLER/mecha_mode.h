@@ -42,5 +42,9 @@ void mecha_mode_update(void);
 void mecha_mode_draw(void);
 void mecha_mode_exit(void);
 
+/* Headless acceptance scene: into the arena, out of it, and on to the
+ * menus. See snapshot_scenes.c. */
+void snapshot_render_arena_exit(void);
+
 //-------------------------------------------------------------------------------------------------
 #endif

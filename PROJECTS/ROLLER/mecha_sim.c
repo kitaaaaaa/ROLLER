@@ -2446,7 +2446,7 @@ static void mecha_check_round_end(tMechaWorld *pWorld)
     return;
   }
 
-  if (pWorld->match.iRoundTicks <= 0) {
+  if (pWorld->match.iRoundTimeLimit > 0 && pWorld->match.iRoundTicks <= 0) {
     /* Time up: the team with the most armour left takes it. */
     float fBestArmour = -1.0f;
     int iBestTeam = -1;
@@ -2491,8 +2491,18 @@ static void mecha_advance_phase(tMechaWorld *pWorld)
     break;
 
   case MECHA_PHASE_FIGHT:
-    if (pMatch->iRoundTicks > 0)
-      pMatch->iRoundTicks--;
+    /*
+     * Down to zero on a clock, up from it on a deathmatch. The count still
+     * runs either way because things other than the end of the round read
+     * it -- the FIGHT banner wants to know how long ago the round started,
+     * and on a deathmatch a clock frozen at zero could never tell it.
+     */
+    if (pMatch->iRoundTimeLimit > 0) {
+      if (pMatch->iRoundTicks > 0)
+        pMatch->iRoundTicks--;
+    } else {
+      pMatch->iRoundTicks++;
+    }
     break;
 
   case MECHA_PHASE_ROUND_OVER:
@@ -2530,7 +2540,7 @@ void mecha_sim_init(tMechaWorld *pWorld, int iArenaIdx, uint32_t uiSeed,
   pWorld->uiSeed = uiSeed;
 
   pWorld->match.iRoundsToWin = iRoundsToWin > 0 ? iRoundsToWin : 1;
-  pWorld->match.iRoundTimeLimit = MECHA_SEC(90.0f);
+  pWorld->match.iRoundTimeLimit = MECHA_SEC((float)MECHA_ROUND_SECONDS);
   pWorld->match.iRoundTicks = pWorld->match.iRoundTimeLimit;
   pWorld->match.iRound = 1;
   pWorld->match.byPhase = MECHA_PHASE_READY;
@@ -2553,6 +2563,31 @@ void mecha_sim_set_ai_skill(tMechaWorld *pWorld, int iSkill)
   if (iSkill >= MECHA_AI_SKILL_COUNT)
     iSkill = MECHA_AI_SKILL_COUNT - 1;
   pWorld->byAiSkill = (uint8_t)iSkill;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+void mecha_sim_set_round_seconds(tMechaWorld *pWorld, int iSeconds)
+{
+  if (!pWorld)
+    return;
+  /*
+   * Zero is a deathmatch: the clock is switched off rather than set very
+   * high, because a round decided on armour when the clock runs out is a
+   * different game from one that only ends when somebody falls over, and a
+   * very long clock is still the first of those.
+   */
+  pWorld->match.iRoundTimeLimit = iSeconds > 0
+                                      ? MECHA_SEC((float)iSeconds) : 0;
+  pWorld->match.iRoundTicks = pWorld->match.iRoundTimeLimit;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+void mecha_sim_set_ai_hold_fire(tMechaWorld *pWorld, bool bHold)
+{
+  if (pWorld)
+    pWorld->bAiHoldFire = bHold;
 }
 
 //-------------------------------------------------------------------------------------------------

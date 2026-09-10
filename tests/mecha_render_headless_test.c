@@ -80,11 +80,17 @@ static tMechaWorld s_World;
 static tMechaCamera s_Camera;
 
 /* How many pixels carry each palette index. */
-static void histogram(const uint8 *pFrame, int aiCounts[256])
+static void histogram_of(const uint8 *pFrame, size_t uCount,
+                         int aiCounts[256])
 {
     memset(aiCounts, 0, sizeof(int) * 256);
-    for (size_t i = 0; i < (size_t)FRAME_W * FRAME_H; i++)
+    for (size_t i = 0; i < uCount; i++)
         aiCounts[pFrame[i]]++;
+}
+
+static void histogram(const uint8 *pFrame, int aiCounts[256])
+{
+    histogram_of(pFrame, (size_t)FRAME_W * FRAME_H, aiCounts);
 }
 
 /* True when any pixel on this row is something other than the background
@@ -713,7 +719,9 @@ int main(int argc, char **argv)
         brief.szResult = "LAST MATCH:  VICTORY";
         brief.bResultWin = true;
         brief.iSelection = 1;
-        brief.iRowCount = 6;
+        /* Every row the mode actually builds, because the thing this test
+         * is really guarding is that the whole screen fits. */
+        brief.iRowCount = 9;
         brief.aRows[0].szLabel = "START MATCH";
         brief.aRows[1].szLabel = "YOUR MECH";
         brief.aRows[1].szValue = mecha_def_get(0)->szName;
@@ -723,7 +731,12 @@ int main(int argc, char **argv)
         brief.aRows[3].szValue = mecha_arena_name(0);
         brief.aRows[4].szLabel = "OPPONENT SKILL";
         brief.aRows[4].szValue = mecha_sim_ai_skill_name(MECHA_AI_VETERAN);
-        brief.aRows[5].szLabel = "EXIT TO WHIPLASH";
+        brief.aRows[5].szLabel = "ROUND TIME";
+        brief.aRows[5].szValue = "DEATHMATCH";
+        brief.aRows[6].szLabel = "ENEMY WEAPONS";
+        brief.aRows[6].szValue = "HELD - DEBUG";
+        brief.aRows[7].szLabel = "VIEW CONTROLS";
+        brief.aRows[8].szLabel = "EXIT TO WHIPLASH";
 
         /* An index nothing in the mode paints with, so anything still
          * carrying it afterwards is a pixel the briefing failed to cover.
@@ -758,8 +771,34 @@ int main(int argc, char **argv)
             CHECK(iLast > 0);
             CHECK(iLast < 198);
             /* And it still drew the whole thing rather than shrinking to
-             * nothing: the rows have to be down there. */
-            CHECK(iLast > 150);
+             * nothing: the rows and the footer under them have to be below
+             * the middle of the screen. */
+            CHECK(iLast > 110);
+        }
+
+        /*
+         * And the controls, which are a page of their own now. Same two
+         * questions: it drew something, and all of it fits in the small
+         * video mode -- it is the longer of the two screens, ten controls
+         * plus a double-height title.
+         */
+        {
+            static uint8 aControls[320 * 200];
+            int aiControls[256];
+            int iLast;
+
+            memset(aControls, MECHA_TEST_SENTINEL, sizeof(aControls));
+            mecha_render_controls(aControls, 320, 200);
+            histogram_of(aControls, 320 * 200, aiControls);
+            CHECK(aiControls[MECHA_TEST_SENTINEL] == 0);
+            CHECK(distinct_colours(aiControls) >= 3);
+            iLast = last_ink_row(aControls, 320, 200);
+            CHECK(iLast > 100);
+            CHECK(iLast < 198);
+
+            memset(s_aFrame, MECHA_TEST_SENTINEL, sizeof(s_aFrame));
+            mecha_render_controls(s_aFrame, FRAME_W, FRAME_H);
+            dump_frame(szOutDir, "arena_controls.png");
         }
 
         /*

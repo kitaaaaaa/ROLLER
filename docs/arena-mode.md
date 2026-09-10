@@ -27,16 +27,31 @@ out-of-range machine or arena picks a real one rather than failing.
 ## The briefing
 
 `--arena` opens on a briefing screen rather than dropping straight into a
-fight. It lists the controls, and its rows set up the match:
+fight. Its rows set up the match:
 
-| Row              | Does                                                |
-| ---------------- | --------------------------------------------------- |
+| Row              | Does                                                 |
+| ---------------- | ---------------------------------------------------- |
 | Start match      | Begins the fight                                     |
 | Your mech        | Left / right cycles the roster                       |
 | Opponent         | Left / right cycles the roster                       |
 | Arena            | Left / right cycles the arenas                       |
 | Opponent skill   | Rookie, veteran or ace                               |
+| Round time       | 30, 60, 90, 120 seconds, or deathmatch               |
+| Enemy weapons    | Live, or held -- a debug switch, see below           |
+| View controls    | Opens the controls on a page of their own            |
 | Exit to Whiplash | Leaves the arena for the main menu and the race game |
+
+**Round time** sets the clock for every round. Deathmatch switches it off
+rather than setting it very high, which is a different game and not a longer
+one: with a clock, a round nobody wins is decided on whoever has the most
+armour left, and a deathmatch round simply runs until somebody falls over.
+The clock in the corner of the HUD reads `--` when there is none.
+
+**Enemy weapons** is a debug switch and says so on the row. Held, the
+computer pilots go on closing, circling, boosting and dodging exactly as
+they would -- they simply never pull a trigger, which is what makes it
+useful for looking at the movement rather than a difficulty setting that
+makes them passive.
 
 `W`/`S` or up/down move between rows, `A`/`D` or left/right change a setting,
 and `Enter` or `Space` selects. A pad works throughout: d-pad or left stick to
@@ -51,6 +66,11 @@ Arena mode needs no retail assets beyond whatever the rest of the game needs to
 boot: every mech, every arena and the HUD font are generated at runtime.
 
 ## Controls
+
+Also on their own page in game, off the briefing's **View controls** row.
+They used to be printed down the middle of the briefing, where they were ten
+lines a returning player had already read and the setup rows had nowhere to
+grow past.
 
 The arcade layout this borrows from is played on two sticks with a trigger on
 each, and the pad mapping keeps that shape.
@@ -121,8 +141,9 @@ Both are read every frame, so either works at any time.
 - **Stagger is separate from damage.** Hits accumulate stagger, which bleeds off
   over time; crossing the threshold floors the mech. Getting up is covered by
   invulnerability, so a knockdown cannot be chained.
-- **Rounds.** Best of whatever `--arena-rounds` asks for, 90 seconds each,
-  decided on remaining armour if the clock runs out.
+- **Rounds.** Best of whatever `--arena-rounds` asks for, 90 seconds each by
+  default and settable on the briefing, decided on remaining armour if the
+  clock runs out -- or on a deathmatch, not decided until somebody is down.
 - **Five arenas, and two of them are terrain.** Three are walled boxes with
   cover in them. COLDWATER MEADOW is an octagon of open country: four
   truncated cones of hill, a scattering of trees and rocks, and no

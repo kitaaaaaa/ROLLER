@@ -137,9 +137,8 @@ void mecha_render_fill(uint8 *pScrBuf, int iWidth, int iHeight,
 /*
  * The briefing screen.
  *
- * Shown before the first match and returned to after every match, so the
- * controls are readable without leaving the game and so there is somewhere
- * to stand that is neither a fight nor the exit. It draws into the same
+ * Shown before the first match and returned to after every match, so there
+ * is somewhere to stand that is neither a fight nor the exit. It draws into the same
  * indexed buffer as everything else and needs no renderer, no camera and no
  * world, which is what lets the headless test cover it.
  *
@@ -147,7 +146,7 @@ void mecha_render_fill(uint8 *pScrBuf, int iWidth, int iHeight,
  * cycled, and which row is selected. Rows with a NULL szValue are actions
  * rather than settings.
  */
-#define MECHA_BRIEF_MAX_ROWS 8
+#define MECHA_BRIEF_MAX_ROWS 12
 
 typedef struct
 {
@@ -166,6 +165,10 @@ typedef struct
 
 void mecha_render_briefing(const tMechaBriefing *pBrief, uint8 *pScrBuf,
                            int iWidth, int iHeight);
+
+/* The controls, on a page of their own, reached from the briefing. Takes no
+ * state: there is nothing on it to choose. */
+void mecha_render_controls(uint8 *pScrBuf, int iWidth, int iHeight);
 
 //-------------------------------------------------------------------------------------------------
 #endif

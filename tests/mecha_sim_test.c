@@ -1605,6 +1605,123 @@ static int test_a_machine_with_a_lock_settles_into_it(void)
 
 //-------------------------------------------------------------------------------------------------
 
+static int test_the_round_clock_is_a_setting(void)
+{
+    static const int aiSeconds[] = { 30, 60, 90, 120 };
+    tMechaWorld world;
+    size_t iChoice;
+
+    for (iChoice = 0; iChoice < sizeof(aiSeconds) / sizeof(aiSeconds[0]);
+         iChoice++) {
+        int iSeconds = aiSeconds[iChoice];
+        int iElapsed = 0;
+
+        mecha_sim_init(&world, 0, 0xC10Cu, 1);
+        mecha_sim_set_round_seconds(&world, iSeconds);
+        CHECK(mecha_sim_add_mech(&world, 0, MECHA_CONTROL_HUMAN, 0) >= 0);
+        CHECK(mecha_sim_add_mech(&world, 1, MECHA_CONTROL_HUMAN, 1) >= 0);
+        mecha_sim_begin_match(&world);
+
+        /*
+         * Nobody fires a shot, so the only thing that can end this round is
+         * the clock -- and it has to end it at the second it was set to,
+         * not at whatever the simulation defaults to.
+         */
+        while (world.match.byPhase != MECHA_PHASE_ROUND_OVER
+               && world.match.byPhase != MECHA_PHASE_MATCH_OVER
+               && iElapsed < MECHA_TICK_HZ * (iSeconds + 20)) {
+            mecha_sim_tick(&world, NULL, 0);
+            if (world.match.byPhase == MECHA_PHASE_FIGHT)
+                iElapsed++;
+        }
+        printf("   a %d second round ran %d\n", iSeconds,
+               iElapsed / MECHA_TICK_HZ);
+        CHECK(iElapsed >= MECHA_TICK_HZ * iSeconds);
+        CHECK(iElapsed <= MECHA_TICK_HZ * iSeconds + 2);
+    }
+
+    /* And a deathmatch has no clock at all: five minutes in, with neither
+     * machine having so much as aimed at the other, the round is still
+     * running. Setting a very long clock would not be the same thing --
+     * that round still ends, on whoever has the most armour left. */
+    {
+        int i;
+
+        mecha_sim_init(&world, 0, 0xDEA7u, 1);
+        mecha_sim_set_round_seconds(&world, 0);
+        CHECK(mecha_sim_add_mech(&world, 0, MECHA_CONTROL_HUMAN, 0) >= 0);
+        CHECK(mecha_sim_add_mech(&world, 1, MECHA_CONTROL_HUMAN, 1) >= 0);
+        mecha_sim_begin_match(&world);
+        for (i = 0; i < MECHA_TICK_HZ * 300; i++)
+            mecha_sim_tick(&world, NULL, 0);
+        printf("   a deathmatch was still going after five minutes\n");
+        CHECK(world.match.byPhase == MECHA_PHASE_FIGHT);
+        CHECK(world.match.iRound == 1);
+    }
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_the_enemy_can_be_told_to_hold_fire(void)
+{
+    tMechaWorld world;
+    int aiShots[2];
+    int aiMoved[2];
+    int iPass;
+
+    for (iPass = 0; iPass < 2; iPass++) {
+        float afStartX[2];
+        float afStartZ[2];
+        int i;
+
+        mecha_sim_init(&world, 0, 0x5AFEu, 2);
+        CHECK(mecha_sim_add_mech(&world, 0, MECHA_CONTROL_AI, 0) >= 0);
+        CHECK(mecha_sim_add_mech(&world, 2, MECHA_CONTROL_AI, 1) >= 0);
+        mecha_sim_set_ai_hold_fire(&world, iPass == 1);
+        mecha_sim_begin_match(&world);
+        afStartX[0] = world.aMechs[0].fX;
+        afStartZ[0] = world.aMechs[0].fZ;
+        afStartX[1] = world.aMechs[1].fX;
+        afStartZ[1] = world.aMechs[1].fZ;
+
+        aiShots[iPass] = 0;
+        aiMoved[iPass] = 0;
+        for (i = 0; i < MECHA_TICK_HZ * 30; i++) {
+            int iShot;
+
+            mecha_sim_tick(&world, NULL, 0);
+            for (iShot = 0; iShot < MECHA_MAX_PROJECTILES; iShot++) {
+                if (world.aProjectiles[iShot].bActive)
+                    aiShots[iPass]++;
+            }
+            /*
+             * And they are still fighting for position while they do not
+             * shoot, which is the whole point of the switch: a pilot that
+             * stopped moving would show nothing about how the movement
+             * looks.
+             */
+            if (mecha_length2(world.aMechs[0].fX - afStartX[0],
+                              world.aMechs[0].fZ - afStartZ[0])
+                    > MECHA_M(8.0f)
+                || mecha_length2(world.aMechs[1].fX - afStartX[1],
+                                 world.aMechs[1].fZ - afStartZ[1])
+                       > MECHA_M(8.0f))
+                aiMoved[iPass]++;
+        }
+    }
+
+    printf("   half a minute of two pilots: %d shot-ticks firing, %d holding"
+           " (moving on %d and %d ticks)\n", aiShots[0], aiShots[1],
+           aiMoved[0], aiMoved[1]);
+    CHECK(aiShots[0] > 0);
+    CHECK(aiShots[1] == 0);
+    CHECK(aiMoved[1] > MECHA_TICK_HZ * 20);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static int test_the_legs_have_four_gaits(void)
 {
     static tMechaQuad aStorage[MECHA_QUAD_CAPACITY];
@@ -4000,6 +4117,10 @@ int main(void)
         { "guard turns melee aside", test_guard_turns_melee_aside },
         { "legs walk on jointed knees", test_legs_walk_on_jointed_knees },
         { "the legs have four gaits", test_the_legs_have_four_gaits },
+        { "the round clock is a setting",
+          test_the_round_clock_is_a_setting },
+        { "the enemy can be told to hold fire",
+          test_the_enemy_can_be_told_to_hold_fire },
         { "a machine at ease lowers its arms",
           test_a_machine_at_ease_lowers_its_arms },
         { "a machine with a lock settles into it",

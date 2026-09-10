@@ -110,7 +110,10 @@ class CMakeRollerCoreTests(unittest.TestCase):
             source_names = {
                 Path(source["path"]).name for source in core_target["sources"]
             }
-            self.assertEqual(len(source_names), 75)
+            # 75 for the game and its editor, plus the nine translation
+            # units of the arena mode, which is part of the core because it
+            # is built on the same renderer and frontend the rest of it is.
+            self.assertEqual(len(source_names), 84)
             self.assertIn("editor_camera.c", source_names)
             self.assertIn("editor_overlay.c", source_names)
             self.assertIn("editor_helpers.c", source_names)
@@ -123,6 +126,18 @@ class CMakeRollerCoreTests(unittest.TestCase):
             self.assertIn("roller_core_error.c", source_names)
             self.assertIn("sound_stub.c", source_names)
             self.assertIn("rollersound_stub.c", source_names)
+            for mecha in (
+                "mecha_ai.c",
+                "mecha_arena.c",
+                "mecha_defs.c",
+                "mecha_input.c",
+                "mecha_math.c",
+                "mecha_mesh.c",
+                "mecha_mode.c",
+                "mecha_render.c",
+                "mecha_sim.c",
+            ):
+                self.assertIn(mecha, source_names)
             self.assertIn("cdx_stub.c", source_names)
             self.assertNotIn("sound.c", source_names)
             self.assertNotIn("rollersound.c", source_names)

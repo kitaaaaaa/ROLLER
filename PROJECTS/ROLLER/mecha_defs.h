@@ -228,6 +228,9 @@
  * How fast the machine brings its guns up and how slowly it puts them down,
  * in fractions of the way there per second. See tMechaMech::fCombat.
  */
+/* Seconds a round runs for unless the briefing says otherwise. */
+#define MECHA_ROUND_SECONDS     90
+
 #define MECHA_COMBAT_RAISE      7.0f
 #define MECHA_COMBAT_LOWER      1.6f
 

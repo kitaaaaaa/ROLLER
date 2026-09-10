@@ -46,14 +46,16 @@
 
 //-------------------------------------------------------------------------------------------------
 /*
- * The mode has two screens. The briefing is where it starts and where every
- * match returns to: it lists the controls, lets the match be set up, and is
- * the only way out to the rest of the game. The match is the fight.
+ * The mode has three screens. The briefing is where it starts and where
+ * every match returns to: it sets the match up and is the only way out to
+ * the rest of the game. The controls are a page of their own off it. The
+ * match is the fight.
  */
 typedef enum
 {
   MECHA_SCREEN_BRIEFING = 0,
-  MECHA_SCREEN_MATCH    = 1
+  MECHA_SCREEN_MATCH    = 1,
+  MECHA_SCREEN_CONTROLS = 2
 } eMechaScreen;
 
 /* Briefing rows, in the order they are drawn. */
@@ -64,9 +66,22 @@ typedef enum
   MECHA_ROW_OPPONENT,
   MECHA_ROW_ARENA,
   MECHA_ROW_SKILL,
+  MECHA_ROW_TIME,
+  MECHA_ROW_HOLD_FIRE,
+  MECHA_ROW_CONTROLS,
   MECHA_ROW_EXIT,
   MECHA_ROW_COUNT
 } eMechaBriefRowId;
+
+/*
+ * What the round clock can be set to. Zero is a deathmatch: no clock, and
+ * so no round ever decided on who has the most armour left when it runs
+ * out, which is a different game rather than a longer one.
+ */
+static const int s_aiRoundSeconds[] = { 30, 60, 90, 120, 0 };
+
+#define MECHA_ROUND_CHOICES \
+  ((int)(sizeof(s_aiRoundSeconds) / sizeof(s_aiRoundSeconds[0])))
 
 //-------------------------------------------------------------------------------------------------
 
@@ -79,6 +94,9 @@ static int s_iOpponentDef = 2;
 static int s_iArenaIdx = 0;
 static int s_iRoundsToWin = 2;
 static int s_iAiSkill = MECHA_AI_VETERAN;
+/* Index into s_aiRoundSeconds; starts on the default the simulation uses. */
+static int s_iRoundChoice = 2;
+static bool s_bAiHoldFire;
 
 static int s_iPlayerIdx = -1;
 static uint64 s_ullLastTimeNs;
@@ -294,6 +312,22 @@ static int mecha_mode_wrap(int iValue, int iCount)
 
 //-------------------------------------------------------------------------------------------------
 
+/* What the clock setting is called on the row. The buffer is static because
+ * the briefing holds pointers into whatever it is given and is redrawn every
+ * frame from this same call. */
+static const char *mecha_mode_round_time_name(void)
+{
+  static char szName[16];
+  int iSeconds = s_aiRoundSeconds[s_iRoundChoice % MECHA_ROUND_CHOICES];
+
+  if (iSeconds <= 0)
+    return "DEATHMATCH";
+  snprintf(szName, sizeof(szName), "%d SECONDS", iSeconds);
+  return szName;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 /* Builds the briefing exactly as it will be drawn. Kept here rather than in
  * the renderer so the mode owns what its own settings are called. */
 static void mecha_mode_build_briefing(tMechaBriefing *pBrief)
@@ -314,6 +348,12 @@ static void mecha_mode_build_briefing(tMechaBriefing *pBrief)
   pBrief->aRows[MECHA_ROW_ARENA].szValue = mecha_mode_arena_name(s_iArenaIdx);
   pBrief->aRows[MECHA_ROW_SKILL].szLabel = "OPPONENT SKILL";
   pBrief->aRows[MECHA_ROW_SKILL].szValue = mecha_mode_skill_name(s_iAiSkill);
+  pBrief->aRows[MECHA_ROW_TIME].szLabel = "ROUND TIME";
+  pBrief->aRows[MECHA_ROW_TIME].szValue = mecha_mode_round_time_name();
+  pBrief->aRows[MECHA_ROW_HOLD_FIRE].szLabel = "ENEMY WEAPONS";
+  pBrief->aRows[MECHA_ROW_HOLD_FIRE].szValue = s_bAiHoldFire
+                                                 ? "HELD - DEBUG" : "LIVE";
+  pBrief->aRows[MECHA_ROW_CONTROLS].szLabel = "VIEW CONTROLS";
   pBrief->aRows[MECHA_ROW_EXIT].szLabel = mecha_mode_retail_present()
                                            ? "EXIT TO WHIPLASH" : "QUIT";
 }
@@ -325,6 +365,10 @@ static void mecha_mode_start_match(void)
   mecha_sim_init(&s_World, s_iArenaIdx, (uint32)SDL_GetTicksNS() | 1u,
                  s_iRoundsToWin);
   mecha_sim_set_ai_skill(&s_World, s_iAiSkill);
+  mecha_sim_set_round_seconds(&s_World,
+                              s_aiRoundSeconds[s_iRoundChoice
+                                               % MECHA_ROUND_CHOICES]);
+  mecha_sim_set_ai_hold_fire(&s_World, s_bAiHoldFire);
   s_iPlayerIdx = mecha_sim_add_mech(&s_World, s_iPlayerDef,
                                     MECHA_CONTROL_HUMAN, 0);
   mecha_sim_add_mech(&s_World, s_iOpponentDef, MECHA_CONTROL_AI, 1);
@@ -341,11 +385,13 @@ static void mecha_mode_start_match(void)
   /* Whichever key or button started the match is still down. */
   s_bQuitHeld = true;
 
-  SDL_Log("arena: match started (%s vs %s, %s, skill %s, first to %d)",
+  SDL_Log("arena: match started (%s vs %s, %s, skill %s, first to %d, %s%s)",
           mecha_mode_mech_name(s_iPlayerDef),
           mecha_mode_mech_name(s_iOpponentDef),
           mecha_mode_arena_name(s_iArenaIdx),
-          mecha_sim_ai_skill_name(s_iAiSkill), s_iRoundsToWin);
+          mecha_sim_ai_skill_name(s_iAiSkill), s_iRoundsToWin,
+          mecha_mode_round_time_name(),
+          s_bAiHoldFire ? ", enemy weapons held" : "");
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -536,6 +582,14 @@ static void mecha_mode_update_briefing(uint64 ullNowNs)
     case MECHA_ROW_SKILL:
       s_iAiSkill = mecha_mode_wrap(s_iAiSkill + iStep, MECHA_AI_SKILL_COUNT);
       break;
+    case MECHA_ROW_TIME:
+      s_iRoundChoice = mecha_mode_wrap(s_iRoundChoice + iStep,
+                                       MECHA_ROUND_CHOICES);
+      break;
+    case MECHA_ROW_HOLD_FIRE:
+      /* Two states, so either direction is the same toggle. */
+      s_bAiHoldFire = !s_bAiHoldFire;
+      break;
     default:
       break;
     }
@@ -564,11 +618,30 @@ static void mecha_mode_update_briefing(uint64 ullNowNs)
     return;
   }
 
-  if (bConfirm && !s_bConfirmHeld && s_iBriefSelection == MECHA_ROW_START)
-    mecha_mode_start_match();
+  if (bConfirm && !s_bConfirmHeld) {
+    if (s_iBriefSelection == MECHA_ROW_START)
+      mecha_mode_start_match();
+    else if (s_iBriefSelection == MECHA_ROW_CONTROLS)
+      s_eScreen = MECHA_SCREEN_CONTROLS;
+  }
 
   s_bConfirmHeld = bConfirm;
   s_bBackHeld = bBack;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/* The controls page: nothing to choose, so anything that means yes or no
+ * goes back to the briefing. */
+static void mecha_mode_update_controls(void)
+{
+  tMechaMenuInput menu;
+
+  mecha_input_poll_menu(&menu);
+  if ((menu.bConfirm && !s_bConfirmHeld) || (menu.bBack && !s_bBackHeld))
+    s_eScreen = MECHA_SCREEN_BRIEFING;
+  s_bConfirmHeld = menu.bConfirm;
+  s_bBackHeld = menu.bBack;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -584,6 +657,13 @@ void mecha_mode_update(void)
 
   if (!s_bActive)
     return;
+
+  if (s_eScreen == MECHA_SCREEN_CONTROLS) {
+    mecha_mode_update_controls();
+    s_ullLastTimeNs = SDL_GetTicksNS();
+    s_ullAccumulatorNs = 0;
+    return;
+  }
 
   if (s_eScreen == MECHA_SCREEN_BRIEFING) {
     mecha_mode_update_briefing(SDL_GetTicksNS());
@@ -652,6 +732,11 @@ void mecha_mode_draw(void)
 {
   if (!s_bActive || !scrbuf)
     return;
+
+  if (s_eScreen == MECHA_SCREEN_CONTROLS) {
+    mecha_render_controls(scrbuf, XMAX, YMAX);
+    return;
+  }
 
   if (s_eScreen == MECHA_SCREEN_BRIEFING) {
     tMechaBriefing brief;

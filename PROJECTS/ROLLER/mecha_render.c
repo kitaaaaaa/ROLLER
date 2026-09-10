@@ -1039,9 +1039,19 @@ static const char *mecha_phase_banner(const tMechaWorld *pWorld,
       return "DRAW";
     return pWorld->match.iWinnerIdx == iViewMech ? "VICTORY" : "DEFEAT";
   default:
-    /* "FIGHT" only for the first moments of the round, then out of the way. */
-    return pWorld->match.iRoundTicks
-             > pWorld->match.iRoundTimeLimit - MECHA_TICK_HZ ? "FIGHT" : NULL;
+    /*
+     * "FIGHT" only for the first moments of the round, then out of the way.
+     * Counted off the round's own clock where there is one and off the ticks
+     * since it started where there is not, because a deathmatch has no
+     * clock to be near the top of and would otherwise wear the banner for
+     * the whole fight.
+     */
+    if (pWorld->match.iRoundTimeLimit > 0) {
+      return pWorld->match.iRoundTicks
+               > pWorld->match.iRoundTimeLimit - MECHA_TICK_HZ ? "FIGHT"
+                                                               : NULL;
+    }
+    return pWorld->match.iRoundTicks < MECHA_TICK_HZ ? "FIGHT" : NULL;
   }
 }
 
@@ -1084,8 +1094,16 @@ static void mecha_render_hud(uint8 *pScrBuf, int iWidth, int iHeight,
    * centred above them, where it sat on top of the player's own name -- and
    * the top of the screen is worth more to the two condition bars than to a
    * number that is only read between exchanges. */
+  /*
+   * A deathmatch has no clock, so it says so rather than sitting at zero --
+   * a zero in the corner of the screen is the one thing that reads as "this
+   * round is about to be taken off you on armour".
+   */
   iSeconds = pWorld->match.iRoundTicks / MECHA_TICK_HZ;
-  snprintf(szBuffer, sizeof(szBuffer), "%d", iSeconds);
+  if (pWorld->match.iRoundTimeLimit > 0)
+    snprintf(szBuffer, sizeof(szBuffer), "%d", iSeconds);
+  else
+    snprintf(szBuffer, sizeof(szBuffer), "%s", "--");
   mecha_render_text(pScrBuf, iWidth, iHeight,
                     iWidth - mecha_render_text_width(iScale * 2, szBuffer)
                       - 12 * iScale,
@@ -1208,16 +1226,80 @@ static const char *const s_aaszControls[][2] = {
 
 /*
  * Lines the screen occupies besides the rows, which vary: two for the
- * double-height title, one for the result, a blank, the controls heading,
- * one per control, a blank either side of the rows, the footer, and one
- * more as the margin the footer's own glyphs need.
+ * double-height title, one for the result and a blank after it, a blank
+ * either side of the rows, the footer, and one more as the margin the
+ * footer's own glyphs need.
  *
  * The budget matters because the game's smaller video mode gives this a
  * 320x200 buffer, and at 200 pixels there is room for exactly twenty-five
  * lines. Anything that does not fit is lost off the bottom, and the bottom
- * is where the exit row lives.
+ * is where the exit row lives. The controls used to be printed here, ten
+ * lines of them, which is most of why the rows had nowhere to grow.
  */
-#define MECHA_BRIEF_FIXED_LINES 18
+#define MECHA_BRIEF_FIXED_LINES 7
+
+/*
+ * The controls, on a page of their own.
+ *
+ * They used to be printed down the middle of the briefing, where they were
+ * ten lines a returning player had already read and the setup rows had
+ * nowhere to grow past. Here they are still one keypress away and no longer
+ * in the way of anything.
+ */
+void mecha_render_controls(uint8 *pScrBuf, int iWidth, int iHeight)
+{
+  int iScale = iWidth / 320;
+  int iLine;
+  int iLabelW;
+  int iBlockW;
+  int iX;
+  int iY;
+  int i;
+
+  if (!pScrBuf || iWidth <= 0 || iHeight <= 0)
+    return;
+  if (iScale < 1)
+    iScale = 1;
+
+  /* Two for the title, one blank, one per control, a blank and the footer,
+   * plus the margin its glyphs need. */
+  while (iScale > 1
+         && (MECHA_BRIEF_CONTROLS + 6) * (MECHA_GLYPH_H + 1) * iScale
+            > iHeight) {
+    iScale--;
+  }
+
+  iLine = (MECHA_GLYPH_H + 1) * iScale;
+  iLabelW = MECHA_BRIEF_LABEL_CHARS * MECHA_GLYPH_ADVANCE * iScale;
+  iBlockW = iLabelW + MECHA_BRIEF_VALUE_CHARS * MECHA_GLYPH_ADVANCE * iScale;
+
+  iX = (iWidth - iBlockW) / 2;
+  iY = (iHeight - (MECHA_BRIEF_CONTROLS + 6) * iLine) / 2;
+  if (iX < iScale)
+    iX = iScale;
+  if (iY < iScale)
+    iY = iScale;
+
+  mecha_render_fill(pScrBuf, iWidth, iHeight, 0, 0, iWidth, iHeight,
+                    MECHA_BRIEF_GROUND);
+  mecha_render_text_large(pScrBuf, iWidth, iHeight, iX, iY, iScale,
+                          MECHA_BRIEF_TITLE, "CONTROLS");
+  iY += iLine * 3;
+
+  for (i = 0; i < MECHA_BRIEF_CONTROLS; i++) {
+    mecha_render_text(pScrBuf, iWidth, iHeight, iX, iY, iScale,
+                      MECHA_BRIEF_DIM, s_aaszControls[i][0]);
+    mecha_render_text(pScrBuf, iWidth, iHeight, iX + iLabelW, iY, iScale,
+                      MECHA_BRIEF_BRIGHT, s_aaszControls[i][1]);
+    iY += iLine;
+  }
+  iY += iLine;
+
+  mecha_render_text(pScrBuf, iWidth, iHeight, iX, iY, iScale,
+                    MECHA_BRIEF_DIM, "ENTER OR ESC TO GO BACK");
+}
+
+//-------------------------------------------------------------------------------------------------
 
 void mecha_render_briefing(const tMechaBriefing *pBrief, uint8 *pScrBuf,
                            int iWidth, int iHeight)
@@ -1281,18 +1363,6 @@ void mecha_render_briefing(const tMechaBriefing *pBrief, uint8 *pScrBuf,
                       pBrief->szResult);
   }
   iY += iLine * 2;
-
-  mecha_render_text(pScrBuf, iWidth, iHeight, iX, iY, iScale,
-                    MECHA_BRIEF_HEADING, "CONTROLS");
-  iY += iLine;
-  for (i = 0; i < MECHA_BRIEF_CONTROLS; i++) {
-    mecha_render_text(pScrBuf, iWidth, iHeight, iX, iY, iScale,
-                      MECHA_BRIEF_DIM, s_aaszControls[i][0]);
-    mecha_render_text(pScrBuf, iWidth, iHeight, iX + iLabelW, iY, iScale,
-                      MECHA_BRIEF_BRIGHT, s_aaszControls[i][1]);
-    iY += iLine;
-  }
-  iY += iLine;
 
   for (i = 0; i < iRows; i++) {
     const tMechaBriefRow *pRow = &pBrief->aRows[i];

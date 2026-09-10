@@ -589,6 +589,12 @@ typedef struct
   int               iTick;      /* ticks since the match started */
   int               iMechCount;
   uint8_t           byAiSkill;  /* eMechaAiSkill, applies to every AI mech */
+  /*
+   * A debug switch, not a difficulty: the computer pilots go on fighting for
+   * position exactly as they would, they simply never pull a trigger. It is
+   * there so the movement can be looked at without being shot while looking.
+   */
+  bool              bAiHoldFire;
 } tMechaWorld;
 
 //-------------------------------------------------------------------------------------------------

@@ -620,7 +620,16 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
 
   /* --- shooting --------------------------------------------------------- */
 
-  iSlot = mecha_ai_choose_weapon(pWorld, iMechIdx, fDistance, bHasLine);
+  /*
+   * Held fire is a debug switch, and it is applied here rather than at the
+   * weapon: everything above this line has already run, so the pilot goes on
+   * closing, circling and dodging exactly as it would. It simply never pulls
+   * a trigger, which is the point -- a machine that stopped fighting would
+   * not show you anything about how the fighting looks.
+   */
+  iSlot = pWorld->bAiHoldFire
+              ? -1
+              : mecha_ai_choose_weapon(pWorld, iMechIdx, fDistance, bHasLine);
   if (iSlot >= 0 && pSelf->iRecovery <= 0 && iOff <= MECHA_AI_FIRE_CONE
       /* No lock, no lead. Firing anyway just empties the magazine into the
        * space beside them. */

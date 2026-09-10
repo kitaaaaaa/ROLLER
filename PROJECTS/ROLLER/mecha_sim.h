@@ -40,6 +40,13 @@ void mecha_sim_begin_match(tMechaWorld *pWorld);
  */
 void mecha_sim_set_ai_skill(tMechaWorld *pWorld, int iSkill);
 
+/* Seconds on the round clock, or zero for a deathmatch with no clock at all.
+ * Call it after mecha_sim_init, which starts every match at the default. */
+void mecha_sim_set_round_seconds(tMechaWorld *pWorld, int iSeconds);
+
+/* Debug: the computer pilots move and manoeuvre as usual but never fire. */
+void mecha_sim_set_ai_hold_fire(tMechaWorld *pWorld, bool bHold);
+
 /* Display name for a skill level. Never NULL. */
 const char *mecha_sim_ai_skill_name(int iSkill);
 

@@ -639,8 +639,14 @@ static int test_ai_fights(void)
         int iHeldTicks = 0;
         bool bDamaged = false;
 
-        mecha_sim_init(&world, iDefA % mecha_arena_count(),
-                       0x51EDu + (uint32_t)iDefA, 2);
+        /*
+         * The built arenas, deliberately. What this measures is lock
+         * discipline, and open country measures something else: on the
+         * meadow two pilots charge each other across a field and never
+         * lose sight of one another at all, which is a fact about the
+         * field rather than about them.
+         */
+        mecha_sim_init(&world, iDefA % 3, 0x51EDu + (uint32_t)iDefA, 2);
         mecha_sim_add_mech(&world, iDefA, MECHA_CONTROL_AI, 0);
         mecha_sim_add_mech(&world, iDefB, MECHA_CONTROL_AI, 1);
         mecha_sim_begin_match(&world);
@@ -2241,15 +2247,381 @@ static int test_dashing_works_in_the_air(void)
 
 //-------------------------------------------------------------------------------------------------
 
+/* Index of the arena whose name matches, so the tests name places rather
+ * than numbers. */
+static int arena_by_name(const char *szName)
+{
+    int i;
+
+    for (i = 0; i < mecha_arena_count(); i++) {
+        if (strcmp(mecha_arena_name(i), szName) == 0)
+            return i;
+    }
+    return -1;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int roof_excursions(uint32_t uiSeed, int *piStroll, int *piPushed)
+{
+    tMechaWorld world;
+    int iArena = arena_by_name("TOWER SEVEN ROOF");
+    bool abWasLethal[2] = { false, false };
+    int i;
+
+    CHECK(iArena >= 0);
+    mecha_sim_init(&world, iArena, uiSeed, 2);
+    CHECK(mecha_sim_add_mech(&world, 1, MECHA_CONTROL_AI, 0) >= 0);
+    CHECK(mecha_sim_add_mech(&world, 2, MECHA_CONTROL_AI, 1) >= 0);
+    mecha_sim_begin_match(&world);
+
+    for (i = 0; i < MECHA_TICK_HZ * 60; i++) {
+        int iMech;
+
+        mecha_sim_tick(&world, NULL, 0);
+        for (iMech = 0; iMech < 2; iMech++) {
+            const tMechaMech *pMech = &world.aMechs[iMech];
+            uint32_t uiSurface = mecha_arena_surface(&world.arena, pMech->fX,
+                                                     pMech->fZ);
+            bool bLethal;
+
+            if (!mecha_mech_alive(pMech)) {
+                abWasLethal[iMech] = false;
+                continue;
+            }
+            /*
+             * Flying over the hole is allowed and is half the point of
+             * having one -- what is not allowed is standing in it, or
+             * walking off the edge. Both of those are being at roof level
+             * where the roof is not.
+             */
+            bLethal = pMech->fY <= MECHA_M(1.0f)
+                      && (((uiSurface & MECHA_SURF_PIT) != 0)
+                          || !mecha_arena_contains(&world.arena, pMech->fX,
+                                                   pMech->fZ));
+            if (bLethal && !abWasLethal[iMech]) {
+                /*
+                 * Being shot over the edge is a fair way to lose a roof
+                 * fight; walking over it under your own power is not. The
+                 * stagger a hit leaves behind is what tells the two apart.
+                 */
+                if (pMech->fStagger > 0.0f)
+                    (*piPushed)++;
+                else
+                    (*piStroll)++;
+            }
+            abWasLethal[iMech] = bLethal;
+        }
+    }
+
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_the_computer_pilot_stays_on_the_roof(void)
+{
+    static const uint32_t auiSeeds[] = { 0x2007u, 0x51EDu, 0x0C0Fu,
+                                         0x7A11u, 0x1234u, 0xBEEFu };
+    int iStroll = 0;
+    int iPushed = 0;
+    size_t i;
+
+    /*
+     * Six minutes of two computer pilots fighting on a roof with a hole in
+     * it. They are allowed to shoot each other to pieces, and to shove each
+     * other off the edge doing it; what they are not allowed to do is walk
+     * into the pit under their own power, which would make the arena a
+     * joke.
+     */
+    for (i = 0; i < sizeof(auiSeeds) / sizeof(auiSeeds[0]); i++)
+        CHECK(roof_excursions(auiSeeds[i], &iStroll, &iPushed) == 0);
+
+    printf("   six roof fights: %d strolls into the void, %d shoved\n",
+           iStroll, iPushed);
+    CHECK(iStroll == 0);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_the_meadow_is_an_octagon_with_hills(void)
+{
+    tMechaArena arena;
+    int iArena = arena_by_name("COLDWATER MEADOW");
+    float fHighest = 0.0f;
+    float fSteepest = 0.0f;
+    int iTrees = 0;
+    int iRocks = 0;
+    int i;
+
+    CHECK(iArena >= 0);
+    mecha_arena_init(&arena, iArena);
+    CHECK(arena.byShape == MECHA_ARENA_OCTAGON);
+
+    /* The corners are cut: a point beyond the diagonal is outside, and the
+     * same distance along an axis is not. */
+    CHECK(mecha_arena_contains(&arena, arena.fHalfExtent * 0.95f, 0.0f));
+    CHECK(!mecha_arena_contains(&arena, arena.fHalfExtent * 0.8f,
+                                arena.fHalfExtent * 0.8f));
+
+    /* Hills, and slopes steep enough to be worth boosting up. */
+    for (i = 0; i < 4000; i++) {
+        float fX = -arena.fHalfExtent
+                   + arena.fHalfExtent * 2.0f * (float)(i % 64) / 64.0f;
+        float fZ = -arena.fHalfExtent
+                   + arena.fHalfExtent * 2.0f * (float)((i / 64) % 64) / 64.0f;
+        float fHere = mecha_arena_terrain_height(&arena, fX, fZ);
+        float fStep = MECHA_M(4.0f);
+        float fRise = mecha_arena_terrain_height(&arena, fX + fStep, fZ)
+                      - fHere;
+        float fGrade = fRise / fStep;
+
+        if (fHere > fHighest)
+            fHighest = fHere;
+        if (fGrade > fSteepest)
+            fSteepest = fGrade;
+    }
+
+    /* Nothing holds a machine to this ground: that is what makes a hill a
+     * ramp rather than a climb. */
+    CHECK((mecha_arena_surface(&arena, 0.0f, 0.0f)
+           & MECHA_SURF_NON_MAGNETIC) != 0);
+
+    for (i = 0; i < arena.iObstacleCount; i++) {
+        if (arena.aObstacles[i].byKind == MECHA_PROP_TREE)
+            iTrees++;
+        if (arena.aObstacles[i].byKind == MECHA_PROP_ROCK)
+            iRocks++;
+    }
+
+    printf("   meadow: %.0f m of hill, steepest grade %.2f, %d trees,"
+           " %d rocks\n", fHighest / MECHA_METRE, fSteepest, iTrees,
+           iRocks);
+    CHECK(fHighest > MECHA_M(15.0f));
+    CHECK(fSteepest > 0.2f);
+    CHECK(iTrees >= 6);
+    CHECK(iRocks >= 2);
+    /* And nothing built out of a building. */
+    for (i = 0; i < arena.iObstacleCount; i++)
+        CHECK(arena.aObstacles[i].byKind != MECHA_PROP_BLOCK);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_the_roof_has_no_walls_and_a_hole(void)
+{
+    tMechaWorld world;
+    tMechaInput aInputs[2];
+    tMechaArena arena;
+    int iArena = arena_by_name("TOWER SEVEN ROOF");
+    float fArmour;
+    int iCorners = 0;
+    int i;
+
+    CHECK(iArena >= 0);
+    mecha_arena_init(&arena, iArena);
+    CHECK(arena.byShape == MECHA_ARENA_OPEN);
+
+    /* A block in each corner. */
+    for (i = 0; i < arena.iObstacleCount; i++) {
+        const tMechaObstacle *pBox = &arena.aObstacles[i];
+
+        if (fabsf(pBox->fX) > arena.fHalfExtent * 0.5f
+            && fabsf(pBox->fZ) > arena.fHalfExtent * 0.5f)
+            iCorners++;
+    }
+    CHECK(iCorners == 4);
+
+    /* The hole in the middle is a surface, and it is both flagged as a pit
+     * and flagged not to be drawn -- which is how the race game makes one. */
+    CHECK((mecha_arena_surface(&arena, 0.0f, 0.0f)
+           & (MECHA_SURF_PIT | MECHA_SURF_SKIP_RENDER))
+          == (MECHA_SURF_PIT | MECHA_SURF_SKIP_RENDER));
+    CHECK(mecha_arena_surface(&arena, arena.fHalfExtent * 0.8f, 0.0f) == 0u);
+
+    /* Nothing stops you walking off, and off the edge there is no floor. */
+    {
+        float fX = arena.fHalfExtent * 3.0f;
+        float fZ = 0.0f;
+
+        CHECK(!mecha_arena_resolve_cylinder(&arena, MECHA_M(6.0f), 0.0f,
+                                            MECHA_M(12.0f), &fX, &fZ));
+        CHECK(fX > arena.fHalfExtent);
+        CHECK(mecha_arena_ground_height(&arena, fX, fZ, 0.0f)
+              < arena.fKillY);
+    }
+
+    /* --- and walking into the hole costs everything --------------------- */
+    start_duel(&world, iArena, 0, 0, 0x9017u, 1);
+    memset(aInputs, 0, sizeof(aInputs));
+    fArmour = world.aMechs[0].fArmour;
+    CHECK(fArmour > 0.0f);
+    world.aMechs[0].fX = 0.0f;
+    world.aMechs[0].fZ = 0.0f;
+    world.aMechs[0].fY = 0.0f;
+    world.aMechs[0].iInvulnTicks = 0;
+    mecha_sim_tick(&world, aInputs, 2);
+    printf("   the pit took %.0f of %.0f armour\n",
+           fArmour - world.aMechs[0].fArmour, fArmour);
+    CHECK(world.aMechs[0].fArmour <= 0.0f);
+
+    /* --- as does going over the side ------------------------------------ */
+    start_duel(&world, iArena, 0, 0, 0x9017u, 1);
+    world.aMechs[1].fX = world.arena.fHalfExtent * 2.0f;   /* off the edge */
+    world.aMechs[1].fY = world.arena.fKillY - MECHA_M(1.0f);
+    world.aMechs[1].iInvulnTicks = 0;
+    mecha_sim_tick(&world, aInputs, 2);
+    CHECK(world.aMechs[1].fArmour <= 0.0f);
+
+    /* And underneath the roof is not standing on it. */
+    CHECK(mecha_arena_ground_height(&arena, 0.0f, MECHA_M(40.0f),
+                                    -MECHA_M(30.0f)) < arena.fKillY);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_a_boost_up_a_slope_leaves_the_ground(void)
+{
+    tMechaWorld world;
+    tMechaInput aInputs[2];
+    int iArena = arena_by_name("COLDWATER MEADOW");
+    float fWalkedAir = 0.0f;
+    float fBoostedAir = 0.0f;
+    int aiAir[2] = { 0, 0 };
+    int iPass;
+
+    CHECK(iArena >= 0);
+
+    /* Up the same hill twice, once on foot and once on the thrusters. */
+    for (iPass = 0; iPass < 2; iPass++) {
+        float fBest = 0.0f;
+        int iAngle;
+        int i;
+
+        start_duel(&world, iArena, 0, 0, 0x51099u & 0xFFFFu, 1);
+        memset(aInputs, 0, sizeof(aInputs));
+
+        /*
+         * The steepest piece of ground the arena has, pointed straight up
+         * it. Hunting for it rather than naming a spot: the hills are
+         * placed by hand and a test that hard-coded one of them would be
+         * measuring the arena's layout instead of the rule.
+         */
+        {
+            float fStep = MECHA_M(4.0f);
+            float fBestGrade = 0.0f;
+            float fBestX = 0.0f;
+            float fBestZ = 0.0f;
+            int iBestAngle = 0;
+            int iScan;
+
+            for (iScan = 0; iScan < 64 * 64; iScan++) {
+                float fX = -world.arena.fHalfExtent
+                           + world.arena.fHalfExtent * 2.0f
+                             * (float)(iScan % 64) / 63.0f;
+                float fZ = -world.arena.fHalfExtent
+                           + world.arena.fHalfExtent * 2.0f
+                             * (float)(iScan / 64) / 63.0f;
+                float fHere;
+                float fDx;
+                float fDz;
+                float fGrade;
+
+                if (!mecha_arena_contains(&world.arena, fX, fZ))
+                    continue;
+                fHere = mecha_arena_terrain_height(&world.arena, fX, fZ);
+                fDx = mecha_arena_terrain_height(&world.arena, fX + fStep,
+                                                 fZ) - fHere;
+                fDz = mecha_arena_terrain_height(&world.arena, fX,
+                                                 fZ + fStep) - fHere;
+                fGrade = mecha_length2(fDx, fDz) / fStep;
+                if (fGrade > fBestGrade) {
+                    fBestGrade = fGrade;
+                    fBestX = fX;
+                    fBestZ = fZ;
+                    iBestAngle = mecha_atan2_angle(fDx, fDz);
+                }
+            }
+            CHECK(fBestGrade > 0.25f);
+
+            /* Started back down the slope so there is a run at it. */
+            world.aMechs[0].fX = fBestX - mecha_sin(iBestAngle)
+                                          * MECHA_M(26.0f);
+            world.aMechs[0].fZ = fBestZ - mecha_cos(iBestAngle)
+                                          * MECHA_M(26.0f);
+            world.aMechs[0].fY =
+                mecha_arena_terrain_height(&world.arena, world.aMechs[0].fX,
+                                           world.aMechs[0].fZ);
+            world.aMechs[0].fGroundY = world.aMechs[0].fY;
+            face_mech(&world, 0, iBestAngle);
+            world.aMechs[0].iLegYaw = iBestAngle;
+            world.aMechs[1].fX = -fBestX;
+            world.aMechs[1].fZ = -fBestZ;
+        }
+
+        aInputs[0].iMoveZ = 100;
+        aInputs[0].bDash = iPass == 1;
+        mecha_sim_tick(&world, aInputs, 2);
+        aInputs[0].bDash = false;
+
+        for (i = 0; i < MECHA_TICK_HZ * 5 / 2; i++) {
+            float fGround;
+
+            mecha_sim_tick(&world, aInputs, 2);
+            fGround = mecha_arena_terrain_height(&world.arena,
+                                                 world.aMechs[0].fX,
+                                                 world.aMechs[0].fZ);
+            if (world.aMechs[0].fY - fGround > fBest)
+                fBest = world.aMechs[0].fY - fGround;
+            if (world.aMechs[0].fY - fGround > MECHA_M(0.5f))
+                aiAir[iPass]++;
+            if (iPass == 1 && i < 40)
+                printf("      dbg %d y=%.1f g=%.1f vy=%.1f move=%d\n", i,
+                       world.aMechs[0].fY / MECHA_METRE,
+                       fGround / MECHA_METRE,
+                       world.aMechs[0].fVelY / MECHA_METRE,
+                       (int)world.aMechs[0].byMove);
+        }
+        if (iPass == 0)
+            fWalkedAir = fBest;
+        else
+            fBoostedAir = fBest;
+    }
+
+    printf("   up the hill: walking clears %.1f m over %d ticks, boosting"
+           " clears %.1f m over %d\n", fWalkedAir / MECHA_METRE, aiAir[0],
+           fBoostedAir / MECHA_METRE, aiAir[1]);
+    /*
+     * What says a machine was launched is time spent off the ground, not
+     * height: the ground is rising underneath it for the whole climb and
+     * falling away underneath it afterwards, so the gap between the two
+     * stays small either way. Walking over the top of a cone hops the apex
+     * for a few ticks -- the ground really does drop out from under you
+     * there -- and boosting up the same slope is airborne for the better
+     * part of a second and a half.
+     */
+    CHECK(aiAir[0] < 15);
+    CHECK(aiAir[1] > 45);
+    CHECK(aiAir[1] > aiAir[0] * 4);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static int test_nothing_is_built_coplanar(void)
 {
     static tMechaQuad aStorage[MECHA_QUAD_CAPACITY];
     tMechaQuadList list;
     tMechaWorld world;
-    int aiPairs[3];
+    int aiPairs[8];
+    int iArenas = mecha_arena_count();
     int iArena;
 
-    for (iArena = 0; iArena < 3; iArena++) {
+    CHECK(iArenas <= (int)(sizeof(aiPairs) / sizeof(aiPairs[0])));
+    for (iArena = 0; iArena < iArenas; iArena++) {
         start_duel(&world, iArena, iArena, (iArena + 1) % 4, 0xC0D1u, 1);
         mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
         mecha_mesh_arena(&list, &world.arena);
@@ -2304,11 +2676,12 @@ static int test_nothing_is_built_coplanar(void)
         CHECK(list.iCount < MECHA_QUAD_CAPACITY * 3 / 4);
     }
 
-    printf("   coplanar overlapping pairs per arena: %d, %d, %d\n",
-           aiPairs[0], aiPairs[1], aiPairs[2]);
-    CHECK(aiPairs[0] == 0);
-    CHECK(aiPairs[1] == 0);
-    CHECK(aiPairs[2] == 0);
+    printf("   coplanar overlapping pairs per arena:");
+    for (iArena = 0; iArena < iArenas; iArena++)
+        printf(" %d", aiPairs[iArena]);
+    printf("\n");
+    for (iArena = 0; iArena < iArenas; iArena++)
+        CHECK(aiPairs[iArena] == 0);
     return 0;
 }
 
@@ -3456,6 +3829,14 @@ int main(void)
           test_a_dash_can_be_steered_and_cancelled },
         { "a boost carries and bounces", test_a_boost_carries_and_bounces },
         { "dashing works in the air", test_dashing_works_in_the_air },
+        { "the computer pilot stays on the roof",
+          test_the_computer_pilot_stays_on_the_roof },
+        { "the meadow is an octagon with hills",
+          test_the_meadow_is_an_octagon_with_hills },
+        { "the roof has no walls and a hole",
+          test_the_roof_has_no_walls_and_a_hole },
+        { "a boost up a slope leaves the ground",
+          test_a_boost_up_a_slope_leaves_the_ground },
         { "nothing is built coplanar", test_nothing_is_built_coplanar },
         { "blasts draw over what they engulf",
           test_blasts_draw_over_what_they_engulf },

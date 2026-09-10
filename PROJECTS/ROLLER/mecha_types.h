@@ -29,6 +29,31 @@
 #define MECHA_MAX_EFFECTS      96
 #define MECHA_MAX_OBSTACLES    24
 
+/*
+ * Terrain is a grid of square cells with a height at every corner and a
+ * surface word per cell. Coarse on purpose: the hills are meant to be
+ * angular, the ground is flat-shaded, and a mech is twelve metres tall, so
+ * anything finer would be detail nobody can stand on.
+ */
+#define MECHA_TERRAIN_CELLS 12
+#define MECHA_TERRAIN_NODES (MECHA_TERRAIN_CELLS + 1)
+
+/*
+ * Surface bits, and they are the engine's own values -- SURFACE_FLAG_PIT,
+ * SURFACE_FLAG_SKIP_RENDER and SURFACE_FLAG_NON_MAGNETIC out of types.h,
+ * which this file cannot include because nothing in the simulation may
+ * reach into the engine. mecha_render.c includes both and asserts at
+ * compile time that they still agree.
+ *
+ * A pit is a surface, not a hole: the ground is still there and still
+ * answers a height query, it is simply flagged as a pit and not drawn.
+ * That is how the race game does it, and it is why a machine that walks
+ * into one falls in rather than falling through the world.
+ */
+#define MECHA_SURF_SKIP_RENDER  0x00020000u
+#define MECHA_SURF_NON_MAGNETIC 0x00080000u
+#define MECHA_SURF_PIT          0x02000000u
+
 /* Left trigger, both triggers, right trigger -- the three shots every mech
  * carries. */
 #define MECHA_WEAPON_SLOTS      3
@@ -399,6 +424,10 @@ typedef struct
    * is the window in which hitting a wall throws you off it.
    */
   int   iCoastTicks;
+  /* Where the ground was under it last tick. The difference is how fast the
+   * ground is rising, which on a surface that does not hold a machine down
+   * is what throws it off the top of a slope. */
+  float fGroundY;
   /*
    * Whether the stick has been let go since this dash began. A dash can be
    * steered mid-flight -- release the direction you left on, tap another,
@@ -460,11 +489,21 @@ typedef struct
  * against it, and the AI uses it for cover, so one shape covers every
  * obstacle the arena needs.
  */
+/* What a piece of cover is made of. All three collide as the same box; the
+ * difference is what gets drawn around it. */
+typedef enum
+{
+  MECHA_PROP_BLOCK = 0,
+  MECHA_PROP_TREE  = 1,
+  MECHA_PROP_ROCK  = 2
+} eMechaPropKind;
+
 typedef struct
 {
   float fX, fZ;             /* centre on the ground plane */
   float fHalfX, fHalfZ;
   float fHeight;
+  uint8_t byKind;           /* eMechaPropKind */
   uint8_t byPalette;
   uint8_t byTrimPalette;
   /* Tiles in the game's building bank, used when the retail data is there.
@@ -475,10 +514,23 @@ typedef struct
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * What the boundary is. A square arena is walled on four sides, an octagon
+ * on eight, and an open one is not walled at all -- its floor simply stops,
+ * and so does anything that walks off it.
+ */
+typedef enum
+{
+  MECHA_ARENA_SQUARE  = 0,
+  MECHA_ARENA_OCTAGON = 1,
+  MECHA_ARENA_OPEN    = 2
+} eMechaArenaShape;
+
 typedef struct
 {
   const char *szName;
-  float fHalfExtent;        /* the arena is square, wall to wall is twice this */
+  uint8_t byShape;          /* eMechaArenaShape */
+  float fHalfExtent;        /* wall to wall is twice this, or floor to floor */
   float fWallHeight;
   uint8_t byFloorPalette;
   uint8_t byGridPalette;
@@ -490,6 +542,16 @@ typedef struct
   uint8_t byWallTile;
   int   iObstacleCount;
   tMechaObstacle aObstacles[MECHA_MAX_OBSTACLES];
+
+  /*
+   * The ground itself. afNode holds a height per grid corner and auiSurface
+   * a surface word per cell; a level arena leaves both at zero and behaves
+   * exactly as it did before either existed.
+   */
+  float    afNode[MECHA_TERRAIN_NODES][MECHA_TERRAIN_NODES];
+  uint32_t auiSurface[MECHA_TERRAIN_CELLS][MECHA_TERRAIN_CELLS];
+  /* Below this a machine is gone, however it got there. */
+  float    fKillY;
 } tMechaArena;
 
 //-------------------------------------------------------------------------------------------------

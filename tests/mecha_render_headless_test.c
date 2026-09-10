@@ -659,6 +659,40 @@ int main(int argc, char **argv)
         CHECK(!single_colour(aiCounts));
     }
 
+    /* --- every arena rasterises ------------------------------------------
+     *
+     * The two outdoor arenas are built out of terrain rather than a flat
+     * floor, and the roof out of nothing at all past its edge, so they are
+     * the ones most likely to come out as an empty screen. A frame each,
+     * for looking at, and the same "it drew something" floor the rest of
+     * this file uses.
+     */
+    {
+        int iArena;
+
+        for (iArena = 0; iArena < mecha_arena_count(); iArena++) {
+            char szName[64];
+            int iPilot;
+            int iFoe;
+
+            mecha_sim_init(&s_World, iArena, 0x5EED1234u, 2);
+            iPilot = mecha_sim_add_mech(&s_World, 0, MECHA_CONTROL_HUMAN, 0);
+            CHECK(iPilot >= 0);
+            iFoe = mecha_sim_add_mech(&s_World, 1, MECHA_CONTROL_AI, 1);
+            CHECK(iFoe >= 0);
+            mecha_sim_begin_match(&s_World);
+            mecha_camera_reset(&s_Camera);
+            render_now(pRenderer, iPilot);
+            histogram(s_aFrame, aiCounts);
+            snprintf(szName, sizeof(szName), "arena_stage%d.png", iArena);
+            dump_frame(szOutDir, szName);
+            printf("   %s: %d colours\n", mecha_arena_name(iArena),
+                   distinct_colours(aiCounts));
+            CHECK(!single_colour(aiCounts));
+            CHECK(aiCounts[s_World.arena.byFloorPalette] > 0);
+        }
+    }
+
     /* --- the briefing screen draws ---------------------------------------
      *
      * It is the first thing the mode shows and the thing every match returns

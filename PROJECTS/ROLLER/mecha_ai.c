@@ -119,6 +119,72 @@ static float mecha_ai_weapon_range(const tMechaWeaponDef *pWeapon)
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * Is there still an arena that way? fLook out along a direction that need
+ * not be normalised; a zero-length direction is going nowhere and so is
+ * always fine.
+ */
+static bool mecha_ai_footing_clear(const tMechaWorld *pWorld,
+                                   const tMechaMech *pSelf, float fDirX,
+                                   float fDirZ, float fLook, bool bEdgeKills)
+{
+  float fLen = mecha_length2(fDirX, fDirZ);
+  float fX;
+  float fZ;
+
+  if (fLen <= 0.01f)
+    return true;
+
+  fX = pSelf->fX + fDirX / fLen * fLook;
+  fZ = pSelf->fZ + fDirZ / fLen * fLook;
+
+  if ((mecha_arena_surface(&pWorld->arena, fX, fZ) & MECHA_SURF_PIT) != 0)
+    return false;
+
+  return !bEdgeKills || mecha_arena_contains(&pWorld->arena, fX, fZ);
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * Somewhere to go instead. Turn away from the direction that ends in
+ * nothing, widening the turn until the ground comes back -- on a roof with
+ * a hole in the middle, straight back the way you came is as likely to be
+ * the pit as the edge was, so "away" has to actually be looked at. Returns
+ * false when every way out is as bad as the one in, and leaves the caller
+ * to simply reverse.
+ */
+static bool mecha_ai_footing_escape(const tMechaWorld *pWorld,
+                                    const tMechaMech *pSelf, float fDirX,
+                                    float fDirZ, float fLook, bool bEdgeKills,
+                                    float *pfOutX, float *pfOutZ)
+{
+  static const int aiTurn[] = { 8192, 6144, 10240, 4096, 12288 };
+  float fLen = mecha_length2(fDirX, fDirZ);
+  size_t i;
+
+  if (fLen <= 0.01f)
+    return false;
+
+  for (i = 0; i < sizeof(aiTurn) / sizeof(aiTurn[0]); i++) {
+    float fCos = mecha_cos(aiTurn[i]);
+    float fSin = mecha_sin(aiTurn[i]);
+    float fTryX = (fDirX * fCos - fDirZ * fSin) / fLen;
+    float fTryZ = (fDirX * fSin + fDirZ * fCos) / fLen;
+
+    if (mecha_ai_footing_clear(pWorld, pSelf, fTryX, fTryZ, fLook,
+                               bEdgeKills)) {
+      *pfOutX = fTryX;
+      *pfOutZ = fTryZ;
+      return true;
+    }
+  }
+
+  return false;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 /* The range the mech as a whole wants to fight at, taken from whatever its
  * main weapon happens to be. A blade mech ends up wanting to be on top of
  * you; a siege platform wants the far side of the arena. */
@@ -396,6 +462,160 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
      * not. */
     if (iOff > MECHA_LOCK_CONE && fBoost > 0.35f && !pOut->bGuard)
       pOut->bDash = true;
+  }
+
+  /* --- watching where it puts its feet ---------------------------------- */
+
+  /*
+   * An arena can have nothing underneath it. On a roof with a hole through
+   * the middle, a pilot that only ever thought about the fight would walk
+   * into the pit and the round would be a farce.
+   *
+   * There is no path-finding here. There is only: do not step off, do not
+   * spend a burst that ends off, and if you are already going off, cancel.
+   *
+   * This is the last word on where the machine goes, after the dodging and
+   * after the lock has had its say about boosting round to face someone,
+   * because any of those will happily spend a burst over the edge.
+   */
+  {
+    /*
+     * A wall is not a hazard. Only an arena you can leave has an edge worth
+     * avoiding, and a pit is worth avoiding anywhere -- checking the
+     * boundary on a walled arena would have the pilot backing away from
+     * walls it is entitled to fight against, which is a different game.
+     */
+    bool bEdgeKills = pWorld->arena.byShape == MECHA_ARENA_OPEN;
+    bool bCommitted = pSelf->byMove == MECHA_MOVE_DASH
+                      || pSelf->iCoastTicks > 0;
+    float fForwardX = mecha_sin(pSelf->iFacing);
+    float fForwardZ = mecha_cos(pSelf->iFacing);
+    float fSpeed = mecha_length2(pSelf->fVelX, pSelf->fVelZ);
+    float fMoveX = (float)pOut->iMoveX / 100.0f;
+    float fMoveZ = (float)pOut->iMoveZ / 100.0f;
+    float fWantX = fForwardX * fMoveZ + fForwardZ * fMoveX;
+    float fWantZ = fForwardZ * fMoveZ - fForwardX * fMoveX;
+    bool bBack = false;
+
+    /* Pressing boost buys the whole burst, coast and all, in one press. */
+    if (pOut->bDash && !bCommitted
+        && !mecha_ai_footing_clear(
+               pWorld, pSelf, fWantX, fWantZ,
+               pDef->fDashSpeed
+                   * (float)(pDef->iDashTicks + MECHA_DASH_COAST_TICKS)
+                   * MECHA_TICK_SECONDS,
+               bEdgeKills)) {
+      pOut->bDash = false;
+      bBack = true;
+    }
+
+    /* On foot, a stride of reaction and whatever it is still carrying. */
+    if (!bCommitted
+        && !mecha_ai_footing_clear(pWorld, pSelf, fWantX, fWantZ,
+                                   MECHA_AI_FOOTING_WALK
+                                       + fSpeed * MECHA_AI_FOOTING_LEAD,
+                                   bEdgeKills)) {
+      pOut->bDash = false;
+      bBack = true;
+    }
+
+    if (bBack) {
+      pOut->iMoveX = -pOut->iMoveX;
+      pOut->iMoveZ = -pOut->iMoveZ;
+    }
+
+    /*
+     * Letting go of the stick is not stopping. A machine that has just come
+     * out of a burst is still travelling, and a pilot standing there
+     * thinking about its next shot will ride that straight off the roof, so
+     * what it is carrying gets checked whether it asked for it or not.
+     */
+    if (!bCommitted && pSelf->byMove != MECHA_MOVE_JUMP
+        && pSelf->byMove != MECHA_MOVE_CANCEL
+        && !mecha_ai_footing_clear(pWorld, pSelf, pSelf->fVelX, pSelf->fVelZ,
+                                   MECHA_AI_FOOTING_WALK
+                                       + fSpeed * MECHA_AI_FOOTING_LEAD,
+                                   bEdgeKills)) {
+      float fOutX = -pSelf->fVelX / fSpeed;
+      float fOutZ = -pSelf->fVelZ / fSpeed;
+
+      (void)mecha_ai_footing_escape(pWorld, pSelf, pSelf->fVelX, pSelf->fVelZ,
+                                    MECHA_AI_FOOTING_WALK
+                                        + fSpeed * MECHA_AI_FOOTING_LEAD,
+                                    bEdgeKills, &fOutX, &fOutZ);
+      pOut->iMoveZ = (int)((fOutX * fForwardX + fOutZ * fForwardZ) * 100.0f);
+      pOut->iMoveX = (int)((fOutX * fForwardZ - fOutZ * fForwardX) * 100.0f);
+      pOut->bDash = false;
+      pOut->bGuard = false;
+    }
+
+    /*
+     * In the air there is no stepping back and nothing to brake against.
+     * All a machine can do with the thrust it has left is lean towards the
+     * middle of the arena and hope it is enough, so that is what it does
+     * rather than pretending it can stop.
+     */
+    if (pSelf->byMove == MECHA_MOVE_JUMP
+        || pSelf->byMove == MECHA_MOVE_CANCEL) {
+      float fLook = MECHA_AI_FOOTING_WALK + fSpeed * MECHA_AI_FOOTING_AIR;
+      float fOutX;
+      float fOutZ;
+
+      if (!mecha_ai_footing_clear(pWorld, pSelf, pSelf->fVelX, pSelf->fVelZ,
+                                  fLook, bEdgeKills)
+          && mecha_ai_footing_escape(pWorld, pSelf, pSelf->fVelX,
+                                     pSelf->fVelZ, fLook, bEdgeKills, &fOutX,
+                                     &fOutZ)) {
+        pOut->iMoveZ = (int)((fOutX * fForwardX + fOutZ * fForwardZ)
+                             * 100.0f);
+        pOut->iMoveX = (int)((fOutX * fForwardZ - fOutZ * fForwardX)
+                             * 100.0f);
+        pOut->bGuard = false;
+      }
+    }
+
+    /*
+     * And a burst already in flight is a different problem: it is
+     * committed, so wanting to stop is not enough. The way out is the way
+     * the player has -- push back against it and boost again -- so that is
+     * what the pilot does, aimed squarely at the edge it is about to go
+     * over.
+     */
+    if (bCommitted) {
+      float fCarryX = pSelf->byMove == MECHA_MOVE_DASH ? pSelf->fDashDirX
+                                                       : pSelf->fVelX;
+      float fCarryZ = pSelf->byMove == MECHA_MOVE_DASH ? pSelf->fDashDirZ
+                                                       : pSelf->fVelZ;
+      float fCarry = mecha_length2(fCarryX, fCarryZ);
+
+      if (fCarry > 0.01f
+          && !mecha_ai_footing_clear(pWorld, pSelf, fCarryX, fCarryZ,
+                                     MECHA_AI_FOOTING_WALK
+                                         + fSpeed * MECHA_AI_FOOTING_CANCEL,
+                                     bEdgeKills)) {
+        /* Back against the line it is travelling, in its own terms, and
+         * the boost button to make the cancel take. */
+        float fOutX = -fCarryX / fCarry;
+        float fOutZ = -fCarryZ / fCarry;
+
+        (void)mecha_ai_footing_escape(pWorld, pSelf, fCarryX, fCarryZ,
+                                      MECHA_AI_FOOTING_WALK
+                                          + fSpeed * MECHA_AI_FOOTING_CANCEL,
+                                      bEdgeKills, &fOutX, &fOutZ);
+        pOut->iMoveZ = (int)((fOutX * fForwardX + fOutZ * fForwardZ)
+                             * 100.0f);
+        pOut->iMoveX = (int)((fOutX * fForwardZ - fOutZ * fForwardX)
+                             * 100.0f);
+        /*
+         * The button, not the holding of it: a burst is started by the
+         * press and a cancel needs another one, so a pilot that simply
+         * leans on boost cancels nothing and rides the burst it wanted to
+         * throw away straight off the edge. Let it up, then press again.
+         */
+        pOut->bDash = !pSelf->bDashHeld;
+        pOut->bGuard = false;
+      }
+    }
   }
 
   /* --- shooting --------------------------------------------------------- */

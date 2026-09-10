@@ -38,8 +38,36 @@ bool mecha_arena_resolve_cylinder(const tMechaArena *pArena,
                                   float fRadius, float fFeetY, float fHeight,
                                   float *pfX, float *pfZ);
 
-/* True when the point is inside the arena's playable square, ignoring boxes. */
+/* True when the point is inside the arena's playable area, ignoring boxes.
+ * Square, octagon or open platform, according to the arena's shape. */
 bool mecha_arena_contains(const tMechaArena *pArena, float fX, float fZ);
+
+/*
+ * The surface word under a point: the engine's own bits, as stored per
+ * terrain cell. Zero off the grid and for a level arena, which is the same
+ * thing as "ordinary ground you cannot leave".
+ */
+uint32_t mecha_arena_surface(const tMechaArena *pArena, float fX, float fZ);
+
+/* The ground alone, with nothing standing on it: what the floor mesh is
+ * drawn from, and what a slope's steepness is measured against. */
+float mecha_arena_terrain_height(const tMechaArena *pArena, float fX,
+                                 float fZ);
+
+/*
+ * Where there is no floor at all -- off the edge of an open arena. Far
+ * enough down that nothing lands on it and gravity has time to do its work
+ * before the kill plane does.
+ */
+#define MECHA_ARENA_VOID (-4000.0f * MECHA_METRE)
+
+/*
+ * The octagon, shared between the boundary test and the mesh so the wall
+ * stands exactly where the collision says it does. Cut c off each end of a
+ * side of length 2h; the cut is c*sqrt(2) long, and for eight equal sides
+ * c = 2h/(2 + sqrt(2)). Along a cut |x| + |z| = 2h - c, which is h*sqrt(2).
+ */
+#define MECHA_OCTAGON_ROOT2 1.41421356f
 
 /* Traces the segment from (fX0,fY0,fZ0) to (fX1,fY1,fZ1) against the floor,
  * the walls and the boxes. On a hit, writes the impact point and returns

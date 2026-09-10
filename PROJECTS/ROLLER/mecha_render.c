@@ -1930,6 +1930,10 @@ static const struct
   { 206, 60, 56, 12 },   /* amber tracer, ammo pips                     */
   { 192, 46, 10, 58 },   /* violet tracer                               */
   {  34, 55, 48, 30 },   /* sand tracer                                 */
+  {  57, 40, 29, 21 },   /* bark, off the retail palette's brown ramp    */
+  { 246,  0, 20,  0 },   /* meadow grass, the darker check              */
+  { 249,  0, 34,  0 },   /* meadow grass, the lighter check             */
+  { 252,  0, 48,  0 },   /* canopy                                      */
 
   /*
    * The sky, deepest first. These indices are not arbitrary: in the game's

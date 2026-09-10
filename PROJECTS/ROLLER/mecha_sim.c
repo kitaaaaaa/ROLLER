@@ -1153,9 +1153,14 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
 
   /* --- integration ------------------------------------------------------ */
 
-  if (pMech->byMove == MECHA_MOVE_DASH) {
-    /* A burst is flat, in the air as much as on the ground: gravity waits
-     * until it is over. */
+  if (pMech->byMove == MECHA_MOVE_DASH && pMech->fVelY <= 0.0f) {
+    /*
+     * A burst is flat, in the air as much as on the ground: gravity waits
+     * until it is over. Only while the machine is level or sinking, mind --
+     * a boost that has just been thrown off the top of a slope is carrying
+     * real upward speed, and holding that would turn a ramp into a ceiling.
+     * Rising, it arcs like anything else.
+     */
     pMech->fVelY = 0.0f;
   } else if (bAirborne || pMech->byMove == MECHA_MOVE_JUMP
              || pMech->byMove == MECHA_MOVE_CANCEL) {
@@ -1164,7 +1169,13 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
     if (bBoosting)
       fGravity *= 0.18f;
     pMech->fVelY -= fGravity * MECHA_DT;
-  } else {
+  } else if (pMech->fVelY <= 0.0f) {
+    /*
+     * Standing on something, so nothing to fall. Upward speed is left
+     * alone: a machine that has just come off the lip of a ramp is still
+     * in contact on the tick it happens, and this is where the launch
+     * would otherwise be thrown away for the second time.
+     */
     pMech->fVelY = 0.0f;
   }
 
@@ -1187,9 +1198,41 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
                                       pMech->fY);
   if (pMech->fY <= fGround) {
     bool bWasFalling = pMech->fVelY < 0.0f;
+    /*
+     * Off a ramp, the way the race game does it.
+     *
+     * A car in Whiplash is held to the road by the surface being magnetic;
+     * where it is not, the game compares where the car's own momentum would
+     * put it against the height of the ground under it, and if the ground
+     * has dropped away, the car is in the air. The same rule stated from
+     * the other end: on a surface that does not hold you, the rate the
+     * ground rose under you this tick is a real upward velocity, and when
+     * the slope runs out you keep it.
+     *
+     * So a machine that walks up a hill is glued to it -- the climb is
+     * slow, and the threshold sees to that -- and one that boosts up the
+     * same hill leaves the ground at the top.
+     */
+    float fClimb = (fGround - pMech->fGroundY) / MECHA_DT;
+    uint32_t uiSurface = mecha_arena_surface(&pWorld->arena, pMech->fX,
+                                             pMech->fZ);
 
     pMech->fY = fGround;
-    pMech->fVelY = 0.0f;
+    if ((uiSurface & MECHA_SURF_NON_MAGNETIC) == 0) {
+      pMech->fVelY = 0.0f;                  /* held down, as a track is */
+    } else if (fClimb > MECHA_RAMP_LAUNCH_CLIMB) {
+      pMech->fVelY = fClimb;                /* the slope is pushing it up */
+    } else if (pMech->fVelY <= 0.0f) {
+      pMech->fVelY = 0.0f;                  /* landing, or level ground */
+    }
+    /*
+     * The fourth case is the one that matters and it does nothing at all:
+     * still in contact, the ground no longer rising, and carrying upward
+     * speed from the slope it has just come off. Zeroing that -- which is
+     * what the first version of this did -- throws the launch away on the
+     * exact tick it should happen, at the lip, and the machine walks onto
+     * the flat top as though the ramp had been a staircase.
+     */
     if ((pMech->byMove == MECHA_MOVE_JUMP
          || pMech->byMove == MECHA_MOVE_CANCEL) && bWasFalling) {
       bool bCancelled = pMech->byMove == MECHA_MOVE_CANCEL;
@@ -1210,6 +1253,32 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
                              pDef->abyPalette[2], MECHA_SEC(0.45f));
     }
   }
+
+  /*
+   * Two ways to be gone that have nothing to do with damage.
+   *
+   * A pit in the race game is a surface like any other -- it answers a
+   * height query, it is simply flagged as a pit and not drawn -- so a
+   * machine standing over one has fallen in rather than fallen through.
+   * And below the kill plane there is nothing at all, which is what
+   * becomes of anything that walks off an open arena.
+   */
+  if (mecha_mech_alive(pMech)) {
+    uint32_t uiSurface = mecha_arena_surface(&pWorld->arena, pMech->fX,
+                                            pMech->fZ);
+    bool bInPit = (uiSurface & MECHA_SURF_PIT) != 0
+                  && pMech->fY <= fGround + MECHA_GROUND_EPS;
+
+    if (bInPit || pMech->fY < pWorld->arena.fKillY) {
+      mecha_sim_spawn_effect(pWorld, MECHA_FX_DUST, pMech->fX, pMech->fY,
+                             pMech->fZ, pDef->fRadius * 2.0f,
+                             pDef->abyPalette[2], MECHA_SEC(0.5f));
+      /* Everything it had. Nobody is credited: the arena did this. */
+      mecha_sim_damage(pWorld, iMechIdx, -1, pMech->fArmour + 1.0f,
+                       MECHA_STAGGER_DOWN, 0.0f, 0.0f);
+    }
+  }
+  pMech->fGroundY = fGround;
 
   /* --- cosmetic smoothing ---------------------------------------------- */
 
@@ -2183,6 +2252,11 @@ static void mecha_reset_mech_for_round(tMechaWorld *pWorld, int iMechIdx,
   pMech->fX = fX;
   pMech->fZ = fZ;
   pMech->fY = mecha_arena_ground_height(&pWorld->arena, fX, fZ, 0.0f);
+  /* Where the ground is, as far as the ramp rule is concerned. Leaving this
+   * at zero on a hill would read as the ground having risen the whole height
+   * of the hill in one tick, and fire the machine into the air on the first
+   * frame of the round. */
+  pMech->fGroundY = pMech->fY;
   pMech->fVelX = 0.0f;
   pMech->fVelY = 0.0f;
   pMech->fVelZ = 0.0f;

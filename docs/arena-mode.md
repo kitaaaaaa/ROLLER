@@ -123,6 +123,40 @@ Both are read every frame, so either works at any time.
   invulnerability, so a knockdown cannot be chained.
 - **Rounds.** Best of whatever `--arena-rounds` asks for, 90 seconds each,
   decided on remaining armour if the clock runs out.
+- **Five arenas, and two of them are terrain.** Three are walled boxes with
+  cover in them. COLDWATER MEADOW is an octagon of open country: four
+  truncated cones of hill, a scattering of trees and rocks, and no
+  buildings. TOWER SEVEN ROOF is a square with no walls at all -- walk off
+  it and you are falling -- a hole through the middle and a block in each
+  corner to fight around.
+- **The ground is the race game's ground.** Every cell of an arena carries
+  the engine's own surface flags. A pit is not a hole in the floor: it is a
+  surface like any other, flagged `SURFACE_FLAG_PIT` and
+  `SURFACE_FLAG_SKIP_RENDER` together, which is exactly how the race game
+  builds one -- it still answers height queries, it simply is not drawn and
+  is fatal to stand on. Falling in one, or off the world past an arena's
+  kill plane, costs the machine everything it has left.
+- **A boost up a slope launches you.** Ground flagged
+  `SURFACE_FLAG_NON_MAGNETIC` does not hold a machine down, which is the
+  rule `control.c` applies to the cars: the rate the ground rose underneath
+  you is real upward velocity, and at the crest you keep it. The meadow's
+  hills are all non-magnetic, so walking over one hops the top for a few
+  ticks and boosting up the same slope leaves it for the better part of a
+  second and a half. Their tops are flat rather than pointed because a cone
+  with a peak on it throws a walking machine into the air at the apex.
+- **The computer pilot watches its feet.** It does not path around anything;
+  it declines to walk into it. Three separate distances: a stride plus what
+  it is carrying on foot, the whole length of a burst before it presses
+  boost, and only as far as a cancel needs once the burst is running --
+  looking further than that has a pilot flinching at an edge it was always
+  going to stop short of, and a panicked counter-burst is its own way off a
+  roof. When the way ahead is nothing it turns away by the smallest angle
+  that finds ground again, because on a roof with a hole in the middle
+  straight back the way you came is as likely to be the pit as the edge was.
+  A burst it wants to throw away is cancelled the way a player cancels one,
+  by letting the button up and pressing it again against the stick: leaning
+  on boost cancels nothing. Six one-minute fights on the roof, and it walks
+  off it zero times; being shot off it still counts as a fair way to lose.
 - **The computer pilot plays by the same lock rules.** It loses tracking on
   the same cone you do, reaches for the manual stick when the auto-turn stops
   following, and boosts to snap a lost lock back on. Across the roster it
@@ -351,6 +385,13 @@ Both are read every frame, so either works at any time.
   arena, which is why the tests now assert the budget rather than hoping:
   around 1750 quads for a full scene against a capacity of 4096, and nothing
   dropped.
+- **Trees and rocks are cover with a different shape.** A tree is a trunk
+  with two crowns stacked on it and a rock two boxes, all built out of the
+  same panelled boxes the blocks are, so they collide, occlude and texture
+  the way cover does. The grass, the canopy and the bark take their palette
+  indices off the retail palette's own green and brown ramps rather than
+  borrowing tracer colours: a field checkered green against grey read as a
+  chess board.
 - **Cover is panelled too.** Same reason as the walls, same tile size: a
   block twenty metres across wore one tile stretched over the whole face.
   Its sides are wound the other way round, because cover is seen from

@@ -196,6 +196,32 @@
  */
 #define MECHA_SHOT_TRADE_MARGIN 0.15f
 
+/*
+ * How fast the ground has to be rising under a machine before a surface
+ * that does not hold it down throws it off the top. Above a walk and well
+ * below a boost, so climbing a hill on foot keeps your feet on it and
+ * boosting up the same hill does not.
+ */
+/*
+ * How far ahead a computer pilot checks there is still an arena under it.
+ *
+ * Three different questions, so three different distances. On foot it is a
+ * stride of reaction plus what the machine is carrying. Before pressing
+ * boost it is the whole burst, because that is the distance the press buys
+ * and there is no taking it back. And once the burst is under way it is
+ * only as far as a cancel needs -- looking any further has the pilot
+ * flinching at an edge it was always going to stop short of, and a panicked
+ * counter-burst is its own way off a roof. In the air it is about how long
+ * the machine has left before it comes down, since that is the only part of
+ * the arc it still gets a say in.
+ */
+#define MECHA_AI_FOOTING_WALK   MECHA_M(16.0f)
+#define MECHA_AI_FOOTING_LEAD   0.35f
+#define MECHA_AI_FOOTING_CANCEL 0.60f
+#define MECHA_AI_FOOTING_AIR    0.80f
+
+#define MECHA_RAMP_LAUNCH_CLIMB MECHA_MPS(18.0f)
+
 #define MECHA_STRIDE_METRES     MECHA_M(3.6f)
 
 #define MECHA_DASH_COAST_TICKS  MECHA_SEC(0.55f)

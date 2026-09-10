@@ -261,6 +261,33 @@ static void mecha_add_box(tMechaQuadList *pList, const tMechaPose *pPose,
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * One tile of ground, with each corner at the height the terrain gives it.
+ * A level arena leaves every corner at zero and this is the flat quad it
+ * always was; a sloped one gets a quad per tile that follows the hill, and
+ * because the four corners need not be coplanar the slope reads as facets
+ * rather than as a smooth surface -- which is the look, not a compromise.
+ */
+static void mecha_add_ground_quad(tMechaQuadList *pList,
+                                  const tMechaArena *pArena,
+                                  float fX0, float fZ0, float fX1, float fZ1,
+                                  uint8_t byPalette)
+{
+  float afVert[4][3];
+
+  afVert[0][0] = fX0; afVert[0][2] = fZ0;
+  afVert[1][0] = fX0; afVert[1][2] = fZ1;
+  afVert[2][0] = fX1; afVert[2][2] = fZ1;
+  afVert[3][0] = fX1; afVert[3][2] = fZ0;
+  afVert[0][1] = mecha_arena_terrain_height(pArena, fX0, fZ0);
+  afVert[1][1] = mecha_arena_terrain_height(pArena, fX0, fZ1);
+  afVert[2][1] = mecha_arena_terrain_height(pArena, fX1, fZ1);
+  afVert[3][1] = mecha_arena_terrain_height(pArena, fX1, fZ0);
+  mecha_quads_add(pList, afVert, byPalette, MECHA_QUAD_TWO_SIDED);
+}
+
+//-------------------------------------------------------------------------------------------------
+
 /* A vertical panel running from (fX0,fZ0) to (fX1,fZ1). The normal comes out
  * a quarter turn anticlockwise from that direction seen from above, so the
  * caller picks which way the panel faces by choosing which end to start at. */
@@ -439,10 +466,24 @@ void mecha_mesh_arena(tMechaQuadList *pList, const tMechaArena *pArena)
 
       bool bAlternate = ((iRow + iCol) & 1) != 0;
 
-      mecha_add_floor_quad(pList, fX0, fZ0, fX0 + fTile, fZ0 + fTile, 0.0f,
-                           bAlternate ? pArena->byFloorPalette
-                                      : pArena->byGridPalette,
-                           0);
+      float fMidX = fX0 + fTile * 0.5f;
+      float fMidZ = fZ0 + fTile * 0.5f;
+      uint32_t uiSurface = mecha_arena_surface(pArena, fMidX, fMidZ);
+
+      /*
+       * A pit is a surface that is not drawn -- the flag pair the race game
+       * uses for exactly this -- and an arena that is not a square has
+       * ground outside itself that nobody should see either.
+       */
+      if ((uiSurface & MECHA_SURF_SKIP_RENDER) != 0)
+        continue;
+      if (!mecha_arena_contains(pArena, fMidX, fMidZ))
+        continue;
+
+      mecha_add_ground_quad(pList, pArena, fX0, fZ0, fX0 + fTile,
+                            fZ0 + fTile,
+                            bAlternate ? pArena->byFloorPalette
+                                       : pArena->byGridPalette);
       /* The checkerboard survives the texturing: the two tiles alternate
        * the same way the two palette entries do, so a floor with the retail
        * art on it still reads as a grid to move about on rather than as one
@@ -456,26 +497,123 @@ void mecha_mesh_arena(tMechaQuadList *pList, const tMechaArena *pArena)
   /* The four walls, each facing inward. A camera shoved outside the arena
    * sees straight through them rather than at a wall of solid colour,
    * because they are one-sided and get culled from behind. */
-  mecha_add_wall(pList,  fExtent, -fExtent,  fExtent,  fExtent,
-                 0.0f, pArena->fWallHeight, fTile, MECHA_TEX_WORLD,
-                 pArena->byWallPalette, pArena->byWallTile);
-  mecha_add_wall(pList, -fExtent,  fExtent, -fExtent, -fExtent,
-                 0.0f, pArena->fWallHeight, fTile, MECHA_TEX_WORLD,
-                 pArena->byWallPalette, pArena->byWallTile);
-  mecha_add_wall(pList,  fExtent,  fExtent, -fExtent,  fExtent,
-                 0.0f, pArena->fWallHeight, fTile, MECHA_TEX_WORLD,
-                 pArena->byWallPalette, pArena->byWallTile);
-  mecha_add_wall(pList, -fExtent, -fExtent,  fExtent, -fExtent,
-                 0.0f, pArena->fWallHeight, fTile, MECHA_TEX_WORLD,
-                 pArena->byWallPalette, pArena->byWallTile);
+  if (pArena->byShape == MECHA_ARENA_OCTAGON) {
+    /*
+     * Eight sides, walked anticlockwise seen from above so every panel's
+     * normal comes out facing the middle. The corner points are the square
+     * with its corners cut, which is what the boundary test is too.
+     */
+    float fCut = 2.0f * fExtent / (2.0f + MECHA_OCTAGON_ROOT2);
+    float fIn = fExtent - fCut;
+    const float aafCorner[8][2] = {
+      {  fExtent, -fIn      }, {  fExtent,  fIn      },
+      {  fIn,      fExtent  }, { -fIn,      fExtent  },
+      { -fExtent,  fIn      }, { -fExtent, -fIn      },
+      { -fIn,     -fExtent  }, {  fIn,     -fExtent  },
+    };
+    int iSide;
+
+    for (iSide = 0; iSide < 8; iSide++) {
+      const float *pfFrom = aafCorner[iSide];
+      const float *pfTo = aafCorner[(iSide + 1) & 7];
+
+      mecha_add_wall(pList, pfFrom[0], pfFrom[1], pfTo[0], pfTo[1],
+                     0.0f, pArena->fWallHeight, fTile, MECHA_TEX_WORLD,
+                     pArena->byWallPalette, pArena->byWallTile);
+    }
+  } else if (pArena->byShape != MECHA_ARENA_OPEN) {
+    mecha_add_wall(pList,  fExtent, -fExtent,  fExtent,  fExtent,
+                   0.0f, pArena->fWallHeight, fTile, MECHA_TEX_WORLD,
+                   pArena->byWallPalette, pArena->byWallTile);
+    mecha_add_wall(pList, -fExtent,  fExtent, -fExtent, -fExtent,
+                   0.0f, pArena->fWallHeight, fTile, MECHA_TEX_WORLD,
+                   pArena->byWallPalette, pArena->byWallTile);
+    mecha_add_wall(pList,  fExtent,  fExtent, -fExtent,  fExtent,
+                   0.0f, pArena->fWallHeight, fTile, MECHA_TEX_WORLD,
+                   pArena->byWallPalette, pArena->byWallTile);
+    mecha_add_wall(pList, -fExtent, -fExtent,  fExtent, -fExtent,
+                   0.0f, pArena->fWallHeight, fTile, MECHA_TEX_WORLD,
+                   pArena->byWallPalette, pArena->byWallTile);
+  }
+  /*
+   * An open arena has a lip instead: the platform's own edge, seen from
+   * outside as you fall past it. Without it the roof is a paper cutout.
+   */
+  if (pArena->byShape == MECHA_ARENA_OPEN) {
+    float fLip = MECHA_M(6.0f);
+
+    mecha_add_wall(pList,  fExtent,  fExtent,  fExtent, -fExtent,
+                   -fLip, 0.0f, fTile, MECHA_TEX_WORLD,
+                   pArena->byWallPalette, pArena->byWallTile);
+    mecha_add_wall(pList, -fExtent, -fExtent, -fExtent,  fExtent,
+                   -fLip, 0.0f, fTile, MECHA_TEX_WORLD,
+                   pArena->byWallPalette, pArena->byWallTile);
+    mecha_add_wall(pList, -fExtent,  fExtent,  fExtent,  fExtent,
+                   -fLip, 0.0f, fTile, MECHA_TEX_WORLD,
+                   pArena->byWallPalette, pArena->byWallTile);
+    mecha_add_wall(pList,  fExtent, -fExtent, -fExtent, -fExtent,
+                   -fLip, 0.0f, fTile, MECHA_TEX_WORLD,
+                   pArena->byWallPalette, pArena->byWallTile);
+  }
 
   for (i = 0; i < pArena->iObstacleCount; i++) {
     const tMechaObstacle *pBox = &pArena->aObstacles[i];
+    float fBase = mecha_arena_terrain_height(pArena, pBox->fX, pBox->fZ);
 
-    mecha_add_tiled_box(pList, pBox->fX, pBox->fZ, pBox->fHalfX,
-                        pBox->fHalfZ, 0.0f, pBox->fHeight, fTile,
-                        MECHA_TEX_STRUCT, pBox->byPalette,
-                        pBox->byTrimPalette, pBox->byTile, pBox->byTopTile);
+    switch (pBox->byKind) {
+    case MECHA_PROP_TREE: {
+      /*
+       * A trunk with a canopy over it. The canopy overhangs what a machine
+       * can walk into, which is right: you can stand under a tree, and the
+       * thing you cannot walk through is the trunk.
+       */
+      float fTrunk = pBox->fHalfX * 0.42f;
+      float fCanopy = pBox->fHeight * 0.44f;
+
+      mecha_add_tiled_box(pList, pBox->fX, pBox->fZ, fTrunk, fTrunk, fBase,
+                          fBase + pBox->fHeight - fCanopy, fTile,
+                          MECHA_TEX_WORLD, pBox->byPalette, pBox->byPalette,
+                          MECHA_TILE_RUST, MECHA_TILE_RUST);
+      mecha_add_tiled_box(pList, pBox->fX, pBox->fZ, pBox->fHalfX,
+                          pBox->fHalfZ, fBase + pBox->fHeight - fCanopy,
+                          fBase + pBox->fHeight, fTile, MECHA_TEX_WORLD,
+                          pBox->byTrimPalette, pBox->byTrimPalette,
+                          pBox->byTile, pBox->byTopTile);
+      /* A second, smaller crown, so a tree is not a lollipop. */
+      mecha_add_tiled_box(pList, pBox->fX, pBox->fZ, pBox->fHalfX * 0.62f,
+                          pBox->fHalfZ * 0.62f, fBase + pBox->fHeight,
+                          fBase + pBox->fHeight + fCanopy * 0.55f, fTile,
+                          MECHA_TEX_WORLD, pBox->byTrimPalette,
+                          pBox->byTrimPalette, pBox->byTile,
+                          pBox->byTopTile);
+      break;
+    }
+
+    case MECHA_PROP_ROCK:
+      /* Squat, and stepped, so it reads as stone rather than as a crate. */
+      mecha_add_tiled_box(pList, pBox->fX, pBox->fZ, pBox->fHalfX,
+                          pBox->fHalfZ, fBase - MECHA_M(1.0f),
+                          fBase + pBox->fHeight * 0.62f, fTile,
+                          MECHA_TEX_WORLD, pBox->byPalette,
+                          pBox->byTrimPalette, pBox->byTile,
+                          pBox->byTopTile);
+      mecha_add_tiled_box(pList, pBox->fX + pBox->fHalfX * 0.18f,
+                          pBox->fZ - pBox->fHalfZ * 0.14f,
+                          pBox->fHalfX * 0.66f, pBox->fHalfZ * 0.7f,
+                          fBase + pBox->fHeight * 0.62f,
+                          fBase + pBox->fHeight, fTile, MECHA_TEX_WORLD,
+                          pBox->byPalette, pBox->byTrimPalette,
+                          pBox->byTile, pBox->byTopTile);
+      break;
+
+    default:
+      mecha_add_tiled_box(pList, pBox->fX, pBox->fZ, pBox->fHalfX,
+                          pBox->fHalfZ, fBase, fBase + pBox->fHeight, fTile,
+                          MECHA_TEX_STRUCT, pBox->byPalette,
+                          pBox->byTrimPalette, pBox->byTile,
+                          pBox->byTopTile);
+      break;
+    }
   }
 }
 

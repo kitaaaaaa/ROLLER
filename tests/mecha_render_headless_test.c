@@ -335,6 +335,31 @@ int main(int argc, char **argv)
             snprintf(szName, sizeof(szName), "arena_rig%d.png", iStep);
             dump_frame(szOutDir, szName);
         }
+        /* And a landing, from the same camera: the dust ring wants looking
+         * at more than the walk cycle does, being the one effect that is
+         * meant to be read from above. */
+        {
+            const tMechaMechDef *pDef =
+                mecha_def_get((int)pRig->byDefIdx);
+
+            pRig->fStepPhase = 0.0f;
+            mecha_sim_spawn_effect(&s_World, MECHA_FX_DUST, pRig->fX,
+                                   pRig->fY, pRig->fZ, pDef->fRadius * 2.4f,
+                                   pDef->abyPalette[2], MECHA_SEC(0.45f));
+            for (iStep = 0; iStep < 3; iStep++) {
+                char szName[32];
+                int iTick;
+
+                for (iTick = 0; iTick < 6; iTick++)
+                    mecha_sim_tick(&s_World, aIdle, MECHA_MAX_MECHS);
+                mecha_render_frame(pRenderer, &s_World, &s_Camera, iPlayer,
+                                   s_aFrame, FRAME_W, FRAME_H,
+                                   s_aQuads, MECHA_QUAD_CAPACITY);
+                snprintf(szName, sizeof(szName), "arena_dust%d.png", iStep);
+                dump_frame(szOutDir, szName);
+            }
+        }
+
         s_World = worldSaved;
         s_Camera = savedCamera;
         render_now(pRenderer, iPlayer);

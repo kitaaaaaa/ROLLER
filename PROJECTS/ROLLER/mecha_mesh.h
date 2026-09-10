@@ -34,6 +34,13 @@
  * colour: shadow_poly darkens what is underneath by indexing
  * shade_palette[256 * level], and that table holds only 16 blocks. */
 #define MECHA_QUAD_SHADOW    0x04
+/*
+ * Lies flat on a surface and belongs on top of it -- a scorch, a puff of
+ * dust. Purely a sorting instruction: it says nothing about how the quad is
+ * filled, which is the difference between it and SHADOW. Both are decals as
+ * far as the draw order is concerned.
+ */
+#define MECHA_QUAD_DECAL     0x08
 
 //-------------------------------------------------------------------------------------------------
 
@@ -88,6 +95,11 @@ typedef struct
 #define MECHA_SPRITE_BLAST_LAST  20
 #define MECHA_SPRITE_SMOKE_FIRST 21
 #define MECHA_SPRITE_SMOKE_LAST  23
+
+/* Puffs in a landing's ring of dust. Enough to read as a circle from above
+ * and as a spray from the side; many more and a landing is a smoke screen.
+ * Out here because the tests count them. */
+#define MECHA_DUST_PUFFS 7
 
 //-------------------------------------------------------------------------------------------------
 /*

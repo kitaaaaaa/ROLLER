@@ -13,6 +13,8 @@
 /* Only ever seen if a cloud somehow rasterises flat, which the mesh refuses
  * to let happen -- a pale index so a bug reads as a bug and not as a hole. */
 #define MECHA_PAL_CLOUD 143
+/* What a puff of dust falls back to if it is ever drawn untextured. */
+#define MECHA_PAL_SMOKE 137
 
 /*
  * Translucent quads carry a SHADE LEVEL in the low byte, not a colour.
@@ -1064,7 +1066,7 @@ float mecha_quad_depth_key(const tMechaQuad *pQuad, const float afEye[3],
    * machine standing on it has to be drawn before the machine, and its far
    * corner is what says so.
    */
-  if (pQuad->byFlags & MECHA_QUAD_SHADOW)
+  if (pQuad->byFlags & (MECHA_QUAD_SHADOW | MECHA_QUAD_DECAL))
     return fMin;
 
   /*
@@ -1399,11 +1401,52 @@ void mecha_mesh_effects(tMechaQuadList *pList, const tMechaWorld *pWorld,
     }
 
     case MECHA_FX_DUST:
-      /* Kicked-up grit lies on the ground rather than facing the camera. */
-      fSize = pFx->fScale * (0.5f + fAge);
-      /* Darkens the ground rather than painting on it, so the shade level
+      /*
+       * A landing throws dust outwards, not upwards: a ring of flat puffs
+       * sliding away from the feet along the ground, each one a frame of
+       * the smoke sequence. One expanding square was the old version of
+       * this, and it read as a stain spreading rather than as anything
+       * being kicked up.
+       */
+      if (s_bSprites) {
+        int iPuff;
+        /* Thins out towards the end rather than vanishing at full size. */
+        float fFade = fAge < 0.6f ? 1.0f : 1.0f - (fAge - 0.6f) / 0.4f;
+        float fRing = pFx->fScale * (0.20f + 1.30f * fAge);
+        float fPuff = pFx->fScale * (0.34f + 0.20f * fAge) * fFade;
+
+        for (iPuff = 0; iPuff < MECHA_DUST_PUFFS; iPuff++) {
+          /* Spaced evenly and then jittered off the spokes, so a landing
+           * does not read as a cog. The jitter is a hash of the effect
+           * slot, so it holds still for the life of the puff. */
+          uint32_t uiHash = mecha_cloud_hash((uint32_t)(i * 31 + iPuff));
+          int iStep = MECHA_ANGLE_FULL / MECHA_DUST_PUFFS;
+          int iAngle = mecha_angle_wrap(iPuff * iStep
+                                        + (int)(uiHash % (uint32_t)iStep));
+          float fPx = pFx->fX + mecha_sin(iAngle) * fRing;
+          float fPz = pFx->fZ + mecha_cos(iAngle) * fRing;
+          /* A millimetre apiece, so overlapping puffs are never in exactly
+           * the same plane fighting over which is on top. */
+          float fY = pFx->fY + (0.06f + 0.004f * (float)iPuff)
+                               * MECHA_METRE;
+
+          if (fPuff <= 0.0f)
+            break;
+          mecha_add_floor_quad(pList, fPx - fPuff, fPz - fPuff,
+                               fPx + fPuff, fPz + fPuff, fY, MECHA_PAL_SMOKE,
+                               MECHA_QUAD_TWO_SIDED | MECHA_QUAD_DECAL);
+          mecha_tag_texture(pList, MECHA_TEX_EFFECT,
+                            mecha_sprite_frame(MECHA_SPRITE_SMOKE_FIRST,
+                                               MECHA_SPRITE_SMOKE_LAST,
+                                               fAge));
+        }
+        break;
+      }
+      /* No bank: the old stain, which at least says something happened.
+       * Darkens the ground rather than painting on it, so the shade level
        * goes in the low byte -- the effect's own colour would be read as a
        * level and index far past the end of shade_palette. */
+      fSize = pFx->fScale * (0.5f + fAge);
       mecha_add_floor_quad(pList, pFx->fX - fSize, pFx->fZ - fSize,
                            pFx->fX + fSize, pFx->fZ + fSize,
                            pFx->fY + 0.08f * MECHA_METRE, MECHA_SHADE_DUST,

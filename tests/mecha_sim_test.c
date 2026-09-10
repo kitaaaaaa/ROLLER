@@ -2141,6 +2141,95 @@ static int test_blasts_draw_over_what_they_engulf(void)
 
 //-------------------------------------------------------------------------------------------------
 
+/* Mean distance of a quad list's vertices from a point on the ground. */
+static float mean_ring_radius(const tMechaQuadList *pList, float fX,
+                              float fZ)
+{
+    float fSum = 0.0f;
+    int iCount = 0;
+    int i;
+
+    for (i = 0; i < pList->iCount; i++) {
+        float fCx = 0.0f;
+        float fCz = 0.0f;
+        int v;
+
+        for (v = 0; v < 4; v++) {
+            fCx += 0.25f * pList->paQuads[i].afVert[v][0];
+            fCz += 0.25f * pList->paQuads[i].afVert[v][2];
+        }
+        fSum += mecha_length2(fCx - fX, fCz - fZ);
+        iCount++;
+    }
+    return iCount > 0 ? fSum / (float)iCount : 0.0f;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_a_landing_throws_a_ring_of_dust(void)
+{
+    static tMechaQuad aStorage[MECHA_QUAD_CAPACITY];
+    tMechaQuadList list;
+    tMechaWorld world;
+    tMechaEffect *pDust = NULL;
+    float fEarly;
+    float fLate;
+    int i;
+
+    start_duel(&world, 0, 0, 0, 0xD057u, 1);
+    mecha_sim_spawn_effect(&world, MECHA_FX_DUST, MECHA_M(5.0f), 0.0f,
+                           MECHA_M(-3.0f), MECHA_M(6.0f), 137,
+                           MECHA_SEC(0.45f));
+    for (i = 0; i < MECHA_MAX_EFFECTS; i++) {
+        if (world.aEffects[i].bActive
+            && world.aEffects[i].byKind == MECHA_FX_DUST) {
+            pDust = &world.aEffects[i];
+            break;
+        }
+    }
+    CHECK(pDust != NULL);
+
+    /* --- with the bank: a ring of textured puffs ------------------------ */
+    mecha_mesh_set_sprites(true);
+    pDust->iAge = pDust->iLife / 5;
+    mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
+    mecha_mesh_effects(&list, &world, 0);
+    CHECK(list.iCount == MECHA_DUST_PUFFS);
+    for (i = 0; i < list.iCount; i++) {
+        const tMechaQuad *pQuad = &aStorage[i];
+
+        CHECK(pQuad->byTexBank == MECHA_TEX_EFFECT);
+        CHECK(pQuad->byTile >= MECHA_SPRITE_SMOKE_FIRST);
+        CHECK(pQuad->byTile <= MECHA_SPRITE_SMOKE_LAST);
+        /* Flat on the floor, and sorted as something lying on it. */
+        CHECK(fabsf(pQuad->afNormal[1]) > 0.9f);
+        CHECK((pQuad->byFlags & MECHA_QUAD_DECAL) != 0);
+    }
+    fEarly = mean_ring_radius(&list, MECHA_M(5.0f), MECHA_M(-3.0f));
+
+    pDust->iAge = pDust->iLife * 3 / 4;
+    mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
+    mecha_mesh_effects(&list, &world, 0);
+    fLate = mean_ring_radius(&list, MECHA_M(5.0f), MECHA_M(-3.0f));
+
+    printf("   dust ring: %.1f m across early, %.1f m late\n",
+           2.0f * fEarly / MECHA_METRE, 2.0f * fLate / MECHA_METRE);
+    /* Radiating outwards is the whole point: a ring that stayed put would
+     * be the old single square with extra steps. */
+    CHECK(fLate > fEarly * 1.5f);
+
+    /* --- without it: the old stain, and only one of it ------------------ */
+    mecha_mesh_set_sprites(false);
+    mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
+    mecha_mesh_effects(&list, &world, 0);
+    CHECK(list.iCount == 1);
+    CHECK((aStorage[0].byFlags & MECHA_QUAD_SHADOW) != 0);
+    mecha_mesh_set_sprites(true);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static int test_sky_carries_a_cloud_dome(void)
 {
     static tMechaQuad aStorage[MECHA_QUAD_CAPACITY];
@@ -2903,6 +2992,8 @@ int main(void)
         { "nothing is built coplanar", test_nothing_is_built_coplanar },
         { "blasts draw over what they engulf",
           test_blasts_draw_over_what_they_engulf },
+        { "a landing throws a ring of dust",
+          test_a_landing_throws_a_ring_of_dust },
         { "sky carries a cloud dome", test_sky_carries_a_cloud_dome },
         { "shots carry plasma frames", test_shots_carry_plasma_frames },
         { "death throws debris", test_death_throws_debris },

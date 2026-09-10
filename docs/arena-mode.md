@@ -255,6 +255,15 @@ Both are read every frame, so either works at any time.
   anything the face lacks is drawn from the mode's own glyphs, at the pen
   position the retail advance table says it occupies and in the retail
   face's colour, so the two stay in step across a string.
+- **A landing throws a ring of dust.** Seven flat puffs of the smoke
+  sequence sliding outwards along the ground from the feet, spaced evenly
+  and then jittered off the spokes so a touchdown does not read as a cog.
+  It was one expanding square before, which read as a stain spreading
+  rather than as anything being kicked up. They are decals, sorted on top
+  of the floor like a shadow but filled like a sprite -- that is what
+  `MECHA_QUAD_DECAL` is for, as against `MECHA_QUAD_SHADOW`, which also
+  says how the quad is filled. With no sprite bank the old single stain is
+  still there.
 - **Blasts throw debris.** A kill spawns a short flash plus a burst of
   particles that fly out, fall under gravity, shrink, and cool down a warm
   palette ramp.

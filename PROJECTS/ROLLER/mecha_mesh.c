@@ -1011,6 +1011,30 @@ static void mecha_add_tracer(tMechaQuadList *pList, int iCameraYaw,
 }
 
 //-------------------------------------------------------------------------------------------------
+
+/*
+ * The roster paints its tracers in six colours (mecha_defs.c names them
+ * PAL_TRACER_*), and a bolt is drawn from whichever recoloured copy of the
+ * plasma frames sits nearest to that. Anything unrecognised keeps the blue
+ * the frames were drawn in.
+ */
+int mecha_bolt_bank(uint8_t byPalette)
+{
+  switch (byPalette) {
+  case 171:                       /* orange */
+  case 206:                       /* amber  */
+  case 34:                        /* sand   */
+    return MECHA_TEX_EFFECT_WARM;
+  case 192:                       /* violet */
+    return MECHA_TEX_EFFECT_VIOLET;
+  case 255:                       /* green  */
+    return MECHA_TEX_EFFECT_GREEN;
+  default:
+    return MECHA_TEX_EFFECT;      /* cyan and white are close enough to it */
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
 /* Draw order */
 
 /*
@@ -1269,6 +1293,49 @@ void mecha_mesh_projectiles(tMechaQuadList *pList, const tMechaWorld *pWorld,
       break;
     }
 
+    case MECHA_PROJ_SHELL: {
+      /*
+       * The standing fireball. Drawn as a shell of puffs on its surface
+       * rather than one billboard, because what has to read is where the
+       * edge of it is: everything inside is being burned and everything
+       * shot into it is being eaten, and a flat disc says nothing about
+       * which side of that line a machine is on.
+       */
+      int iPuff;
+
+      if (!s_bSprites) {
+        mecha_add_billboard(pList, iCameraYaw, pShot->fX, pShot->fY,
+                            pShot->fZ, pShot->fRadius, pShot->byPalette);
+        break;
+      }
+      for (iPuff = 0; iPuff < MECHA_SHELL_PUFFS; iPuff++) {
+        uint32_t uiHash = mecha_cloud_hash((uint32_t)(i * 131 + iPuff));
+        int iAzimuth = (int)(uiHash & (uint32_t)(MECHA_ANGLE_FULL - 1));
+        /* Spread over the sphere rather than round its waist, so it is a
+         * ball from any angle. */
+        int iElevation = (int)((uiHash >> 14) % (uint32_t)MECHA_ANGLE_HALF)
+                         - MECHA_ANGLE_QUARTER;
+        float afDir[3];
+        float fSize = pShot->fRadius * 0.42f;
+
+        afDir[0] = mecha_cos(iElevation) * mecha_sin(iAzimuth);
+        afDir[1] = mecha_sin(iElevation);
+        afDir[2] = mecha_cos(iElevation) * mecha_cos(iAzimuth);
+        mecha_add_billboard(pList, iCameraYaw,
+                            pShot->fX + afDir[0] * pShot->fRadius,
+                            pShot->fY + afDir[1] * pShot->fRadius,
+                            pShot->fZ + afDir[2] * pShot->fRadius,
+                            fSize, pShot->byPalette);
+        mecha_tag_texture(pList, MECHA_TEX_EFFECT,
+                          MECHA_SPRITE_BLAST_FIRST
+                          + (int)((uiHash >> 24)
+                                  % (uint32_t)(MECHA_SPRITE_BLAST_LAST
+                                               - MECHA_SPRITE_BLAST_FIRST
+                                               + 1)));
+      }
+      break;
+    }
+
     case MECHA_PROJ_MELEE:
       /* The swing itself -- a broad bright arc rather than a projectile. */
       mecha_add_billboard(pList, iCameraYaw, pShot->fX, pShot->fY, pShot->fZ,
@@ -1291,7 +1358,7 @@ void mecha_mesh_projectiles(tMechaQuadList *pList, const tMechaWorld *pWorld,
         mecha_add_billboard(pList, iCameraYaw, pShot->fX, pShot->fY,
                             pShot->fZ, pShot->fRadius * 1.8f,
                             pShot->byPalette);
-        mecha_tag_texture(pList, MECHA_TEX_EFFECT,
+        mecha_tag_texture(pList, mecha_bolt_bank(pShot->byPalette),
                           mecha_plasma_frame(pShot->iAge));
       }
       break;
@@ -1313,7 +1380,7 @@ void mecha_mesh_projectiles(tMechaQuadList *pList, const tMechaWorld *pWorld,
       mecha_add_billboard(pList, iCameraYaw, pShot->fX, pShot->fY, pShot->fZ,
                           pShot->fRadius * (s_bSprites ? 2.0f : 1.4f),
                           pShot->byPalette);
-      mecha_tag_texture(pList, MECHA_TEX_EFFECT,
+      mecha_tag_texture(pList, mecha_bolt_bank(pShot->byPalette),
                         mecha_plasma_frame(pShot->iAge));
       break;
     }
@@ -1460,7 +1527,7 @@ void mecha_mesh_effects(tMechaQuadList *pList, const tMechaWorld *pWorld,
       fSize = pFx->fScale * (1.0f - 0.6f * fAge);
       mecha_add_billboard(pList, iCameraYaw, pFx->fX, pFx->fY, pFx->fZ,
                           fSize, pFx->byPalette);
-      mecha_tag_texture(pList, MECHA_TEX_EFFECT,
+      mecha_tag_texture(pList, mecha_bolt_bank(pFx->byPalette),
                         mecha_plasma_frame(pFx->iAge));
       break;
 

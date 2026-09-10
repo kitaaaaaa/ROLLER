@@ -173,6 +173,11 @@ Both are read every frame, so either works at any time.
   data, so the arena lends the engine one `HorizonColour` entry for the
   length of the call and puts it back. The nine-band sunset gradient this
   replaced was the mode inventing a sky the engine already had.
+- **The machines move faster than they animate.** Speeds went up by about a
+  third across the roster, and a stride is 3.6 metres of ground rather than
+  two: tying the cycle tightly to distance turned the extra speed into a
+  sprint of little steps, where a longer stride reads as something heavy
+  moving quickly.
 - **A boost is a committed act.** The button starts a burst and does not
   hold it up: once it is running, only the clock, an empty gauge, a jump or
   a wall ends it. Letting go does nothing, which is what makes a dash
@@ -182,9 +187,12 @@ Both are read every frame, so either works at any time.
   against the direction you left on and the burst restarts the other way --
   that is the cancel, and it is why commitment is not a trap. Or let the
   stick go and tap a new direction: the burst turns without a second press,
-  and the release is the whole price of it. Holding a different direction
-  down does nothing at all, so leaning on the stick cannot walk a dash round
-  in a circle.
+  and the release is the whole price of it. Either way the clock starts
+  again the new way rather than limping out the remainder of the old one --
+  a crossing step is a dash that changed its mind, not the tail of one, and
+  what stops it going on forever is the gauge, which drains throughout.
+  Holding a different direction down does nothing at all, so leaning on the
+  stick cannot walk a dash round in a circle.
 - **The speed outlives the burst.** A dash that ends hands its momentum to a
   coast: the same drive the walk uses with the authority turned down at both
   ends, so the machine bleeds off what it was carrying slowly and slides
@@ -239,6 +247,33 @@ Both are read every frame, so either works at any time.
   for half a second. A shot fired walking or standing does not: those are the
   states where the heading is yours, and reclaiming it on every trigger pull
   would be the old auto-turn under another name.
+- **Fire is colour coded.** The game's plasma frames are blue and there is
+  only one set of them, so every machine's fire came out the same colour and
+  a crossfire was unreadable. The render layer builds recoloured copies of
+  the bank at run time -- walking each frame's palette indices onto the
+  nearest colour the palette has in the wanted hue at the same brightness,
+  keeping index 0 as index 0 because that is the transparent key -- and
+  uploads them as banks of its own in the engine's spare texture slots. Hue
+  is weighted over brightness in that search, or a wanted violet comes back
+  as a grey of about the right weight, grey being near everything. Warm,
+  violet and green, with cyan and white left on the original blue. Without
+  the data or the palette none are built and every shot is blue again,
+  which is duller and not broken.
+- **Shots settle it between themselves.** Two shots that meet are worth what
+  they do: within a sixth of each other they trade and both are gone, and
+  outside that the heavier one carries on through unchanged. Anything
+  carrying a blast goes off where it was stopped rather than blinking out,
+  so shooting a bomb down is a decision about where it explodes rather than
+  whether it does. Two shots from the same machine ignore each other; a laid
+  mine and a swing carried in front of a machine are not things in flight
+  and take no part.
+- **A bomb leaves a fireball standing.** The blast pays out its damage as it
+  always did, and then a sphere is left behind for about four tenths of a
+  second: it opens from a third of the blast radius to all of it, burns
+  anyone who walks in afterwards -- once each, with whoever was caught by
+  the blast itself marked as already burned -- and eats anything shot
+  through it. It cannot be shot down. Drawn as puffs on its surface rather
+  than as one billboard, because what has to read is where its edge is.
 - **Shots are plasma.** The frames are the retail sky's own cloud puffs --
   `gentex.drh` has no bolt art, and at bolt size a soft blue puff reads as
   plasma. Beams keep their coloured streak and gain a boiling head; homing pods and lobbed charges are the sprite outright. The frames

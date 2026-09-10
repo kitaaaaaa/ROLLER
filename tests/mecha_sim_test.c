@@ -2166,6 +2166,185 @@ static float mean_ring_radius(const tMechaQuadList *pList, float fX,
 
 //-------------------------------------------------------------------------------------------------
 
+/* Drops a shot straight into the world, so a test can stage a meeting
+ * without having to find two machines that would fire it. */
+static tMechaProjectile *stage_shot(tMechaWorld *pWorld, int iOwner,
+                                    uint8_t byKind, float fX, float fZ,
+                                    float fVelZ, float fDamage)
+{
+    int i;
+
+    for (i = 0; i < MECHA_MAX_PROJECTILES; i++) {
+        tMechaProjectile *pShot = &pWorld->aProjectiles[i];
+
+        if (pShot->bActive)
+            continue;
+        memset(pShot, 0, sizeof(*pShot));
+        pShot->bActive = true;
+        pShot->byKind = byKind;
+        pShot->byOwner = (uint8_t)iOwner;
+        pShot->byPalette = 171;
+        pShot->fX = fX;
+        pShot->fY = MECHA_M(6.0f);
+        pShot->fZ = fZ;
+        pShot->fPrevX = fX;
+        pShot->fPrevY = pShot->fY;
+        pShot->fPrevZ = fZ;
+        pShot->fVelZ = fVelZ;
+        pShot->fRadius = MECHA_M(1.2f);
+        pShot->fDamage = fDamage;
+        pShot->iLife = MECHA_TICK_HZ;
+        pShot->iTarget = -1;
+        return pShot;
+    }
+    return NULL;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int count_shots(const tMechaWorld *pWorld, uint8_t byKind)
+{
+    int iCount = 0;
+    int i;
+
+    for (i = 0; i < MECHA_MAX_PROJECTILES; i++) {
+        if (pWorld->aProjectiles[i].bActive
+            && pWorld->aProjectiles[i].byKind == byKind)
+            iCount++;
+    }
+    return iCount;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_shots_trade_on_damage(void)
+{
+    tMechaWorld world;
+    tMechaInput aInputs[2];
+    tMechaProjectile *pHeavy;
+    int i;
+
+    memset(aInputs, 0, sizeof(aInputs));
+
+    /* --- level pegging: both gone -------------------------------------- */
+    {
+        start_duel(&world, 0, 0, 0, 0x7EADu, 1);
+        memset(world.aProjectiles, 0, sizeof(world.aProjectiles));
+        CHECK(stage_shot(&world, 0, MECHA_PROJ_BULLET, 0.0f,
+                         -MECHA_M(3.0f), MECHA_MPS(60.0f), 100.0f) != NULL);
+        CHECK(stage_shot(&world, 1, MECHA_PROJ_BULLET, 0.0f,
+                         MECHA_M(3.0f), -MECHA_MPS(60.0f), 104.0f) != NULL);
+        for (i = 0; i < 10; i++)
+            mecha_sim_tick(&world, aInputs, 2);
+        printf("   level shots left: %d\n",
+               count_shots(&world, MECHA_PROJ_BULLET));
+        CHECK(count_shots(&world, MECHA_PROJ_BULLET) == 0);
+    }
+
+    /* --- one much heavier: it carries on through ------------------------ */
+    {
+        start_duel(&world, 0, 0, 0, 0x7EADu, 1);
+        memset(world.aProjectiles, 0, sizeof(world.aProjectiles));
+        pHeavy = stage_shot(&world, 0, MECHA_PROJ_BULLET, 0.0f,
+                            -MECHA_M(3.0f), MECHA_MPS(60.0f), 300.0f);
+        CHECK(pHeavy != NULL);
+        CHECK(stage_shot(&world, 1, MECHA_PROJ_BULLET, 0.0f,
+                         MECHA_M(3.0f), -MECHA_MPS(60.0f), 60.0f) != NULL);
+        for (i = 0; i < 10; i++)
+            mecha_sim_tick(&world, aInputs, 2);
+        printf("   after a heavy meets a light: %d shot left\n",
+               count_shots(&world, MECHA_PROJ_BULLET));
+        CHECK(count_shots(&world, MECHA_PROJ_BULLET) == 1);
+        CHECK(pHeavy->bActive);
+        CHECK(pHeavy->fDamage > 200.0f);
+    }
+
+    /* --- two of the same machine's shots ignore each other -------------- */
+    {
+        start_duel(&world, 0, 0, 0, 0x7EADu, 1);
+        memset(world.aProjectiles, 0, sizeof(world.aProjectiles));
+        CHECK(stage_shot(&world, 0, MECHA_PROJ_BULLET, 0.0f,
+                         -MECHA_M(3.0f), MECHA_MPS(60.0f), 100.0f) != NULL);
+        CHECK(stage_shot(&world, 0, MECHA_PROJ_BULLET, 0.0f,
+                         MECHA_M(3.0f), -MECHA_MPS(60.0f), 100.0f) != NULL);
+        for (i = 0; i < 10; i++)
+            mecha_sim_tick(&world, aInputs, 2);
+        CHECK(count_shots(&world, MECHA_PROJ_BULLET) == 2);
+    }
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_a_bomb_leaves_a_fireball(void)
+{
+    tMechaWorld world;
+    tMechaInput aInputs[2];
+    tMechaProjectile *pBomb;
+    float fFirstRadius = 0.0f;
+    float fLaterRadius = 0.0f;
+    float fArmourBefore;
+    int iShells;
+    int i;
+
+    memset(aInputs, 0, sizeof(aInputs));
+    start_duel(&world, 0, 0, 0, 0xF12Bu, 1);
+    memset(world.aProjectiles, 0, sizeof(world.aProjectiles));
+
+    /* A bomb going off well clear of both machines. */
+    pBomb = stage_shot(&world, 0, MECHA_PROJ_ARC, MECHA_M(20.0f),
+                       MECHA_M(20.0f), 0.0f, 80.0f);
+    CHECK(pBomb != NULL);
+    pBomb->fBlastRadius = MECHA_M(14.0f);
+    pBomb->fStagger = 0.2f;
+    pBomb->iLife = 1;
+    mecha_sim_tick(&world, aInputs, 2);
+
+    iShells = count_shots(&world, MECHA_PROJ_SHELL);
+    CHECK(iShells == 1);
+    for (i = 0; i < MECHA_MAX_PROJECTILES; i++) {
+        if (world.aProjectiles[i].bActive
+            && world.aProjectiles[i].byKind == MECHA_PROJ_SHELL)
+            fFirstRadius = world.aProjectiles[i].fRadius;
+    }
+
+    /* It opens as it burns. */
+    for (i = 0; i < 8; i++)
+        mecha_sim_tick(&world, aInputs, 2);
+    for (i = 0; i < MECHA_MAX_PROJECTILES; i++) {
+        if (world.aProjectiles[i].bActive
+            && world.aProjectiles[i].byKind == MECHA_PROJ_SHELL)
+            fLaterRadius = world.aProjectiles[i].fRadius;
+    }
+    printf("   fireball opened from %.1f m to %.1f m\n",
+           fFirstRadius / MECHA_METRE, fLaterRadius / MECHA_METRE);
+    CHECK(fLaterRadius > fFirstRadius);
+
+    /* --- and it eats what is shot through it ---------------------------- */
+    CHECK(stage_shot(&world, 1, MECHA_PROJ_BULLET, MECHA_M(20.0f),
+                     MECHA_M(20.0f) - MECHA_M(2.0f), 0.0f, 40.0f) != NULL);
+    mecha_sim_tick(&world, aInputs, 2);
+    CHECK(count_shots(&world, MECHA_PROJ_BULLET) == 0);
+
+    /* --- and burns whoever walks into it -------------------------------- */
+    fArmourBefore = world.aMechs[1].fArmour;
+    world.aMechs[1].fX = MECHA_M(20.0f);
+    world.aMechs[1].fZ = MECHA_M(20.0f);
+    world.aMechs[1].iInvulnTicks = 0;
+    mecha_sim_tick(&world, aInputs, 2);
+    printf("   walking into it cost %.1f armour\n",
+           fArmourBefore - world.aMechs[1].fArmour);
+    CHECK(world.aMechs[1].fArmour < fArmourBefore);
+
+    /* --- and it does not last ------------------------------------------- */
+    for (i = 0; i < MECHA_SHELL_TICKS + 4; i++)
+        mecha_sim_tick(&world, aInputs, 2);
+    CHECK(count_shots(&world, MECHA_PROJ_SHELL) == 0);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static int test_a_landing_throws_a_ring_of_dust(void)
 {
     static tMechaQuad aStorage[MECHA_QUAD_CAPACITY];
@@ -2992,6 +3171,8 @@ int main(void)
         { "nothing is built coplanar", test_nothing_is_built_coplanar },
         { "blasts draw over what they engulf",
           test_blasts_draw_over_what_they_engulf },
+        { "shots trade on damage", test_shots_trade_on_damage },
+        { "a bomb leaves a fireball", test_a_bomb_leaves_a_fireball },
         { "a landing throws a ring of dust",
           test_a_landing_throws_a_ring_of_dust },
         { "sky carries a cloud dome", test_sky_carries_a_cloud_dome },

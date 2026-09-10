@@ -335,6 +335,52 @@ int main(int argc, char **argv)
             snprintf(szName, sizeof(szName), "arena_rig%d.png", iStep);
             dump_frame(szOutDir, szName);
         }
+        /*
+         * Four bolts in a row, one per recoloured copy of the plasma
+         * frames. The tint is built out of the palette at run time, so the
+         * only way to know it worked is to look at it.
+         */
+        {
+            static const uint8 abyTracer[4] = { 218, 171, 192, 255 };
+            int iShot;
+
+            memset(s_World.aProjectiles, 0, sizeof(s_World.aProjectiles));
+            for (iShot = 0; iShot < 4; iShot++) {
+                tMechaProjectile *pShot = &s_World.aProjectiles[iShot];
+
+                memset(pShot, 0, sizeof(*pShot));
+                pShot->bActive = true;
+                pShot->byKind = MECHA_PROJ_HOMING;   /* drawn as the sprite */
+                pShot->byOwner = (uint8_t)iPlayer;
+                pShot->byPalette = abyTracer[iShot];
+                pShot->fX = MECHA_M(-9.0f) + MECHA_M(6.0f) * (float)iShot;
+                pShot->fY = MECHA_M(7.0f);
+                pShot->fZ = -MECHA_M(6.0f);
+                pShot->fPrevX = pShot->fX;
+                pShot->fPrevY = pShot->fY;
+                pShot->fPrevZ = pShot->fZ;
+                pShot->fRadius = MECHA_M(1.6f);
+                pShot->iLife = MECHA_TICK_HZ;
+                pShot->iTarget = -1;
+            }
+            mecha_render_frame(pRenderer, &s_World, &s_Camera, iPlayer,
+                               s_aFrame, FRAME_W, FRAME_H,
+                               s_aQuads, MECHA_QUAD_CAPACITY);
+            dump_frame(szOutDir, "arena_tints.png");
+            /*
+             * Every recoloured bank is built out of the palette the moment
+             * a shot first asks for one, so having drawn four of them, all
+             * three tints must be up -- or the data was never there and
+             * none of them are.
+             */
+            printf("   %d of 3 bolt tints built (%s)\n",
+                   mecha_render_tints_active(),
+                   mecha_render_sprites_active() ? "textured" : "flat");
+            CHECK(mecha_render_tints_active() == 3
+                  || !mecha_render_sprites_active());
+            memset(s_World.aProjectiles, 0, sizeof(s_World.aProjectiles));
+        }
+
         /* And a landing, from the same camera: the dust ring wants looking
          * at more than the walk cycle does, being the one effect that is
          * meant to be read from above. */

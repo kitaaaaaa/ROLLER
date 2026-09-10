@@ -885,6 +885,13 @@ static void mecha_steer_dash(tMechaMech *pMech, const tMechaInput *pInput,
   if (pMech->bDashStickFree && fStick > MECHA_DASH_STICK_TAP) {
     pMech->fDashDirX = fDirX;
     pMech->fDashDirZ = fDirZ;
+    /*
+     * And the burst starts again the new way rather than limping out the
+     * remainder of the old one. A crossing step is a dash that changed its
+     * mind, not the tail of one -- what stops it going on forever is the
+     * gauge, which is still draining the whole time.
+     */
+    pMech->iStateTicks = 0;
     /* One turn per release, so leaning on the stick does not steer the
      * burst round in a circle. */
     pMech->bDashStickFree = false;
@@ -1216,7 +1223,14 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
       fLean = (float)MECHA_DEG(3);
     pMech->fLeanRoll = mecha_approachf(pMech->fLeanRoll, fLean,
                                        (float)MECHA_DEG(40) * MECHA_DT);
-    pMech->fStepPhase += fSpeed * MECHA_DT / (2.0f * MECHA_METRE);
+    /*
+     * Metres per stride, and it is deliberately long. The machines cover
+     * ground faster than they used to and a cycle tied tightly to distance
+     * turned that into a sprint of little steps; a longer stride reads as
+     * something heavy moving quickly rather than as something small moving
+     * frantically.
+     */
+    pMech->fStepPhase += fSpeed * MECHA_DT / MECHA_STRIDE_METRES;
     if (pMech->fStepPhase > 1000.0f)
       pMech->fStepPhase -= 1000.0f;
 
@@ -1604,6 +1618,108 @@ static bool mecha_segment_hits_cylinder(float fX0, float fY0, float fZ0,
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * The fireball a blast leaves standing. The explosion itself has already
+ * paid out its damage to everyone within reach, so those are marked as
+ * burned before the shell has drawn a breath: what is left for it to do is
+ * catch whoever walks in afterwards, and stop anything shot through it.
+ */
+static void mecha_spawn_shell(tMechaWorld *pWorld,
+                              const tMechaProjectile *pSource)
+{
+  tMechaProjectile *pShell = mecha_alloc_projectile(pWorld);
+  int i;
+
+  if (!pShell)
+    return;
+
+  memset(pShell, 0, sizeof(*pShell));
+  pShell->bActive = true;
+  pShell->byKind = MECHA_PROJ_SHELL;
+  pShell->byOwner = pSource->byOwner;
+  pShell->byPalette = pSource->byPalette;
+  pShell->fX = pSource->fX;
+  pShell->fY = pSource->fY;
+  pShell->fZ = pSource->fZ;
+  pShell->fPrevX = pSource->fX;
+  pShell->fPrevY = pSource->fY;
+  pShell->fPrevZ = pSource->fZ;
+  pShell->fBlastRadius = pSource->fBlastRadius;
+  pShell->fRadius = pSource->fBlastRadius * MECHA_SHELL_OPEN;
+  pShell->fDamage = pSource->fDamage;
+  pShell->fStagger = pSource->fStagger;
+  pShell->iLife = MECHA_SHELL_TICKS;
+  pShell->iTarget = -1;
+
+  for (i = 0; i < MECHA_MAX_MECHS; i++) {
+    const tMechaMech *pMech = &pWorld->aMechs[i];
+    const tMechaMechDef *pDef;
+    float fDist;
+
+    if (!pMech->bActive)
+      continue;
+    if (i == (int)pShell->byOwner || !mecha_mech_alive(pMech)) {
+      pShell->byHitMask |= (uint8_t)(1u << i);
+      continue;
+    }
+    pDef = mecha_mech_def(pMech);
+    fDist = mecha_length3(pMech->fX - pShell->fX,
+                          (pMech->fY + pDef->fHeight * 0.5f) - pShell->fY,
+                          pMech->fZ - pShell->fZ) - pDef->fRadius;
+    if (fDist < pShell->fBlastRadius)
+      pShell->byHitMask |= (uint8_t)(1u << i);
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/* Opens the fireball a little further and burns anyone new inside it. */
+static void mecha_update_shell(tMechaWorld *pWorld, tMechaProjectile *pShell)
+{
+  float fOpen;
+  int i;
+
+  pShell->iAge++;
+  if (--pShell->iLife <= 0) {
+    pShell->bActive = false;
+    return;
+  }
+
+  fOpen = (float)pShell->iAge / (float)MECHA_SHELL_TICKS;
+  if (fOpen > 1.0f)
+    fOpen = 1.0f;
+  pShell->fRadius = pShell->fBlastRadius
+                    * (MECHA_SHELL_OPEN + (1.0f - MECHA_SHELL_OPEN) * fOpen);
+
+  for (i = 0; i < MECHA_MAX_MECHS; i++) {
+    tMechaMech *pMech = &pWorld->aMechs[i];
+    const tMechaMechDef *pDef;
+    float fDist;
+
+    if ((pShell->byHitMask & (uint8_t)(1u << i)) != 0)
+      continue;
+    if (!mecha_mech_alive(pMech) || pMech->iInvulnTicks > 0)
+      continue;
+    pDef = mecha_mech_def(pMech);
+    fDist = mecha_length3(pMech->fX - pShell->fX,
+                          (pMech->fY + pDef->fHeight * 0.5f) - pShell->fY,
+                          pMech->fZ - pShell->fZ) - pDef->fRadius;
+    if (fDist >= pShell->fRadius)
+      continue;
+
+    pShell->byHitMask |= (uint8_t)(1u << i);
+    mecha_sim_damage(pWorld, i, (int)pShell->byOwner,
+                     pShell->fDamage * MECHA_SHELL_TOUCH,
+                     pShell->fStagger * MECHA_SHELL_TOUCH, 0.0f, 0.0f);
+    mecha_sim_spawn_effect(pWorld, MECHA_FX_IMPACT, pMech->fX,
+                           pMech->fY + pDef->fHeight * 0.5f, pMech->fZ,
+                           pDef->fRadius, pShell->byPalette,
+                           MECHA_SEC(0.2f));
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static void mecha_projectile_detonate(tMechaWorld *pWorld,
                                       tMechaProjectile *pShot,
                                       int iDirectVictim)
@@ -1612,6 +1728,7 @@ static void mecha_projectile_detonate(tMechaWorld *pWorld,
     mecha_sim_explode(pWorld, (int)pShot->byOwner, pShot->fX, pShot->fY,
                       pShot->fZ, pShot->fBlastRadius, pShot->fDamage,
                       pShot->fStagger, pShot->byPalette);
+    mecha_spawn_shell(pWorld, pShot);
   } else if (iDirectVictim >= 0) {
     float fLen = mecha_length3(pShot->fVelX, pShot->fVelY, pShot->fVelZ);
     float fPushX = 0.0f;
@@ -1703,6 +1820,94 @@ static void mecha_home_projectile(tMechaWorld *pWorld,
 
 //-------------------------------------------------------------------------------------------------
 
+/* Shots that meet in the air settle it between themselves. A mine sitting
+ * on the floor and a swing carried in front of a machine are neither of
+ * them things in flight, so neither takes part. */
+static bool mecha_shot_trades(const tMechaProjectile *pShot)
+{
+  return pShot->byKind != MECHA_PROJ_MINE
+      && pShot->byKind != MECHA_PROJ_MELEE;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * Fire against fire.
+ *
+ * Two shots that meet are worth what they do: within a sixth of each other
+ * they trade, both gone, and outside that the heavier one carries on
+ * through unchanged. It is what makes a siege shell worth the wind-up and a
+ * spread worth firing at one -- and it is why a wall of fire is a wall
+ * rather than a suggestion.
+ *
+ * Anything carrying a blast goes off where it was stopped rather than
+ * blinking out, so shooting a bomb down is a decision about where it
+ * explodes rather than whether it does.
+ */
+static void mecha_trade_projectiles(tMechaWorld *pWorld)
+{
+  int i;
+  int j;
+
+  for (i = 0; i < MECHA_MAX_PROJECTILES; i++) {
+    tMechaProjectile *pA = &pWorld->aProjectiles[i];
+
+    if (!pA->bActive || !mecha_shot_trades(pA))
+      continue;
+
+    for (j = i + 1; j < MECHA_MAX_PROJECTILES; j++) {
+      tMechaProjectile *pB = &pWorld->aProjectiles[j];
+      bool bShellA = pA->byKind == MECHA_PROJ_SHELL;
+      bool bShellB = pB->byKind == MECHA_PROJ_SHELL;
+      float fReach;
+      float fGap;
+      float fHigher;
+
+      if (!pB->bActive || !mecha_shot_trades(pB))
+        continue;
+      /* A fireball is everybody's problem; two shots from the same machine
+       * are nobody's. */
+      if (!bShellA && !bShellB && pA->byOwner == pB->byOwner)
+        continue;
+      if (bShellA && bShellB)
+        continue;
+
+      fReach = pA->fRadius + pB->fRadius;
+      if (mecha_length3(pA->fX - pB->fX, pA->fY - pB->fY, pA->fZ - pB->fZ)
+          > fReach)
+        continue;
+
+      if (bShellA) {
+        mecha_projectile_detonate(pWorld, pB, -1);
+        continue;
+      }
+      if (bShellB) {
+        mecha_projectile_detonate(pWorld, pA, -1);
+        break;
+      }
+
+      fHigher = pA->fDamage > pB->fDamage ? pA->fDamage : pB->fDamage;
+      fGap = pA->fDamage - pB->fDamage;
+      if (fGap < 0.0f)
+        fGap = -fGap;
+
+      if (fGap <= fHigher * MECHA_SHOT_TRADE_MARGIN) {
+        mecha_projectile_detonate(pWorld, pB, -1);
+        mecha_projectile_detonate(pWorld, pA, -1);
+        break;
+      }
+      if (pA->fDamage > pB->fDamage) {
+        mecha_projectile_detonate(pWorld, pB, -1);
+        continue;
+      }
+      mecha_projectile_detonate(pWorld, pA, -1);
+      break;
+    }
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static void mecha_update_projectiles(tMechaWorld *pWorld)
 {
   int i;
@@ -1718,6 +1923,11 @@ static void mecha_update_projectiles(tMechaWorld *pWorld)
 
     if (!pShot->bActive)
       continue;
+
+    if (pShot->byKind == MECHA_PROJ_SHELL) {
+      mecha_update_shell(pWorld, pShot);
+      continue;
+    }
 
     bMine = pShot->byKind == MECHA_PROJ_MINE;
 
@@ -2355,6 +2565,9 @@ void mecha_sim_tick(tMechaWorld *pWorld, const tMechaInput *paInputs,
   }
 
   mecha_update_projectiles(pWorld);
+  /* After they have moved, so two shots closing head on meet where they
+   * actually met rather than a tick either side of it. */
+  mecha_trade_projectiles(pWorld);
   mecha_update_effects(pWorld);
   mecha_resolve_overlaps(pWorld);
 

@@ -100,7 +100,14 @@ typedef enum
   MECHA_PROJ_BEAM   = 2,  /* fast, flat, pierces nothing but travels far */
   MECHA_PROJ_ARC    = 3,  /* lobbed, falls under its own gravity */
   MECHA_PROJ_MINE   = 4,  /* drops, arms, then detonates on proximity */
-  MECHA_PROJ_MELEE  = 5   /* short-lived hitbox carried in front of the mech */
+  MECHA_PROJ_MELEE  = 5,  /* short-lived hitbox carried in front of the mech */
+  /*
+   * What a bomb leaves behind: a standing sphere of fire that hurts anything
+   * walking into it and swallows shots crossing it. It does not travel and
+   * cannot be shot down; it is the one projectile that is only ever a
+   * hazard, never a target.
+   */
+  MECHA_PROJ_SHELL  = 6
 } eMechaProjectileKind;
 
 //-------------------------------------------------------------------------------------------------
@@ -425,6 +432,12 @@ typedef struct
   int   iHomingRate;
   int   iTarget;            /* -1 for unguided */
   int   iArmTicks;          /* mines ignore everything until this reaches zero */
+  /*
+   * One bit per mech, for a shell: who has already been burned by it. The
+   * blast that spawns it hits everyone standing inside at the time, so those
+   * are marked at birth and the shell only catches whoever walks in after.
+   */
+  uint8_t byHitMask;
 } tMechaProjectile;
 
 //-------------------------------------------------------------------------------------------------

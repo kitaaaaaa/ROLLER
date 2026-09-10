@@ -99,6 +99,11 @@ bool mecha_render_font_is_retail(void);
 
 bool mecha_render_sprites_active(void);
 
+/* How many recoloured copies of the effect bank came up. Three when the
+ * game's data and palette are both there, zero without them -- in which
+ * case every machine's fire is the same blue and the mode still runs. */
+int mecha_render_tints_active(void);
+
 /* True when index byIndex has a colour of its own in the table above rather
  * than the neutral fill. Lets the render test catch a quad that paints with
  * an index nobody gave a colour to. */

@@ -72,6 +72,18 @@ typedef struct
 #define MECHA_TEX_EFFECT  1   /* generic/car bank: explosions, fire, smoke */
 #define MECHA_TEX_WORLD   2   /* track bank: ground, grass, walls */
 #define MECHA_TEX_STRUCT  3   /* building bank: block faces */
+/*
+ * The effect bank again, recoloured. The game's plasma frames are blue and
+ * there is only the one set of them, so every machine's fire came out the
+ * same colour and a crossfire was unreadable. The render layer builds these
+ * by walking the frames' own indices onto a different ramp of the palette
+ * and uploading the result as banks of its own; when it cannot -- no data,
+ * no palette -- they fall back to the blue one and nothing breaks.
+ */
+#define MECHA_TEX_EFFECT_WARM   4
+#define MECHA_TEX_EFFECT_VIOLET 5
+#define MECHA_TEX_EFFECT_GREEN  6
+#define MECHA_TEX_BANK_COUNT    7
 
 /*
  * Frames in the game's generic texture bank. Sequences run start..end
@@ -100,6 +112,11 @@ typedef struct
  * and as a spray from the side; many more and a landing is a smoke screen.
  * Out here because the tests count them. */
 #define MECHA_DUST_PUFFS 7
+
+/* Puffs on the surface of a bomb's standing fireball. Enough that the edge
+ * of it reads as an edge, which is the only thing about it a player has to
+ * judge. */
+#define MECHA_SHELL_PUFFS 16
 
 //-------------------------------------------------------------------------------------------------
 /*
@@ -155,6 +172,15 @@ void mecha_mesh_set_sprites(bool bAvailable);
  * air, which is worse than no cloud at all.
  */
 void mecha_mesh_clouds(tMechaQuadList *pList, const tMechaWorld *pWorld);
+
+/*
+ * Which recoloured copy of the effect bank a shot of this colour should be
+ * drawn from. The mesh has the tracer index and nothing else -- it is the
+ * one piece of the weapon that reaches the geometry -- so the mapping is by
+ * index, and lives next to the roster's own comment about what those
+ * indices mean.
+ */
+int mecha_bolt_bank(uint8_t byPalette);
 
 /*
  * Where a quad belongs in the painter's order: bigger is drawn earlier. The

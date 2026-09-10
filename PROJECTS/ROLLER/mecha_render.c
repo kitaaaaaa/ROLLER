@@ -152,6 +152,7 @@ static tBlockHeader *s_pFontBig;
 static int mecha_font_advance(char cChar);
 static int mecha_font_big_advance(char cChar);
 static bool mecha_bank_ensure(GameRenderer *pRenderer, int iBank);
+static bool mecha_tint_build(GameRenderer *pRenderer, int iBank);
 static TextureHandle mecha_bank_handle(int iBank);
 static bool mecha_bank_has_tile(int iBank, int iTile);
 
@@ -833,10 +834,13 @@ static void mecha_render_scene(GameRenderer *pRenderer,
       int iSprite = ((int)pQuad->byTile & SURFACE_MASK_TEXTURE_INDEX)
                   | SURFACE_FLAG_APPLY_TEXTURE;
 
-      /* Only the effect frames are keyed. Ground, walls and block faces are
-       * solid surfaces, and skipping index 0 in those would punch holes
-       * through the world wherever the artwork happened to use it. */
-      if (pQuad->byTexBank == MECHA_TEX_EFFECT)
+      /* Only the effect frames are keyed -- the recoloured copies of them
+       * included, which is the whole reason they are a bank each. Ground,
+       * walls and block faces are solid surfaces, and skipping index 0 in
+       * those would punch holes through the world wherever the artwork
+       * happened to use it. */
+      if (pQuad->byTexBank == MECHA_TEX_EFFECT
+          || pQuad->byTexBank >= MECHA_TEX_EFFECT_WARM)
         iSprite |= SURFACE_FLAG_PARTIAL_TRANS;
 
       /* The legacy path works its own texture coordinates out inside
@@ -1437,12 +1441,156 @@ typedef struct
 
 static const char *const s_szWorldFile = "track1.drh";
 
-static tMechaTexBank s_aBanks[4] = {
+/*
+ * The recoloured effect banks.
+ *
+ * The game's plasma frames are blue, and there is only one set of them, so
+ * every machine's fire came out the same colour: in a crossfire you could
+ * not tell whose shot was whose, which is the one thing a shot has to say.
+ *
+ * A tint is built by walking each of the frames' palette indices onto the
+ * nearest colour the palette has in the wanted hue at the same brightness,
+ * and uploading the result as a bank of its own -- so the recolour is real
+ * pixels rather than a shading trick the rasteriser does not have. Index 0
+ * stays index 0: that is the transparent key, and everything about these
+ * frames depends on it.
+ *
+ * Slots 20 and up: the engine's texture-count table only ever speaks for 0,
+ * 17, 18 and 19, so the ones above that are free for the arena to take, and
+ * the count for them is set alongside the upload.
+ */
+#define MECHA_TINT_SLOT_FIRST 20
+/* Enough rows to hold every frame up to the last plasma one. */
+#define MECHA_TINT_TILES      (MECHA_SPRITE_PLASMA_LAST + 1)
+#define MECHA_TINT_PIXELS     (256 * 256)
+
+static uint8 s_aabyTintPixels[3][MECHA_TINT_PIXELS];
+
+/* Hue per tinted bank, in the order MECHA_TEX_EFFECT_WARM onwards. */
+static const struct
+{
+  float fR;
+  float fG;
+  float fB;
+} s_aTintHue[3] = {
+  { 1.00f, 0.62f, 0.20f },   /* warm: orange, amber, sand */
+  { 0.72f, 0.42f, 1.00f },   /* violet                    */
+  { 0.42f, 1.00f, 0.46f },   /* green                     */
+};
+
+static tMechaTexBank s_aBanks[MECHA_TEX_BANK_COUNT] = {
   { 0,                     0,  0, 0, false },   /* NONE   */
   { TEXTURE_BANK_CARGEN,   18, 0, 0, false },   /* EFFECT */
   { 0,                     19, 0, 0, false },   /* WORLD  */
   { TEXTURE_BANK_BUILDING, 17, 0, 0, false },   /* STRUCT */
+  { MECHA_TINT_SLOT_FIRST + 0, MECHA_TINT_SLOT_FIRST + 0, 0, 0, false },
+  { MECHA_TINT_SLOT_FIRST + 1, MECHA_TINT_SLOT_FIRST + 1, 0, 0, false },
+  { MECHA_TINT_SLOT_FIRST + 2, MECHA_TINT_SLOT_FIRST + 2, 0, 0, false },
 };
+
+/*
+ * Builds one recoloured copy of the effect bank and hands it to the
+ * renderer. Returns false when there is nothing to recolour from -- no
+ * frames, or no palette to find colours in -- and the caller then falls
+ * back to the blue original, which is a duller picture and not a broken
+ * one.
+ */
+static bool mecha_tint_build(GameRenderer *pRenderer, int iBank)
+{
+  int iTint = iBank - MECHA_TEX_EFFECT_WARM;
+  tMechaTexBank *pDest = &s_aBanks[iBank];
+  uint8 abyMap[256];
+  int iTileSize;
+  int iPerRow;
+  int iRows;
+  int iHeight;
+  int iPixel;
+  int i;
+  bool bPalette = false;
+
+  if (iTint < 0 || iTint >= 3)
+    return false;
+  if (!mecha_bank_ensure(pRenderer, MECHA_TEX_EFFECT) || !cargen_vga)
+    return false;
+  if (s_aBanks[MECHA_TEX_EFFECT].iTiles < MECHA_TINT_TILES)
+    return false;
+
+  for (i = 1; i < 256 && !bPalette; i++) {
+    if (palette[i].byR || palette[i].byG || palette[i].byB)
+      bPalette = true;
+  }
+  if (!bPalette)
+    return false;
+
+  iTileSize = gfx_size ? 32 : 64;
+  iPerRow = 256 / iTileSize;
+  iRows = (MECHA_TINT_TILES + iPerRow - 1) / iPerRow;
+  iHeight = iRows * iTileSize;
+  if (iHeight * 256 > MECHA_TINT_PIXELS)
+    return false;
+
+  /*
+   * For every colour the frames use, the nearest colour the palette has to
+   * that same brightness in the wanted hue. Searching the whole palette
+   * rather than assuming a ramp: the retail palette is a handful of ramps
+   * of different lengths and this way the tint uses whichever of them
+   * happens to run in the right direction.
+   */
+  abyMap[0] = 0;
+  for (i = 1; i < 256; i++) {
+    float fLevel = (0.30f * (float)palette[i].byR
+                    + 0.59f * (float)palette[i].byG
+                    + 0.11f * (float)palette[i].byB);
+    float fWantR = s_aTintHue[iTint].fR * fLevel;
+    float fWantG = s_aTintHue[iTint].fG * fLevel;
+    float fWantB = s_aTintHue[iTint].fB * fLevel;
+    float fBest = 1e30f;
+    int iBest = i;
+    int j;
+
+    for (j = 1; j < 256; j++) {
+      float fDr = (float)palette[j].byR - fWantR;
+      float fDg = (float)palette[j].byG - fWantG;
+      float fDb = (float)palette[j].byB - fWantB;
+      /*
+       * Hue counts for more than weight. A plain nearest-colour search
+       * happily answers a wanted violet with a grey of about the right
+       * brightness, because grey is never far from anything; weighting the
+       * part of the error that is off the grey axis keeps the ramps
+       * coloured, which is the only reason any of this exists.
+       */
+      float fGrey = (fDr + fDg + fDb) / 3.0f;
+      float fCr = fDr - fGrey;
+      float fCg = fDg - fGrey;
+      float fCb = fDb - fGrey;
+      float fCost = fGrey * fGrey
+                  + 4.0f * (fCr * fCr + fCg * fCg + fCb * fCb);
+
+      if (fCost < fBest) {
+        fBest = fCost;
+        iBest = j;
+      }
+    }
+    abyMap[i] = (uint8)iBest;
+  }
+
+  for (iPixel = 0; iPixel < iHeight * 256; iPixel++)
+    s_aabyTintPixels[iTint][iPixel] = abyMap[cargen_vga[iPixel]];
+
+  /* The renderer reads a bank's tile count out of this table, so the slot
+   * has to speak for itself before the upload is worth anything. */
+  num_textures[pDest->iCountSlot] = MECHA_TINT_TILES;
+  pDest->hTexture = game_render_load_texture(pRenderer,
+                                             s_aabyTintPixels[iTint], 256,
+                                             iHeight, pDest->iEngineBank,
+                                             gfx_size);
+  if (pDest->hTexture == TEXTURE_HANDLE_INVALID) {
+    num_textures[pDest->iCountSlot] = 0;
+    return false;
+  }
+  pDest->iTiles = MECHA_TINT_TILES;
+  return true;
+}
 
 static bool mecha_file_present(const char *szFile)
 {
@@ -1462,11 +1610,18 @@ static bool mecha_bank_ensure(GameRenderer *pRenderer, int iBank)
   tMechaTexBank *pBank;
   uint8 *pPixels = NULL;
 
-  if (iBank <= MECHA_TEX_NONE || iBank > MECHA_TEX_STRUCT || !pRenderer)
+  if (iBank <= MECHA_TEX_NONE || iBank >= MECHA_TEX_BANK_COUNT || !pRenderer)
     return false;
   pBank = &s_aBanks[iBank];
   if (pBank->hTexture != TEXTURE_HANDLE_INVALID)
     return true;
+
+  if (iBank >= MECHA_TEX_EFFECT_WARM) {
+    if (pBank->bTried)
+      return false;
+    pBank->bTried = true;
+    return mecha_tint_build(pRenderer, iBank);
+  }
 
   /* Already loaded by the race, in which case it is ours to use. */
   if (num_textures[pBank->iCountSlot] > 0) {
@@ -1525,7 +1680,7 @@ static bool mecha_bank_ensure(GameRenderer *pRenderer, int iBank)
 
 static TextureHandle mecha_bank_handle(int iBank)
 {
-  if (iBank <= MECHA_TEX_NONE || iBank > MECHA_TEX_STRUCT)
+  if (iBank <= MECHA_TEX_NONE || iBank >= MECHA_TEX_BANK_COUNT)
     return TEXTURE_HANDLE_INVALID;
   return s_aBanks[iBank].hTexture;
 }
@@ -1533,7 +1688,7 @@ static TextureHandle mecha_bank_handle(int iBank)
 /* True when the loaded bank actually has this tile. */
 static bool mecha_bank_has_tile(int iBank, int iTile)
 {
-  if (iBank <= MECHA_TEX_NONE || iBank > MECHA_TEX_STRUCT)
+  if (iBank <= MECHA_TEX_NONE || iBank >= MECHA_TEX_BANK_COUNT)
     return false;
   return iTile >= 0 && iTile < s_aBanks[iBank].iTiles;
 }
@@ -1551,6 +1706,21 @@ bool mecha_render_font_is_retail(void)
 {
   return s_pFont != NULL;
 }
+
+int mecha_render_tints_active(void)
+{
+  int iCount = 0;
+  int i;
+
+  for (i = MECHA_TEX_EFFECT_WARM; i < MECHA_TEX_BANK_COUNT; i++) {
+    if (s_aBanks[i].hTexture != TEXTURE_HANDLE_INVALID
+        && s_aBanks[i].iTiles > 0)
+      iCount++;
+  }
+  return iCount;
+}
+
+//-------------------------------------------------------------------------------------------------
 
 bool mecha_render_sprites_active(void)
 {

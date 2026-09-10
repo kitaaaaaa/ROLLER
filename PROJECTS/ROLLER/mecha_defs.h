@@ -172,6 +172,26 @@
  * What is left afterwards is the coast: the speed carries, the steering is
  * feeble, and the machine skids rather than turning.
  */
+/* How far a machine travels per stride of the walk cycle. */
+/*
+ * The fireball a bomb leaves standing. It opens from a third of the blast
+ * radius to all of it, and for as long as it is there it burns anything
+ * that walks in and eats anything shot through it.
+ */
+#define MECHA_SHELL_TICKS       MECHA_SEC(0.42f)
+#define MECHA_SHELL_OPEN        0.34f
+/* Walking into the fire afterwards is worth less than being caught by the
+ * blast itself, which has already been paid out. */
+#define MECHA_SHELL_TOUCH       0.5f
+
+/*
+ * Shots meeting in the air. Within this much of each other's damage they
+ * trade -- both gone -- and outside it the heavier one carries on through.
+ */
+#define MECHA_SHOT_TRADE_MARGIN 0.15f
+
+#define MECHA_STRIDE_METRES     MECHA_M(3.6f)
+
 #define MECHA_DASH_COAST_TICKS  MECHA_SEC(0.55f)
 #define MECHA_COAST_ACCEL_SCALE 0.22f
 #define MECHA_COAST_GRIP_SCALE  0.18f

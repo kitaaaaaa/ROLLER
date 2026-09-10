@@ -144,6 +144,15 @@ void mecha_mesh_set_sprites(bool bAvailable);
  */
 void mecha_mesh_clouds(tMechaQuadList *pList, const tMechaWorld *pWorld);
 
+/*
+ * Where a quad belongs in the painter's order: bigger is drawn earlier. The
+ * renderer sorts on this and nothing else, so it lives here, with the
+ * geometry it describes, and can be measured by the tests rather than
+ * inferred from what the screen looks like.
+ */
+float mecha_quad_depth_key(const tMechaQuad *pQuad, const float afEye[3],
+                           const float afForward[3]);
+
 void mecha_mesh_projectiles(tMechaQuadList *pList, const tMechaWorld *pWorld,
                             int iCameraYaw);
 void mecha_mesh_effects(tMechaQuadList *pList, const tMechaWorld *pWorld,

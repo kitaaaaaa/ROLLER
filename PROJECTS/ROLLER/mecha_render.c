@@ -706,6 +706,7 @@ static void mecha_render_scene(GameRenderer *pRenderer,
   float afRight[3];
   float afUp[3];
   float afForward[3];
+  float afEye[3];
   int iSortCount = 0;
   int iMech;
   int i;
@@ -727,6 +728,9 @@ static void mecha_render_scene(GameRenderer *pRenderer,
   (void)iViewMech;
 
   mecha_camera_basis(pCamera, afRight, afUp, afForward);
+  afEye[0] = pCamera->fX;
+  afEye[1] = pCamera->fY;
+  afEye[2] = pCamera->fZ;
 
   for (i = 0; i < list.iCount; i++) {
     const tMechaQuad *pQuad = &paScratch[i];
@@ -752,9 +756,10 @@ static void mecha_render_scene(GameRenderer *pRenderer,
         continue;
     }
 
-    fDepth = (fCentre[0] - pCamera->fX) * afForward[0]
-           + (fCentre[1] - pCamera->fY) * afForward[1]
-           + (fCentre[2] - pCamera->fZ) * afForward[2];
+    /* The key is the mesh layer's business, not the renderer's: what counts
+     * as the depth of a quad depends on what the quad is, and the quad is
+     * what the mesh knows about. */
+    fDepth = mecha_quad_depth_key(pQuad, afEye, afForward);
     if (fDepth <= 0.0f)
       continue;
 

@@ -140,6 +140,20 @@ Both are read every frame, so either works at any time.
   thick-limbed with an oversized gun on each arm while an interceptor is a
   narrow torso on thin legs. Measured off the mesh as width over standing
   height they span 0.46 to 1.11.
+- **The draw order is the depth buffer.** There isn't one, so a quad is
+  drawn either wholly before another or wholly after, and the key that
+  decides which lives with the geometry in `mecha_quad_depth_key` rather
+  than in the renderer. Most quads sort on their middle. Two do not. A
+  shadow lying on the floor sorts on its nearest corner and the ground
+  beneath it on its farthest, because a tile whose middle falls nearer than
+  the shadow's would otherwise be painted over the top of it and cut the
+  shadow in half along an edge that slides as the camera moves -- and that
+  holds whichever of the two is larger. Self-lit sprites are pulled forward
+  by their own half-width, which is exactly the radius of the volume they
+  stand for: everything inside the fireball is outranked, everything outside
+  it is not, so a shoulder standing clear of a blast still occludes it. The
+  narrower edge is the one measured, so a long tracer cannot claim to be
+  half its length nearer than it is.
 - **There are clouds.** Thirty puffs on a dome around the arena's centre,
   each one tangent to it so it faces the middle -- where the camera is, near
   enough -- rather than being a camera-facing billboard, because a billboard

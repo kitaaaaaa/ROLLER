@@ -1433,6 +1433,371 @@ static int test_arms_and_head_follow_the_lock(void)
 
 //-------------------------------------------------------------------------------------------------
 
+/* The old key, kept here so the test can say what the new one bought. */
+static float quad_centre_key(const tMechaQuad *pQuad, const float afEye[3],
+                             const float afForward[3])
+{
+    float fKey = 0.0f;
+    int v;
+
+    for (v = 0; v < 4; v++) {
+        fKey += 0.25f * ((pQuad->afVert[v][0] - afEye[0]) * afForward[0]
+                       + (pQuad->afVert[v][1] - afEye[1]) * afForward[1]
+                       + (pQuad->afVert[v][2] - afEye[2]) * afForward[2]);
+    }
+    return fKey;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static void quad_ground_span(const tMechaQuad *pQuad, float *pfLowX,
+                             float *pfHighX, float *pfLowZ, float *pfHighZ,
+                             float *pfY)
+{
+    int v;
+
+    *pfLowX = *pfHighX = pQuad->afVert[0][0];
+    *pfLowZ = *pfHighZ = pQuad->afVert[0][2];
+    *pfY = 0.0f;
+    for (v = 0; v < 4; v++) {
+        if (pQuad->afVert[v][0] < *pfLowX)
+            *pfLowX = pQuad->afVert[v][0];
+        if (pQuad->afVert[v][0] > *pfHighX)
+            *pfHighX = pQuad->afVert[v][0];
+        if (pQuad->afVert[v][2] < *pfLowZ)
+            *pfLowZ = pQuad->afVert[v][2];
+        if (pQuad->afVert[v][2] > *pfHighZ)
+            *pfHighZ = pQuad->afVert[v][2];
+        *pfY += 0.25f * pQuad->afVert[v][1];
+    }
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * Counts the decals that would be painted over by ground they lie on. With
+ * no depth buffer the whole picture rests on the order the quads are handed
+ * over in, and this is the one ordering the eye notices: a shadow cut in
+ * half along a floor tile edge that slides about as the camera moves.
+ */
+static int decal_inversions(const tMechaQuadList *pList, const float afEye[3],
+                            const float afForward[3], bool bOldKey)
+{
+    int iBad = 0;
+    int i;
+    int j;
+
+    for (i = 0; i < pList->iCount; i++) {
+        const tMechaQuad *pDecal = &pList->paQuads[i];
+        float fDecalLowX;
+        float fDecalHighX;
+        float fDecalLowZ;
+        float fDecalHighZ;
+        float fDecalY;
+        float fDecalKey;
+
+        if (!(pDecal->byFlags & MECHA_QUAD_SHADOW))
+            continue;
+        quad_ground_span(pDecal, &fDecalLowX, &fDecalHighX, &fDecalLowZ,
+                         &fDecalHighZ, &fDecalY);
+        fDecalKey = bOldKey ? quad_centre_key(pDecal, afEye, afForward)
+                            : mecha_quad_depth_key(pDecal, afEye, afForward);
+
+        for (j = 0; j < pList->iCount; j++) {
+            const tMechaQuad *pGround = &pList->paQuads[j];
+            float fLowX;
+            float fHighX;
+            float fLowZ;
+            float fHighZ;
+            float fY;
+            float fKey;
+
+            if (pGround->byFlags & MECHA_QUAD_SHADOW)
+                continue;
+            if (pGround->afNormal[1] < 0.9f)
+                continue;               /* the ground, not a wall or a hull */
+            quad_ground_span(pGround, &fLowX, &fHighX, &fLowZ, &fHighZ, &fY);
+            if (fY > fDecalY)
+                continue;               /* above the decal: not underneath it */
+            if (fDecalY - fY > MECHA_M(0.5f))
+                continue;               /* a different storey */
+            if (fHighX <= fDecalLowX || fLowX >= fDecalHighX)
+                continue;
+            if (fHighZ <= fDecalLowZ || fLowZ >= fDecalHighZ)
+                continue;
+
+            fKey = bOldKey ? quad_centre_key(pGround, afEye, afForward)
+                           : mecha_quad_depth_key(pGround, afEye, afForward);
+            /* Larger key is drawn first. The ground has to go down before
+             * the shadow lying on it. */
+            if (fKey <= fDecalKey)
+                iBad++;
+        }
+    }
+    return iBad;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_shadows_survive_the_paint_order(void)
+{
+    static tMechaQuad aStorage[MECHA_QUAD_CAPACITY];
+    tMechaQuadList list;
+    tMechaWorld world;
+    tMechaInput aInputs[2];
+    int iWasBad = 0;
+    int iNowBad = 0;
+    int iAngle;
+
+    start_duel(&world, 0, 0, 1, 0x5017u, 1);
+    memset(aInputs, 0, sizeof(aInputs));
+    run_ticks(&world, aInputs, 2, MECHA_TICK_HZ);
+
+    mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
+    mecha_mesh_arena(&list, &world.arena);
+    mecha_mesh_shadows(&list, &world);
+    CHECK(list.iCount > 0);
+
+    /* Walked all the way round, because the failure is a function of where
+     * the camera is: a tile whose middle happens to fall nearer than the
+     * shadow's is what does the damage, and which tile that is depends on
+     * the angle it is seen from. */
+    for (iAngle = 0; iAngle < 16; iAngle++) {
+        int iYaw = iAngle * MECHA_ANGLE_FULL / 16;
+        float afForward[3];
+        float afEye[3];
+
+        afForward[0] = mecha_sin(iYaw);
+        afForward[1] = -0.25f;
+        afForward[2] = mecha_cos(iYaw);
+        afEye[0] = world.aMechs[0].fX - afForward[0] * MECHA_M(26.0f);
+        afEye[1] = MECHA_M(14.0f);
+        afEye[2] = world.aMechs[0].fZ - afForward[2] * MECHA_M(26.0f);
+
+        iWasBad += decal_inversions(&list, afEye, afForward, true);
+        iNowBad += decal_inversions(&list, afEye, afForward, false);
+    }
+
+    printf("   ground painted over a shadow: %d times, was %d\n", iNowBad,
+           iWasBad);
+    /* The old key got this wrong often enough to see; the new one must not
+     * get it wrong at all. */
+    CHECK(iWasBad > 0);
+    CHECK(iNowBad == 0);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * A blast goes off inside a machine, and the machine must not paint over
+ * it. Nothing here can be fixed by nudging geometry -- the two really do
+ * occupy the same space -- so it is the draw order or nothing.
+ */
+/*
+ * Two quads facing the same way, lying in the same plane, overlapping. No
+ * sort can separate them -- whichever is handed over second wins the whole
+ * shared area -- so the only fix is not to build them, and the only way to
+ * know they are not being built is to look.
+ */
+static int coplanar_overlaps(const tMechaQuadList *pList)
+{
+    int iPairs = 0;
+    int i;
+    int j;
+
+    for (i = 0; i < pList->iCount; i++) {
+        const tMechaQuad *pA = &pList->paQuads[i];
+        float fPlaneA = pA->afNormal[0] * pA->afVert[0][0]
+                      + pA->afNormal[1] * pA->afVert[0][1]
+                      + pA->afNormal[2] * pA->afVert[0][2];
+
+        for (j = i + 1; j < pList->iCount; j++) {
+            const tMechaQuad *pB = &pList->paQuads[j];
+            float fDot = pA->afNormal[0] * pB->afNormal[0]
+                       + pA->afNormal[1] * pB->afNormal[1]
+                       + pA->afNormal[2] * pB->afNormal[2];
+            float fPlaneB;
+            int iAxis;
+            int bOverlap = 1;
+
+            if (fDot < 0.999f)
+                continue;               /* not parallel, or facing away */
+            fPlaneB = pB->afNormal[0] * pB->afVert[0][0]
+                    + pB->afNormal[1] * pB->afVert[0][1]
+                    + pB->afNormal[2] * pB->afVert[0][2];
+            if (fabsf(fPlaneA - fPlaneB) > 1.0f)
+                continue;               /* different planes: sortable */
+
+            for (iAxis = 0; iAxis < 3 && bOverlap; iAxis++) {
+                float fLowA = pA->afVert[0][iAxis];
+                float fHighA = fLowA;
+                float fLowB = pB->afVert[0][iAxis];
+                float fHighB = fLowB;
+                int v;
+
+                for (v = 1; v < 4; v++) {
+                    if (pA->afVert[v][iAxis] < fLowA)
+                        fLowA = pA->afVert[v][iAxis];
+                    if (pA->afVert[v][iAxis] > fHighA)
+                        fHighA = pA->afVert[v][iAxis];
+                    if (pB->afVert[v][iAxis] < fLowB)
+                        fLowB = pB->afVert[v][iAxis];
+                    if (pB->afVert[v][iAxis] > fHighB)
+                        fHighB = pB->afVert[v][iAxis];
+                }
+                /* A shared edge is not an overlap: tiles are meant to meet. */
+                if (fHighA - fLowB < 1.0f || fHighB - fLowA < 1.0f)
+                    bOverlap = 0;
+            }
+            if (bOverlap)
+                iPairs++;
+        }
+    }
+    return iPairs;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_nothing_is_built_coplanar(void)
+{
+    static tMechaQuad aStorage[MECHA_QUAD_CAPACITY];
+    tMechaQuadList list;
+    tMechaWorld world;
+    int aiPairs[3];
+    int iArena;
+
+    for (iArena = 0; iArena < 3; iArena++) {
+        start_duel(&world, iArena, iArena, (iArena + 1) % 4, 0xC0D1u, 1);
+        mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
+        mecha_mesh_arena(&list, &world.arena);
+        mecha_mesh_mech(&list, &world, 0);
+        mecha_mesh_mech(&list, &world, 1);
+        mecha_mesh_shadows(&list, &world);
+        aiPairs[iArena] = coplanar_overlaps(&list);
+    }
+
+    printf("   coplanar overlapping pairs per arena: %d, %d, %d\n",
+           aiPairs[0], aiPairs[1], aiPairs[2]);
+    CHECK(aiPairs[0] == 0);
+    CHECK(aiPairs[1] == 0);
+    CHECK(aiPairs[2] == 0);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_blasts_draw_over_what_they_engulf(void)
+{
+    static tMechaQuad aStorage[MECHA_QUAD_CAPACITY];
+    tMechaQuadList list;
+    tMechaWorld world;
+    const tMechaMechDef *pDef;
+    int iHullQuads = 0;
+    int iBadWas = 0;
+    int iBadNow = 0;
+    int iAngle;
+    int iBlast;
+    float fBlastX;
+    float fBlastY;
+    float fBlastZ;
+    float fBlastReach = 0.0f;
+
+    start_duel(&world, 0, 0, 0, 0xB1A5u, 1);
+    pDef = mecha_def_get((int)world.aMechs[0].byDefIdx);
+
+    mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
+    mecha_mesh_mech(&list, &world, 0);
+    iHullQuads = list.iCount;
+    CHECK(iHullQuads > 0);
+
+    /* A blast the size of the machine, centred on its chest. */
+    mecha_sim_spawn_effect(&world, MECHA_FX_EXPLOSION, world.aMechs[0].fX,
+                           world.aMechs[0].fY + 0.6f * pDef->fHeight,
+                           world.aMechs[0].fZ, pDef->fRadius * 1.5f,
+                           pDef->abyPalette[3], MECHA_SEC(0.4f));
+    fBlastX = world.aMechs[0].fX;
+    fBlastY = world.aMechs[0].fY + 0.6f * pDef->fHeight;
+    fBlastZ = world.aMechs[0].fZ;
+    world.iTick += 4;
+    mecha_mesh_effects(&list, &world, 0);
+    iBlast = list.iCount - iHullQuads;
+    CHECK(iBlast > 0);
+
+    /* However big the sprite came out this tick, that is the volume it
+     * stands for and the volume it has to win inside of. */
+    {
+        int v;
+
+        for (v = 0; v < 4; v++) {
+            float fReach = mecha_length3(
+                aStorage[iHullQuads].afVert[v][0] - fBlastX,
+                aStorage[iHullQuads].afVert[v][1] - fBlastY,
+                aStorage[iHullQuads].afVert[v][2] - fBlastZ);
+
+            if (fReach > fBlastReach)
+                fBlastReach = fReach;
+        }
+        fBlastReach *= 0.70f;      /* the inscribed sphere, not the corners */
+    }
+
+    for (iAngle = 0; iAngle < 12; iAngle++) {
+        int iYaw = iAngle * MECHA_ANGLE_FULL / 12;
+        float afForward[3];
+        float afEye[3];
+        int i;
+        int j;
+
+        afForward[0] = mecha_sin(iYaw);
+        afForward[1] = -0.2f;
+        afForward[2] = mecha_cos(iYaw);
+        afEye[0] = world.aMechs[0].fX - afForward[0] * MECHA_M(22.0f);
+        afEye[1] = MECHA_M(12.0f);
+        afEye[2] = world.aMechs[0].fZ - afForward[2] * MECHA_M(22.0f);
+
+        for (i = iHullQuads; i < list.iCount; i++) {
+            float fNow = mecha_quad_depth_key(&aStorage[i], afEye, afForward);
+            float fWas = quad_centre_key(&aStorage[i], afEye, afForward);
+
+            for (j = 0; j < iHullQuads; j++) {
+                float fCx = 0.0f;
+                float fCy = 0.0f;
+                float fCz = 0.0f;
+                int v;
+
+                for (v = 0; v < 4; v++) {
+                    fCx += 0.25f * aStorage[j].afVert[v][0];
+                    fCy += 0.25f * aStorage[j].afVert[v][1];
+                    fCz += 0.25f * aStorage[j].afVert[v][2];
+                }
+                /*
+                 * Only the panels actually inside the fireball. A shoulder
+                 * standing clear of it is entitled to occlude it, and a
+                 * rule that said otherwise would be drawing blasts through
+                 * solid machines.
+                 */
+                if (mecha_length3(fCx - fBlastX, fCy - fBlastY, fCz - fBlastZ)
+                    > fBlastReach)
+                    continue;
+                /* Larger key first, so the hull must outrank the blast. */
+                if (mecha_quad_depth_key(&aStorage[j], afEye, afForward)
+                    <= fNow)
+                    iBadNow++;
+                if (quad_centre_key(&aStorage[j], afEye, afForward) <= fWas)
+                    iBadWas++;
+            }
+        }
+    }
+
+    printf("   hull panels painted over a blast: %d, was %d\n", iBadNow,
+           iBadWas);
+    CHECK(iBadWas > 0);
+    CHECK(iBadNow == 0);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static int test_sky_carries_a_cloud_dome(void)
 {
     static tMechaQuad aStorage[MECHA_QUAD_CAPACITY];
@@ -2185,6 +2550,11 @@ int main(void)
         { "torso turns off the legs", test_torso_turns_off_the_legs },
         { "arms and head follow the lock",
           test_arms_and_head_follow_the_lock },
+        { "shadows survive the paint order",
+          test_shadows_survive_the_paint_order },
+        { "nothing is built coplanar", test_nothing_is_built_coplanar },
+        { "blasts draw over what they engulf",
+          test_blasts_draw_over_what_they_engulf },
         { "sky carries a cloud dome", test_sky_carries_a_cloud_dome },
         { "shots carry plasma frames", test_shots_carry_plasma_frames },
         { "death throws debris", test_death_throws_debris },

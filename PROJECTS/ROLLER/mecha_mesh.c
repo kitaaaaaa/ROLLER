@@ -842,9 +842,15 @@ void mecha_mesh_shadows(tMechaQuadList *pList, const tMechaWorld *pWorld)
     fSize = pDef->fRadius
             * mecha_clampf(1.3f - (pMech->fY - fGround)
                                   / (28.0f * MECHA_METRE), 0.45f, 1.3f);
+    /*
+     * Staggered by index. Two shadows at exactly the same height overlap in
+     * one plane, and which of them wins where they cross is then decided by
+     * float noise -- a millimetre apiece costs nothing and settles it.
+     */
     mecha_add_floor_quad(pList, pMech->fX - fSize, pMech->fZ - fSize,
                          pMech->fX + fSize, pMech->fZ + fSize,
-                         fGround + 0.04f * MECHA_METRE, MECHA_SHADE_SHADOW,
+                         fGround + (0.04f + 0.004f * (float)i) * MECHA_METRE,
+                         MECHA_SHADE_SHADOW,
                          MECHA_QUAD_TWO_SIDED | MECHA_QUAD_SHADOW);
   }
 }
@@ -1000,6 +1006,122 @@ static void mecha_add_tracer(tMechaQuadList *pList, int iCameraYaw,
   afVert[3][0] = fX0 + fSideX; afVert[3][1] = fY0 + fSideY; afVert[3][2] = fZ0 + fSideZ;
   mecha_quads_add(pList, afVert, byPalette,
                   MECHA_QUAD_TWO_SIDED | MECHA_QUAD_GLOW);
+}
+
+//-------------------------------------------------------------------------------------------------
+/* Draw order */
+
+/*
+ * A quad is "broad" when it is big enough for the far end of it to be a long
+ * way further off than the middle. Two and a half metres is the line: floor
+ * tiles and the tops of cover are broad, the panels a mech is built from are
+ * not, and it matters which side of it a quad falls on -- see below.
+ */
+#define MECHA_BROAD_QUAD MECHA_M(2.5f)
+
+float mecha_quad_depth_key(const tMechaQuad *pQuad, const float afEye[3],
+                           const float afForward[3])
+{
+  float afDepth[4];
+  float fCentre = 0.0f;
+  float fMin;
+  float fMax;
+  float fSpanX = 0.0f;
+  float fSpanZ = 0.0f;
+  int v;
+
+  for (v = 0; v < 4; v++) {
+    afDepth[v] = (pQuad->afVert[v][0] - afEye[0]) * afForward[0]
+               + (pQuad->afVert[v][1] - afEye[1]) * afForward[1]
+               + (pQuad->afVert[v][2] - afEye[2]) * afForward[2];
+    fCentre += afDepth[v] * 0.25f;
+  }
+  fMin = afDepth[0];
+  fMax = afDepth[0];
+  for (v = 1; v < 4; v++) {
+    if (afDepth[v] < fMin)
+      fMin = afDepth[v];
+    if (afDepth[v] > fMax)
+      fMax = afDepth[v];
+  }
+
+  /*
+   * There is no depth buffer, so a quad is either drawn before another one
+   * or after it, whole. For most geometry the middle of the quad is the
+   * honest answer to which, and for two things it is not.
+   *
+   * A shadow lying on the floor is the first. Its middle can easily be
+   * further off than the middle of a floor tile it covers, and then the
+   * tile is painted over the top of it and the shadow is cut in half along
+   * a tile edge that moves as the camera does. Sorting the decal by its
+   * nearest corner and the ground beneath it by its farthest fixes that
+   * both ways round: whichever of the two is larger, the ground's far
+   * corner is behind the decal's near one, so the ground always goes down
+   * first.
+   *
+   * Broad horizontal surfaces are the second, and it is the same argument
+   * seen from the other side -- a floor tile stretching away under a
+   * machine standing on it has to be drawn before the machine, and its far
+   * corner is what says so.
+   */
+  if (pQuad->byFlags & MECHA_QUAD_SHADOW)
+    return fMin;
+
+  /*
+   * Self-lit geometry -- blasts, flames, tracers, a visor -- is drawn on top
+   * of whatever it is going off inside. A blast centred on a machine
+   * intersects it, and per-quad sorting then lets some of the machine's
+   * panels paint over the fireball and not others, which as the camera
+   * moves is a fireball with a hole in it that swims about. Pulling the key
+   * forward by the sprite's own size, capped, sorts it as though it stood
+   * clear in front of the thing it is engulfing. The cap is what stops a
+   * long tracer claiming to be metres nearer than it is.
+   */
+  if (pQuad->byFlags & MECHA_QUAD_GLOW) {
+    /*
+     * Pulled forward by the sprite's own half-width, which is exactly the
+     * radius of the volume it stands for: everything inside that volume is
+     * then outranked and everything outside it is not, so a shoulder well
+     * clear of the fireball still occludes it. The narrower of the two
+     * edges is the one measured, because a tracer is a long thin quad and
+     * has no business claiming to be half its length nearer than it is.
+     */
+    float fEdgeA = mecha_length3(pQuad->afVert[1][0] - pQuad->afVert[0][0],
+                                 pQuad->afVert[1][1] - pQuad->afVert[0][1],
+                                 pQuad->afVert[1][2] - pQuad->afVert[0][2]);
+    float fEdgeB = mecha_length3(pQuad->afVert[2][0] - pQuad->afVert[1][0],
+                                 pQuad->afVert[2][1] - pQuad->afVert[1][1],
+                                 pQuad->afVert[2][2] - pQuad->afVert[1][2]);
+    float fReach = 0.5f * (fEdgeA < fEdgeB ? fEdgeA : fEdgeB)
+                 + MECHA_M(0.4f);
+
+    if (fReach > MECHA_M(6.0f))
+      fReach = MECHA_M(6.0f);
+    return fMin - fReach;
+  }
+
+  if (pQuad->afNormal[1] > 0.9f || pQuad->afNormal[1] < -0.9f) {
+    float fLowX = pQuad->afVert[0][0];
+    float fHighX = fLowX;
+    float fLowZ = pQuad->afVert[0][2];
+    float fHighZ = fLowZ;
+
+    for (v = 1; v < 4; v++) {
+      if (pQuad->afVert[v][0] < fLowX)
+        fLowX = pQuad->afVert[v][0];
+      if (pQuad->afVert[v][0] > fHighX)
+        fHighX = pQuad->afVert[v][0];
+      if (pQuad->afVert[v][2] < fLowZ)
+        fLowZ = pQuad->afVert[v][2];
+      if (pQuad->afVert[v][2] > fHighZ)
+        fHighZ = pQuad->afVert[v][2];
+    }
+    fSpanX = fHighX - fLowX;
+    fSpanZ = fHighZ - fLowZ;
+    if (fSpanX > MECHA_BROAD_QUAD || fSpanZ > MECHA_BROAD_QUAD)
+      return fMax;
+  }
+  return fCentre;
 }
 
 //-------------------------------------------------------------------------------------------------

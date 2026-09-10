@@ -10,6 +10,9 @@
 //-------------------------------------------------------------------------------------------------
 /* Palette indices used only by the geometry; see mecha_arena.c for the rest. */
 #define MECHA_PAL_TRACER_CORE 143
+/* Only ever seen if a cloud somehow rasterises flat, which the mesh refuses
+ * to let happen -- a pale index so a bug reads as a bug and not as a hole. */
+#define MECHA_PAL_CLOUD 143
 
 /*
  * Translucent quads carry a SHADE LEVEL in the low byte, not a colour.
@@ -997,6 +1000,117 @@ static void mecha_add_tracer(tMechaQuadList *pList, int iCameraYaw,
   afVert[3][0] = fX0 + fSideX; afVert[3][1] = fY0 + fSideY; afVert[3][2] = fZ0 + fSideZ;
   mecha_quads_add(pList, afVert, byPalette,
                   MECHA_QUAD_TWO_SIDED | MECHA_QUAD_GLOW);
+}
+
+//-------------------------------------------------------------------------------------------------
+/* Clouds */
+
+/*
+ * How many, how far out, and how big. The radius is chosen against the
+ * arena rather than against the sky. The floor is a couple of hundred
+ * metres across, so a dome at six hundred swung by nearly twenty degrees as
+ * a player crossed it, which reads as the sky sliding rather than as the
+ * machine walking; at fourteen hundred it is a few degrees. Puff size
+ * scales with the radius, so pushing it out costs nothing but parallax --
+ * and it is still four orders of magnitude short of straining a float. The retail dome sits ten million units out,
+ * which is fine for a track renderer that was written around it and not
+ * fine for this one.
+ */
+#define MECHA_CLOUD_COUNT   30
+#define MECHA_CLOUD_RADIUS  MECHA_M(1400.0f)
+#define MECHA_CLOUD_FLOOR   MECHA_DEG(7)    /* nothing below this elevation */
+#define MECHA_CLOUD_CEILING MECHA_DEG(52)
+/* Angle units per tick. A shade under one circuit an hour: a sky that is
+ * visibly moving is a sky the player is looking at instead of the fight. */
+#define MECHA_CLOUD_DRIFT   12
+
+/* A cheap integer hash, so the sky is a pure function of the cloud's index
+ * and the arena it hangs over. Nothing is stored between frames and nothing
+ * is drawn from the world's random stream, which would put the look of the
+ * sky at the mercy of how many shots had been fired under it. */
+static uint32_t mecha_cloud_hash(uint32_t uiValue)
+{
+  uiValue *= 2654435761u;
+  uiValue ^= uiValue >> 15;
+  uiValue *= 2246822519u;
+  uiValue ^= uiValue >> 13;
+  return uiValue;
+}
+
+void mecha_mesh_clouds(tMechaQuadList *pList, const tMechaWorld *pWorld)
+{
+  int i;
+
+  if (!pList || !pWorld || !s_bSprites)
+    return;
+
+  for (i = 0; i < MECHA_CLOUD_COUNT; i++) {
+    /* Seeded off the match, so every arena hangs under its own sky and the
+     * same match always gets the same one. */
+    uint32_t uiHash = mecha_cloud_hash((uint32_t)i * 3u + pWorld->uiSeed);
+    int iAzimuth;
+    int iElevation;
+    float fLow;
+    float fSize;
+    float afDir[3];
+    float afRight[3];
+    float afUp[3];
+    float afVert[4][3];
+    float fLength;
+    int iCorner;
+
+    /* Squaring a uniform draw crowds the dome down towards the horizon,
+     * which is where clouds are in any sky worth looking at and also where
+     * they do the most work: a band of them along the skyline is what gives
+     * a flat fill a distance. */
+    fLow = (float)((uiHash >> 14) & 1023u) / 1024.0f;
+    iElevation = MECHA_CLOUD_FLOOR
+               + (int)((float)(MECHA_CLOUD_CEILING - MECHA_CLOUD_FLOOR)
+                       * fLow * fLow);
+    iAzimuth = mecha_angle_wrap((int)(uiHash & (uint32_t)(MECHA_ANGLE_FULL - 1))
+                                + pWorld->iTick / MECHA_CLOUD_DRIFT);
+
+    afDir[0] = mecha_cos(iElevation) * mecha_sin(iAzimuth);
+    afDir[1] = mecha_sin(iElevation);
+    afDir[2] = mecha_cos(iElevation) * mecha_cos(iAzimuth);
+
+    /* Tangent to the dome, so every puff faces its middle -- which is where
+     * the camera is, near enough, and is why these are not camera-facing
+     * billboards: a billboard high overhead turns edge-on to a camera
+     * underneath it and the sky develops holes. */
+    afRight[0] = afDir[2];
+    afRight[1] = 0.0f;
+    afRight[2] = -afDir[0];
+    fLength = mecha_length3(afRight[0], afRight[1], afRight[2]);
+    if (fLength < 1e-4f)
+      continue;
+    afRight[0] /= fLength;
+    afRight[2] /= fLength;
+    afUp[0] = afDir[1] * afRight[2] - afDir[2] * afRight[1];
+    afUp[1] = afDir[2] * afRight[0] - afDir[0] * afRight[2];
+    afUp[2] = afDir[0] * afRight[1] - afDir[1] * afRight[0];
+
+    fSize = MECHA_CLOUD_RADIUS
+            * (0.055f + 0.045f * (float)((uiHash >> 24) & 255u) / 255.0f);
+
+    for (iCorner = 0; iCorner < 4; iCorner++) {
+      float fU = (iCorner == 0 || iCorner == 3) ? -fSize : fSize;
+      float fV = iCorner < 2 ? -fSize : fSize;
+      int iAxis;
+
+      for (iAxis = 0; iAxis < 3; iAxis++) {
+        afVert[iCorner][iAxis] = afDir[iAxis] * MECHA_CLOUD_RADIUS
+                               + afRight[iAxis] * fU + afUp[iAxis] * fV;
+      }
+    }
+    mecha_quads_add(pList, afVert, MECHA_PAL_CLOUD,
+                    MECHA_QUAD_TWO_SIDED | MECHA_QUAD_GLOW);
+    mecha_tag_texture(pList, MECHA_TEX_EFFECT,
+                      MECHA_SPRITE_CLOUD_FIRST
+                      + (int)((uiHash >> 8) % (uint32_t)(
+                          MECHA_SPRITE_CLOUD_LAST
+                          - MECHA_SPRITE_CLOUD_FIRST + 1)));
+  }
 }
 
 //-------------------------------------------------------------------------------------------------

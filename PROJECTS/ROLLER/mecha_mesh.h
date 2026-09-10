@@ -73,15 +73,17 @@ typedef struct
 #define MECHA_SPRITE_FIRE_FIRST   4
 #define MECHA_SPRITE_FIRE_LAST    7
 /*
- * 8..12 are the retail sky's cloud puffs -- horizon.c picks one of those
- * five for every quad of its dome. Borrowed here because at bolt size a
- * soft blue puff reads as plasma, and because the bank has no bolt art of
- * its own: 0 and 21..23 are smoke, 1..3 the start lights, 4..7 flame and
- * 13..20 the blast. Worth revisiting when the dome itself is drawn, since
- * then the same five frames would be both the sky and the shots.
+ * 8..12 are the sky's cloud puffs -- horizon.c picks one of those five for
+ * every quad of its dome, and so does this mode. They double as the glow on
+ * a plasma bolt, because the bank has no bolt art of its own: 0 and 21..23
+ * are smoke, 1..3 the start lights, 4..7 flame and 13..20 the blast. At
+ * bolt size a soft blue puff reads as plasma; it is still the same five
+ * frames as the sky, which is worth knowing.
  */
-#define MECHA_SPRITE_PLASMA_FIRST 8
-#define MECHA_SPRITE_PLASMA_LAST 12
+#define MECHA_SPRITE_CLOUD_FIRST 8
+#define MECHA_SPRITE_CLOUD_LAST 12
+#define MECHA_SPRITE_PLASMA_FIRST MECHA_SPRITE_CLOUD_FIRST
+#define MECHA_SPRITE_PLASMA_LAST MECHA_SPRITE_CLOUD_LAST
 #define MECHA_SPRITE_BLAST_FIRST 13
 #define MECHA_SPRITE_BLAST_LAST  20
 #define MECHA_SPRITE_SMOKE_FIRST 21
@@ -132,6 +134,15 @@ void mecha_mesh_mech(tMechaQuadList *pList, const tMechaWorld *pWorld,
  * still gets geometry that reads.
  */
 void mecha_mesh_set_sprites(bool bAvailable);
+
+/*
+ * The sky's cloud dome, as arena geometry. Placed around the arena's centre
+ * at a radius that dwarfs it, so it reads as distance without ever being
+ * reachable, and drawn only when the sprite bank is there to draw it with:
+ * a cloud that falls back to a flat square is a grey slab hanging in the
+ * air, which is worse than no cloud at all.
+ */
+void mecha_mesh_clouds(tMechaQuadList *pList, const tMechaWorld *pWorld);
 
 void mecha_mesh_projectiles(tMechaQuadList *pList, const tMechaWorld *pWorld,
                             int iCameraYaw);

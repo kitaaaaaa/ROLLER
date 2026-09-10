@@ -1433,6 +1433,80 @@ static int test_arms_and_head_follow_the_lock(void)
 
 //-------------------------------------------------------------------------------------------------
 
+static int test_sky_carries_a_cloud_dome(void)
+{
+    static tMechaQuad aStorage[MECHA_QUAD_CAPACITY];
+    tMechaQuadList list;
+    tMechaWorld world;
+    float fNearest = 1e30f;
+    float fLowest = 1e30f;
+    int iFirstCount;
+    int i;
+    int v;
+
+    start_duel(&world, 0, 0, 0, 0xC10Du, 1);
+
+    /* Without the bank there is no dome: a cloud that falls back to a flat
+     * square is a grey slab hanging in the air. */
+    mecha_mesh_set_sprites(false);
+    mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
+    mecha_mesh_clouds(&list, &world);
+    CHECK(list.iCount == 0);
+
+    mecha_mesh_set_sprites(true);
+    mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
+    mecha_mesh_clouds(&list, &world);
+    CHECK(list.iCount > 8);
+    iFirstCount = list.iCount;
+
+    for (i = 0; i < list.iCount; i++) {
+        const tMechaQuad *pQuad = &aStorage[i];
+
+        /* Every puff is a frame from the sky's own five, and every one of
+         * them is a sprite: an untextured cloud is a bug. */
+        CHECK(pQuad->byTexBank == MECHA_TEX_EFFECT);
+        CHECK(pQuad->byTile >= MECHA_SPRITE_CLOUD_FIRST);
+        CHECK(pQuad->byTile <= MECHA_SPRITE_CLOUD_LAST);
+        CHECK((pQuad->byFlags & MECHA_QUAD_TWO_SIDED) != 0);
+
+        for (v = 0; v < 4; v++) {
+            float fX = pQuad->afVert[v][0];
+            float fY = pQuad->afVert[v][1];
+            float fZ = pQuad->afVert[v][2];
+            float fFlat = mecha_length2(fX, fZ);
+
+            if (fFlat < fNearest)
+                fNearest = fFlat;
+            if (fY < fLowest)
+                fLowest = fY;
+        }
+    }
+
+    printf("   %d cloud quads, nearest %.0f out (%.1f arenas), lowest"
+           " %.0f up\n", list.iCount, fNearest,
+           fNearest / world.arena.fHalfExtent, fLowest);
+    /* Well outside the arena, and none of them underground: a cloud you can
+     * walk into is scenery, and a cloud below the horizon is a mistake. */
+    CHECK(fNearest > 6.0f * world.arena.fHalfExtent);
+    CHECK(fLowest > 0.0f);
+
+    /* And the dome drifts, slowly, rather than being nailed to the world. */
+    {
+        float fBefore = aStorage[0].afVert[0][0];
+        float fAfter;
+
+        world.iTick += MECHA_TICK_HZ * 20;
+        mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
+        mecha_mesh_clouds(&list, &world);
+        CHECK(list.iCount == iFirstCount);
+        fAfter = aStorage[0].afVert[0][0];
+        CHECK(fabsf(fAfter - fBefore) > 1.0f);
+    }
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static int test_shots_carry_plasma_frames(void)
 {
     static tMechaQuad aStorage[MECHA_QUAD_CAPACITY];
@@ -2111,6 +2185,7 @@ int main(void)
         { "torso turns off the legs", test_torso_turns_off_the_legs },
         { "arms and head follow the lock",
           test_arms_and_head_follow_the_lock },
+        { "sky carries a cloud dome", test_sky_carries_a_cloud_dome },
         { "shots carry plasma frames", test_shots_carry_plasma_frames },
         { "death throws debris", test_death_throws_debris },
         { "machines carry their weight", test_machines_carry_their_weight },

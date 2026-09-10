@@ -140,6 +140,17 @@ Both are read every frame, so either works at any time.
   thick-limbed with an oversized gun on each arm while an interceptor is a
   narrow torso on thin legs. Measured off the mesh as width over standing
   height they span 0.46 to 1.11.
+- **There are clouds.** Thirty puffs on a dome around the arena's centre,
+  each one tangent to it so it faces the middle -- where the camera is, near
+  enough -- rather than being a camera-facing billboard, because a billboard
+  high overhead turns edge-on to a camera underneath it and the sky develops
+  holes. They are the sky's own five frames from `gentex.drh`, drawn only
+  when that bank is there: a cloud that falls back to a flat square is a grey
+  slab hanging in the air, which is worse than no cloud. Placement is a hash
+  of the cloud's index and the match seed, so nothing is stored between
+  frames and the sky does not depend on how many shots have been fired under
+  it, and a squared draw crowds them down towards the horizon where they do
+  the most work. The whole dome turns about once an hour.
 - **The sky is the game's own.** `DrawHorizon` paints it: flat blue above a
   line through the projection, a haze colour below, exactly as it does for
   the race. It reads the camera out of globals that `game_render_set_camera`
@@ -314,13 +325,14 @@ zig build test-mecha-render -Dmecha-frames=/tmp/frames
   Inside knife range the camera centres the lock and drops your mech into the
   foreground, and two mechs in melee are simply in the same place. This wants tuning against real play rather than against a
   still frame.
-- The sky has no clouds yet. `DrawHorizon` ends by drawing the cloud dome,
-  but that dome is forty quads placed ten million units out in a Z-up
-  coordinate system and submitted through the renderer's cloud subdivision
-  path; handing that an arena camera makes a frame take minutes instead of
-  milliseconds. The arena disables them at the `textures_off` bit while it
-  calls in. Bringing them in wants the dome rebuilt against the arena's own
-  scale and axes rather than the view basis swapped underneath it.
+- The clouds are the arena's own dome, not the retail one. `DrawHorizon`
+  ends by drawing its dome, but that is forty quads ten million units out in
+  a Z-up coordinate system, submitted through the renderer's cloud
+  subdivision path; handing that an arena camera makes a frame take minutes
+  instead of milliseconds, so the arena disables them at the `textures_off`
+  bit while it calls in and hangs its own dome as ordinary arena geometry
+  instead. Same five frames, same look, sorted and drawn like everything
+  else in the scene.
 - The palette indices are tuned by eye, not derived. They are named constants at
   the top of `mecha_arena.c`, `mecha_defs.c`, `mecha_mesh.c` and
   `mecha_render.c` precisely so a retune stays a small edit.

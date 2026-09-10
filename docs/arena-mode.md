@@ -173,6 +173,34 @@ Both are read every frame, so either works at any time.
   data, so the arena lends the engine one `HorizonColour` entry for the
   length of the call and puts it back. The nine-band sunset gradient this
   replaced was the mode inventing a sky the engine already had.
+- **A boost is a committed act.** The button starts a burst and does not
+  hold it up: once it is running, only the clock, an empty gauge, a jump or
+  a wall ends it. Letting go does nothing, which is what makes a dash
+  something you spend rather than something you steer.
+- **But a committed burst can still be turned.** Two ways in, and the
+  difference between them is what they cost. Boost again while pushing back
+  against the direction you left on and the burst restarts the other way --
+  that is the cancel, and it is why commitment is not a trap. Or let the
+  stick go and tap a new direction: the burst turns without a second press,
+  and the release is the whole price of it. Holding a different direction
+  down does nothing at all, so leaning on the stick cannot walk a dash round
+  in a circle.
+- **The speed outlives the burst.** A dash that ends hands its momentum to a
+  coast: the same drive the walk uses with the authority turned down at both
+  ends, so the machine bleeds off what it was carrying slowly and slides
+  while it does. Measured over a third of a second after a burst ends, a
+  machine coasts about ten metres where one that simply stopped walking
+  covers under two.
+- **And it comes off walls.** The push the arena applies to get a machine
+  back out of a wall is the surface normal, which is all a bounce needs. At
+  walking pace it just leans on the wall; carrying a boost into the same
+  wall it ricochets off at a bit over half the speed it arrived at, the way
+  the race game's cars do, and the burst is over -- you hit something.
+- **Dashing works in the air.** A burst is flat wherever it starts, so
+  gravity waits until it is done: an air dash holds its height, runs the
+  same clock, steers and cancels the same way, and drops the machine back
+  into a fall when it ends. An arc is now something the other player has to
+  read rather than something they can wait out.
 - **The machines are jointed.** Legs have knees that bend the way a person's
   do -- the thigh's pose pitch is negated and the knee's is not, and getting
   those two signs the same makes the machine bird-legged, which is a fine

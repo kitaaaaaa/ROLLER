@@ -775,6 +775,65 @@ static void mecha_update_facing(tMechaWorld *pWorld, int iMechIdx,
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * Hitting something solid.
+ *
+ * The push the arena applied to get the machine back out is the surface
+ * normal, which is all a bounce needs. At walking pace the machine simply
+ * leans on the wall and the speed into it is dropped -- pressing into a
+ * corner should not build up a shove that fires you out of it later. Carry a
+ * boost into the same wall and it comes off, the way the race game's cars
+ * do, and the burst is over: you hit something.
+ */
+static void mecha_wall_impact(tMechaWorld *pWorld, int iMechIdx,
+                              float fPushX, float fPushZ, bool bAirborne)
+{
+  tMechaMech *pMech = &pWorld->aMechs[iMechIdx];
+  const tMechaMechDef *pDef = mecha_mech_def(pMech);
+  float fLength = mecha_length2(fPushX, fPushZ);
+  float fInto;
+  float fSpeed;
+  bool bFast;
+
+  if (fLength < 1e-3f)
+    return;
+  fPushX /= fLength;
+  fPushZ /= fLength;
+
+  /* Positive means the machine is already on its way out of the wall, which
+   * happens on the tick after a bounce. Nothing to do. */
+  fInto = pMech->fVelX * fPushX + pMech->fVelZ * fPushZ;
+  if (fInto >= 0.0f)
+    return;
+
+  fSpeed = mecha_length2(pMech->fVelX, pMech->fVelZ);
+  bFast = (pMech->byMove == MECHA_MOVE_DASH || pMech->iCoastTicks > 0)
+          && fSpeed >= MECHA_BOUNCE_MIN_SPEED;
+
+  pMech->fVelX -= (bFast ? 1.0f + MECHA_BOUNCE_RESTITUTION : 1.0f)
+                  * fInto * fPushX;
+  pMech->fVelZ -= (bFast ? 1.0f + MECHA_BOUNCE_RESTITUTION : 1.0f)
+                  * fInto * fPushZ;
+  if (!bFast)
+    return;
+
+  if (pMech->byMove == MECHA_MOVE_DASH) {
+    pMech->byMove = bAirborne ? MECHA_MOVE_JUMP : MECHA_MOVE_STAND;
+    pMech->iStateTicks = 0;
+  }
+  /* Off the wall with the clock reset, so the ricochet carries as far as the
+   * burst that caused it would have. */
+  pMech->iCoastTicks = MECHA_DASH_COAST_TICKS;
+  mecha_sim_spawn_effect(pWorld, MECHA_FX_SPARK,
+                         pMech->fX + fPushX * pDef->fRadius,
+                         pMech->fY + pDef->fHeight * 0.45f,
+                         pMech->fZ + fPushZ * pDef->fRadius,
+                         pDef->fRadius * 0.4f, pDef->abyPalette[3],
+                         MECHA_SEC(0.2f));
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static void mecha_start_dash(tMechaMech *pMech, const tMechaInput *pInput)
 {
   float fDirX;
@@ -790,6 +849,46 @@ static void mecha_start_dash(tMechaMech *pMech, const tMechaInput *pInput)
   }
   pMech->byMove = MECHA_MOVE_DASH;
   pMech->iStateTicks = 0;
+  pMech->iCoastTicks = 0;
+  /* Whatever the stick was doing when the burst started does not count as a
+   * steering input: it has to be let go first. */
+  pMech->bDashStickFree = false;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * Steering a burst you are already committed to.
+ *
+ * Two ways in. Boost again while pushing back against the direction you left
+ * on and the dash restarts the other way -- the cancel, and the reason a
+ * committed dash is not a trap. Or let the stick go and tap a new direction:
+ * the burst turns without a second press, which is the crossing step, and
+ * the release is the whole cost of it.
+ */
+static void mecha_steer_dash(tMechaMech *pMech, const tMechaInput *pInput,
+                             float fStick, float fDirX, float fDirZ,
+                             bool bDashPressed)
+{
+  float fDot;
+
+  if (fStick < MECHA_DASH_STICK_FREE) {
+    pMech->bDashStickFree = true;
+    return;
+  }
+
+  fDot = fDirX * pMech->fDashDirX + fDirZ * pMech->fDashDirZ;
+  if (bDashPressed && fDot < MECHA_DASH_CANCEL_DOT) {
+    mecha_start_dash(pMech, pInput);
+    return;
+  }
+  if (pMech->bDashStickFree && fStick > MECHA_DASH_STICK_TAP) {
+    pMech->fDashDirX = fDirX;
+    pMech->fDashDirZ = fDirZ;
+    /* One turn per release, so leaning on the stick does not steer the
+     * burst round in a circle. */
+    pMech->bDashStickFree = false;
+  }
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -894,8 +993,24 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
       /* The whole point of dropping out of the air is to come down facing
        * them again, so the drop brings the machine round on its own. */
       pMech->iRecentreTicks = MECHA_RECENTRE_TICKS;
+    } else if (pMech->byMove == MECHA_MOVE_DASH
+               && pMech->iStateTicks < pDef->iDashTicks
+               && mecha_boost_available(pMech)) {
+      /* An air dash runs the same clock as one on the ground, and can be
+       * steered and cancelled the same way. */
+      mecha_steer_dash(pMech, pInput, fStick, fDirX, fDirZ,
+                       bCanAct && pInput->bDash && !pMech->bDashHeld);
+    } else if (bCanAct && pMech->byMove != MECHA_MOVE_CANCEL
+               && pInput->bDash && !pMech->bDashHeld
+               && mecha_boost_available(pMech)) {
+      /* Dashing in the air: a flat burst that holds its height, which is
+       * what makes an arc something the other player has to read rather
+       * than something they can simply wait out. */
+      mecha_start_dash(pMech, pInput);
+      pMech->fVelY = 0.0f;
     } else if (pMech->byMove != MECHA_MOVE_JUMP
-               && pMech->byMove != MECHA_MOVE_CANCEL) {
+               && pMech->byMove != MECHA_MOVE_CANCEL
+               && pMech->byMove != MECHA_MOVE_DASH) {
       /* Walked off a ledge. */
       pMech->byMove = MECHA_MOVE_JUMP;
       pMech->iStateTicks = 0;
@@ -914,11 +1029,14 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
                              pMech->fZ, pDef->fRadius * 2.0f,
                              pDef->abyPalette[2], MECHA_SEC(0.4f));
     } else if (pMech->byMove == MECHA_MOVE_DASH
-               && pInput->bDash
                && pMech->iStateTicks < pDef->iDashTicks
                && mecha_boost_available(pMech)) {
-      /* Holding the button keeps the burst going until either the timer or
-       * the gauge runs out. */
+      /*
+       * Committed. The button starts the burst and does not hold it up:
+       * once it is running, only the clock, an empty gauge, a jump or a
+       * wall ends it. What the stick can still do is steer it.
+       */
+      mecha_steer_dash(pMech, pInput, fStick, fDirX, fDirZ, bDashPressed);
     } else if (bDashPressed && mecha_boost_available(pMech)) {
       mecha_start_dash(pMech, pInput);
     } else if (pInput->bGuard) {
@@ -984,6 +1102,17 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
   } else if (pMech->byMove == MECHA_MOVE_GUARD) {
     pMech->fVelX = 0.0f;
     pMech->fVelZ = 0.0f;
+  } else if (pMech->iCoastTicks > 0
+             && (pMech->byMove == MECHA_MOVE_WALK
+                 || pMech->byMove == MECHA_MOVE_STAND)) {
+    /*
+     * Out the far side of a burst. The same drive the walk uses, with the
+     * authority turned down at both ends: the machine bleeds off the speed
+     * it was carrying slowly and slides while it does it, so a boost ends
+     * where it was going rather than where the stick is pointing.
+     */
+    mecha_drive(pMech, pDef, fDirX, fDirZ, pDef->fWalkSpeed * fStick,
+                MECHA_COAST_ACCEL_SCALE, MECHA_COAST_GRIP_SCALE);
   } else if (pMech->byMove == MECHA_MOVE_WALK) {
     mecha_drive(pMech, pDef, fDirX, fDirZ, pDef->fWalkSpeed * fStick,
                 1.0f, 1.0f);
@@ -996,12 +1125,14 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
     mecha_drive(pMech, pDef, 0.0f, 0.0f, 0.0f, 1.0f, fBrake / fGrip);
   }
 
-  /* Ending a dash: the burst decides when, not the player. */
+  /* Ending a dash: the burst decides when, not the player. The speed it
+   * built is not thrown away with it -- that is what the coast is. */
   if (pMech->byMove == MECHA_MOVE_DASH
       && (pMech->iStateTicks >= pDef->iDashTicks
           || !mecha_boost_available(pMech))) {
-    pMech->byMove = MECHA_MOVE_STAND;
+    pMech->byMove = bAirborne ? MECHA_MOVE_JUMP : MECHA_MOVE_STAND;
     pMech->iStateTicks = 0;
+    pMech->iCoastTicks = MECHA_DASH_COAST_TICKS;
   }
 
   /* --- boost recovery --------------------------------------------------- */
@@ -1015,8 +1146,12 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
 
   /* --- integration ------------------------------------------------------ */
 
-  if (bAirborne || pMech->byMove == MECHA_MOVE_JUMP
-      || pMech->byMove == MECHA_MOVE_CANCEL) {
+  if (pMech->byMove == MECHA_MOVE_DASH) {
+    /* A burst is flat, in the air as much as on the ground: gravity waits
+     * until it is over. */
+    pMech->fVelY = 0.0f;
+  } else if (bAirborne || pMech->byMove == MECHA_MOVE_JUMP
+             || pMech->byMove == MECHA_MOVE_CANCEL) {
     float fGravity = MECHA_GRAVITY;
 
     if (bBoosting)
@@ -1030,8 +1165,16 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
   pMech->fZ += pMech->fVelZ * MECHA_DT;
   pMech->fY += pMech->fVelY * MECHA_DT;
 
-  mecha_arena_resolve_cylinder(&pWorld->arena, pDef->fRadius, pMech->fY,
-                               pDef->fHeight, &pMech->fX, &pMech->fZ);
+  {
+    float fPreX = pMech->fX;
+    float fPreZ = pMech->fZ;
+
+    if (mecha_arena_resolve_cylinder(&pWorld->arena, pDef->fRadius, pMech->fY,
+                                     pDef->fHeight, &pMech->fX, &pMech->fZ)) {
+      mecha_wall_impact(pWorld, iMechIdx, pMech->fX - fPreX,
+                        pMech->fZ - fPreZ, bAirborne);
+    }
+  }
 
   fGround = mecha_arena_ground_height(&pWorld->arena, pMech->fX, pMech->fZ,
                                       pMech->fY);
@@ -1114,6 +1257,8 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
     pMech->iStunTicks--;
   if (pMech->iInvulnTicks > 0)
     pMech->iInvulnTicks--;
+  if (pMech->iCoastTicks > 0)
+    pMech->iCoastTicks--;
   pMech->fStagger = mecha_approachf(pMech->fStagger, 0.0f,
                                     MECHA_STAGGER_DECAY * MECHA_DT);
 
@@ -1827,6 +1972,8 @@ static void mecha_reset_mech_for_round(tMechaWorld *pWorld, int iMechIdx,
   pMech->bBoostLocked = false;
   pMech->fDashDirX = 0.0f;
   pMech->fDashDirZ = 0.0f;
+  pMech->iCoastTicks = 0;
+  pMech->bDashStickFree = false;
 
   pMech->fArmour = pDef->fArmour;
   pMech->fStagger = 0.0f;

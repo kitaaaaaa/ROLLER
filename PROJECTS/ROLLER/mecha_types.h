@@ -385,6 +385,20 @@ typedef struct
    */
   int   iLegYaw;
   bool  bLegsBackward;      /* stepping backwards: the cycle runs in reverse */
+  /*
+   * What is left of a boost after the burst itself. The machine keeps the
+   * speed it had and steers badly for the length of it, which is what makes
+   * a dash a thing you commit to rather than a thing you switch off, and it
+   * is the window in which hitting a wall throws you off it.
+   */
+  int   iCoastTicks;
+  /*
+   * Whether the stick has been let go since this dash began. A dash can be
+   * steered mid-flight -- release the direction you left on, tap another,
+   * and the burst turns -- and the release is what separates that from
+   * simply holding a direction down.
+   */
+  bool  bDashStickFree;
 } tMechaMech;
 
 //-------------------------------------------------------------------------------------------------

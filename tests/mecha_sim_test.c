@@ -11,6 +11,7 @@
 #include "mecha_mesh.h"
 #include "mecha_sim.h"
 
+#include <stdlib.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -241,10 +242,16 @@ static int test_movement_and_boost(void)
     iBoostAfterDash = world.aMechs[0].iBoost;
     CHECK(iBoostAfterDash < pDef->iBoostMax * MECHA_TICK_HZ);
 
+    /* Let the burst run itself out first. Releasing the button does not
+     * stop it -- a dash is committed -- so measuring the gauge before the
+     * clock is up measures a dash, not a mech standing still. */
+    memset(aInputs, 0, sizeof(aInputs));
+    run_ticks(&world, aInputs, 2, pDef->iDashTicks + 4);
+    CHECK(world.aMechs[0].byMove != MECHA_MOVE_DASH);
+
     /* Standing refills, guarding refills faster. Both start from the same
      * low gauge, and over a short enough window that neither saturates --
      * comparing two full gauges would prove nothing. */
-    memset(aInputs, 0, sizeof(aInputs));
     world.aMechs[0].iBoost = pDef->iBoostMax * MECHA_TICK_HZ / 10;
     world.aMechs[0].bBoostLocked = false;
     run_ticks(&world, aInputs, 2, 30);
@@ -1659,6 +1666,342 @@ static int coplanar_overlaps(const tMechaQuadList *pList)
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * Puts a machine somewhere it can dash without hitting anything, facing a
+ * given way, and sends the other one out of the picture. Arena layouts have
+ * cover in them and a burst crosses tens of metres, so a test that wants to
+ * measure a dash has to find itself a runway first -- otherwise it measures
+ * a bounce and calls it a bug.
+ */
+static bool clear_runway(tMechaWorld *pWorld, int iFacing)
+{
+    const tMechaMechDef *pDef = mecha_def_get((int)pWorld->aMechs[0].byDefIdx);
+    float fDirX = mecha_sin(iFacing);
+    float fDirZ = mecha_cos(iFacing);
+    float fStep = pDef->fRadius * 1.5f;
+    int iSlot;
+
+    for (iSlot = 0; iSlot < 400; iSlot++) {
+        /* A lattice across the floor, skipping the middle where the round
+         * starts and cover tends to be. */
+        float fX = (float)((iSlot % 20) - 10) * pWorld->arena.fHalfExtent
+                   / 11.0f;
+        float fZ = (float)((iSlot / 20) - 10) * pWorld->arena.fHalfExtent
+                   / 11.0f;
+        bool bClear = true;
+        float fAhead;
+
+        for (fAhead = 0.0f; fAhead < MECHA_M(34.0f) && bClear;
+             fAhead += fStep) {
+            float fProbeX = fX + fDirX * fAhead;
+            float fProbeZ = fZ + fDirZ * fAhead;
+            float fMovedX = fProbeX;
+            float fMovedZ = fProbeZ;
+
+            if (!mecha_arena_contains(&pWorld->arena, fProbeX, fProbeZ))
+                bClear = false;
+            else if (mecha_arena_resolve_cylinder(&pWorld->arena,
+                                                  pDef->fRadius * 1.4f, 0.0f,
+                                                  pDef->fHeight, &fMovedX,
+                                                  &fMovedZ))
+                bClear = false;
+            else if (mecha_arena_ground_height(&pWorld->arena, fProbeX,
+                                               fProbeZ, 0.0f) > 1.0f)
+                bClear = false;
+        }
+        if (!bClear)
+            continue;
+
+        pWorld->aMechs[0].fX = fX;
+        pWorld->aMechs[0].fZ = fZ;
+        pWorld->aMechs[0].fY = 0.0f;
+        pWorld->aMechs[0].iFacing = mecha_angle_wrap(iFacing);
+        pWorld->aMechs[0].iLegYaw = pWorld->aMechs[0].iFacing;
+        /* The other machine is a wall too. */
+        pWorld->aMechs[1].fX = -fX;
+        pWorld->aMechs[1].fZ = -fZ - MECHA_M(4.0f);
+        return true;
+    }
+    return false;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/* Heading of the machine's travel, or -1 when it is not travelling. */
+static int travel_heading(const tMechaMech *pMech)
+{
+    if (mecha_length2(pMech->fVelX, pMech->fVelZ) < MECHA_MPS(1.0f))
+        return -1;
+    return mecha_atan2_angle(pMech->fVelX, pMech->fVelZ);
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_dashing_is_committed(void)
+{
+    tMechaWorld world;
+    tMechaInput aInputs[2];
+    const tMechaMechDef *pDef;
+    float fSpeedAfterRelease;
+    int iTicksDashed = 0;
+    int i;
+
+    start_duel(&world, 0, 0, 0, 0xDA54u, 1);
+    pDef = mecha_def_get((int)world.aMechs[0].byDefIdx);
+    memset(aInputs, 0, sizeof(aInputs));
+
+    /* One tap, then hands off the button entirely. */
+    aInputs[0].iMoveZ = 100;
+    aInputs[0].bDash = true;
+    mecha_sim_tick(&world, aInputs, 2);
+    aInputs[0].bDash = false;
+    aInputs[0].iMoveZ = 0;
+    CHECK(world.aMechs[0].byMove == MECHA_MOVE_DASH);
+
+    for (i = 0; i < pDef->iDashTicks * 2; i++) {
+        mecha_sim_tick(&world, aInputs, 2);
+        if (world.aMechs[0].byMove == MECHA_MOVE_DASH)
+            iTicksDashed++;
+        else
+            break;
+    }
+    fSpeedAfterRelease = mecha_length2(world.aMechs[0].fVelX,
+                                       world.aMechs[0].fVelZ);
+
+    printf("   burst ran %d ticks of %d after the button came up,"
+           " leaving %.1f m/s\n", iTicksDashed + 1, pDef->iDashTicks,
+           fSpeedAfterRelease / MECHA_METRE);
+    /* The button starts the burst; it does not hold it up. */
+    CHECK(iTicksDashed + 1 >= pDef->iDashTicks - 1);
+    /* And the speed it built is not thrown away with it. */
+    CHECK(fSpeedAfterRelease > pDef->fWalkSpeed);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_a_dash_can_be_steered_and_cancelled(void)
+{
+    tMechaWorld world;
+    tMechaInput aInputs[2];
+    int iStraight;
+    int iCrossed;
+    int iHeld;
+    int iCancelled;
+
+    /* --- the crossing step: let go, tap across, the burst turns --------- */
+    start_duel(&world, 0, 0, 0, 0xC205u, 1);
+    memset(aInputs, 0, sizeof(aInputs));
+    CHECK(clear_runway(&world, 0));
+    aInputs[0].iMoveZ = 100;
+    aInputs[0].bDash = true;
+    mecha_sim_tick(&world, aInputs, 2);
+    aInputs[0].bDash = false;
+    run_ticks(&world, aInputs, 2, 3);
+    iStraight = travel_heading(&world.aMechs[0]);
+    CHECK(iStraight >= 0);
+
+    aInputs[0].iMoveZ = 0;                      /* released */
+    mecha_sim_tick(&world, aInputs, 2);
+    aInputs[0].iMoveX = 100;                    /* tapped across */
+    run_ticks(&world, aInputs, 2, 3);
+    iCrossed = travel_heading(&world.aMechs[0]);
+    CHECK(world.aMechs[0].byMove == MECHA_MOVE_DASH);
+
+    /* --- holding a direction is not steering ---------------------------- */
+    {
+        tMechaWorld held;
+
+        start_duel(&held, 0, 0, 0, 0xC205u, 1);
+        memset(aInputs, 0, sizeof(aInputs));
+        CHECK(clear_runway(&held, 0));
+        aInputs[0].iMoveZ = 100;
+        aInputs[0].bDash = true;
+        mecha_sim_tick(&held, aInputs, 2);
+        aInputs[0].bDash = false;
+        /* Straight onto a new direction without ever letting go. */
+        aInputs[0].iMoveX = 100;
+        run_ticks(&held, aInputs, 2, 6);
+        iHeld = travel_heading(&held.aMechs[0]);
+        CHECK(held.aMechs[0].byMove == MECHA_MOVE_DASH);
+    }
+
+    /* --- the cancel: push back and boost again -------------------------- */
+    {
+        tMechaWorld back;
+
+        start_duel(&back, 0, 0, 0, 0xC205u, 1);
+        memset(aInputs, 0, sizeof(aInputs));
+        CHECK(clear_runway(&back, 0));
+        aInputs[0].iMoveZ = 100;
+        aInputs[0].bDash = true;
+        mecha_sim_tick(&back, aInputs, 2);
+        aInputs[0].bDash = false;
+        run_ticks(&back, aInputs, 2, 3);
+        aInputs[0].iMoveZ = -100;
+        aInputs[0].bDash = true;
+        mecha_sim_tick(&back, aInputs, 2);
+        aInputs[0].bDash = false;
+        run_ticks(&back, aInputs, 2, 2);
+        iCancelled = travel_heading(&back.aMechs[0]);
+        CHECK(back.aMechs[0].byMove == MECHA_MOVE_DASH);
+    }
+
+    printf("   dash headings: straight %d, crossed %d, held %d,"
+           " cancelled %d\n", iStraight, iCrossed, iHeld, iCancelled);
+    /* Released and tapped across: the burst turns, and by a lot. */
+    CHECK(abs(mecha_angle_delta(iStraight, iCrossed)) > MECHA_DEG(60));
+    /* Held through: it does not. */
+    CHECK(abs(mecha_angle_delta(iStraight, iHeld)) < MECHA_DEG(8));
+    /* Pushed back against and boosted again: the other way entirely. */
+    CHECK(abs(mecha_angle_delta(iStraight, iCancelled)) > MECHA_DEG(150));
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_a_boost_carries_and_bounces(void)
+{
+    tMechaWorld world;
+    tMechaInput aInputs[2];
+    const tMechaMechDef *pDef;
+    float fCoasted;
+    float fWalked;
+    int i;
+
+    /* --- momentum out the far side of a burst --------------------------- */
+    start_duel(&world, 0, 0, 0, 0xB005u, 1);
+    pDef = mecha_def_get((int)world.aMechs[0].byDefIdx);
+    memset(aInputs, 0, sizeof(aInputs));
+    CHECK(clear_runway(&world, 0));
+    aInputs[0].iMoveZ = 100;
+    aInputs[0].bDash = true;
+    mecha_sim_tick(&world, aInputs, 2);
+    memset(aInputs, 0, sizeof(aInputs));
+    for (i = 0; i < pDef->iDashTicks * 2; i++) {
+        mecha_sim_tick(&world, aInputs, 2);
+        if (world.aMechs[0].byMove != MECHA_MOVE_DASH)
+            break;
+    }
+    {
+        float fZ0 = world.aMechs[0].fZ;
+
+        run_ticks(&world, aInputs, 2, MECHA_TICK_HZ / 3);
+        fCoasted = world.aMechs[0].fZ - fZ0;
+    }
+
+    /* The same window, walking and then stopping dead. */
+    {
+        tMechaWorld walk;
+        float fZ0;
+
+        start_duel(&walk, 0, 0, 0, 0xB005u, 1);
+        memset(aInputs, 0, sizeof(aInputs));
+        CHECK(clear_runway(&walk, 0));
+        aInputs[0].iMoveZ = 100;
+        run_ticks(&walk, aInputs, 2, MECHA_TICK_HZ);
+        memset(aInputs, 0, sizeof(aInputs));
+        fZ0 = walk.aMechs[0].fZ;
+        run_ticks(&walk, aInputs, 2, MECHA_TICK_HZ / 3);
+        fWalked = walk.aMechs[0].fZ - fZ0;
+    }
+
+    printf("   after the burst ends: coasts %.1f m, a stopped walk %.1f m\n",
+           fCoasted / MECHA_METRE, fWalked / MECHA_METRE);
+    CHECK(fCoasted > fWalked * 1.6f);
+
+    /* --- off a wall ------------------------------------------------------ */
+    {
+        tMechaWorld wall;
+        float fInto;
+        float fOut;
+        float fSpeed;
+
+        start_duel(&wall, 0, 0, 0, 0xBA11u, 1);
+        memset(aInputs, 0, sizeof(aInputs));
+        /* Facing the far wall from just short of it. */
+        face_mech(&wall, 0, 0);
+        wall.aMechs[0].fX = 0.0f;
+        wall.aMechs[0].fZ = wall.arena.fHalfExtent - MECHA_M(8.0f);
+        wall.aMechs[1].fX = 0.0f;
+        wall.aMechs[1].fZ = -wall.arena.fHalfExtent + MECHA_M(8.0f);
+        aInputs[0].iMoveZ = 100;
+        aInputs[0].bDash = true;
+        mecha_sim_tick(&wall, aInputs, 2);
+        memset(aInputs, 0, sizeof(aInputs));
+        fInto = wall.aMechs[0].fVelZ;
+        CHECK(fInto > 0.0f);
+
+        for (i = 0; i < MECHA_TICK_HZ; i++) {
+            mecha_sim_tick(&wall, aInputs, 2);
+            if (wall.aMechs[0].fVelZ < 0.0f)
+                break;
+        }
+        fOut = wall.aMechs[0].fVelZ;
+        fSpeed = mecha_length2(wall.aMechs[0].fVelX, wall.aMechs[0].fVelZ);
+
+        printf("   into the wall at %.1f m/s, off it at %.1f m/s\n",
+               fInto / MECHA_METRE, -fOut / MECHA_METRE);
+        /* It comes off rather than sticking to it, and with real speed. */
+        CHECK(fOut < 0.0f);
+        CHECK(fSpeed > MECHA_BOUNCE_MIN_SPEED);
+    }
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_dashing_works_in_the_air(void)
+{
+    tMechaWorld world;
+    tMechaInput aInputs[2];
+    const tMechaMechDef *pDef;
+    float fTakeoffY;
+    float fDashY;
+    float fSpeed;
+    int i;
+
+    start_duel(&world, 0, 0, 0, 0xA12Du, 1);
+    pDef = mecha_def_get((int)world.aMechs[0].byDefIdx);
+    memset(aInputs, 0, sizeof(aInputs));
+    CHECK(clear_runway(&world, 0));
+
+    aInputs[0].bJump = true;
+    mecha_sim_tick(&world, aInputs, 2);
+    aInputs[0].bJump = false;
+    run_ticks(&world, aInputs, 2, 12);
+    CHECK(world.aMechs[0].byMove == MECHA_MOVE_JUMP);
+    CHECK(world.aMechs[0].fY > MECHA_M(1.0f));
+
+    aInputs[0].iMoveZ = 100;
+    aInputs[0].bDash = true;
+    mecha_sim_tick(&world, aInputs, 2);
+    memset(aInputs, 0, sizeof(aInputs));
+    CHECK(world.aMechs[0].byMove == MECHA_MOVE_DASH);
+    fTakeoffY = world.aMechs[0].fY;
+
+    for (i = 0; i < pDef->iDashTicks - 2; i++)
+        mecha_sim_tick(&world, aInputs, 2);
+    fDashY = world.aMechs[0].fY;
+    fSpeed = mecha_length2(world.aMechs[0].fVelX, world.aMechs[0].fVelZ);
+
+    printf("   air dash held %.2f m of height and made %.1f m/s\n",
+           (fDashY - fTakeoffY) / MECHA_METRE, fSpeed / MECHA_METRE);
+    /* Flat, fast, and still in the air: a burst holds its height. */
+    CHECK(fDashY > fTakeoffY - MECHA_M(0.5f));
+    CHECK(fSpeed > pDef->fDashSpeed * 0.9f);
+    CHECK(world.aMechs[0].fY > MECHA_M(0.5f));
+
+    /* And when it runs out, the machine is falling again, not standing. */
+    for (i = 0; i < 6; i++)
+        mecha_sim_tick(&world, aInputs, 2);
+    CHECK(world.aMechs[0].byMove == MECHA_MOVE_JUMP);
+    CHECK(world.aMechs[0].fVelY < 0.0f);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static int test_nothing_is_built_coplanar(void)
 {
     static tMechaQuad aStorage[MECHA_QUAD_CAPACITY];
@@ -2552,6 +2895,11 @@ int main(void)
           test_arms_and_head_follow_the_lock },
         { "shadows survive the paint order",
           test_shadows_survive_the_paint_order },
+        { "dashing is committed", test_dashing_is_committed },
+        { "a dash can be steered and cancelled",
+          test_a_dash_can_be_steered_and_cancelled },
+        { "a boost carries and bounces", test_a_boost_carries_and_bounces },
+        { "dashing works in the air", test_dashing_works_in_the_air },
         { "nothing is built coplanar", test_nothing_is_built_coplanar },
         { "blasts draw over what they engulf",
           test_blasts_draw_over_what_they_engulf },

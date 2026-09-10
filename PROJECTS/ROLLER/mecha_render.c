@@ -1181,6 +1181,7 @@ static const char *const s_aaszControls[][2] = {
   { "MOVE",        "W A S D  /  LEFT STICK" },
   { "TURN",        "Q E  /  RIGHT STICK" },
   { "DASH",        "SHIFT  /  B OR LB" },
+  { "STEER DASH",  "LET GO  THEN TAP" },
   { "JUMP",        "SPACE  /  A" },
   { "GUARD",       "C OR CTRL  /  X" },
   { "JUMP CANCEL", "GUARD WHILE AIRBORNE" },

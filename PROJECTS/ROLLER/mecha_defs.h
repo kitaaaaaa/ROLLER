@@ -166,6 +166,35 @@
  * a shot kicks the arm that fired it. The arms reach further round than the
  * head does: an arm is a gun mount, a neck is a neck.
  */
+/*
+ * A boost is a committed act. The button starts it and nothing but the
+ * clock, an empty gauge, a jump or a wall ends it -- letting go does not.
+ * What is left afterwards is the coast: the speed carries, the steering is
+ * feeble, and the machine skids rather than turning.
+ */
+#define MECHA_DASH_COAST_TICKS  MECHA_SEC(0.55f)
+#define MECHA_COAST_ACCEL_SCALE 0.22f
+#define MECHA_COAST_GRIP_SCALE  0.18f
+
+/*
+ * Two ways to change a dash you are already committed to. Boost again while
+ * pushing back against it and the burst restarts the other way -- that is
+ * the cancel. Or let the stick go and tap a new direction, and the burst
+ * turns without a second press, which is the crossing step: cheaper, but it
+ * costs the moment it takes to release.
+ */
+#define MECHA_DASH_CANCEL_DOT   (-0.35f)
+#define MECHA_DASH_STICK_FREE   0.20f
+#define MECHA_DASH_STICK_TAP    0.45f
+
+/*
+ * Off a wall at speed. The race game's cars bounce rather than stopping
+ * dead, and a machine carrying a boost into a wall should do the same:
+ * below this speed it just leans on the wall, above it, it comes off.
+ */
+#define MECHA_BOUNCE_RESTITUTION 0.55f
+#define MECHA_BOUNCE_MIN_SPEED   MECHA_MPS(9.0f)
+
 #define MECHA_ARM_YAW_LIMIT    MECHA_DEG(46)
 #define MECHA_ARM_PITCH_LIMIT  MECHA_DEG(38)
 #define MECHA_ARM_DROOP        MECHA_DEG(22)

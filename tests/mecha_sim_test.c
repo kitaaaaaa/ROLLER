@@ -2264,6 +2264,40 @@ static int test_nothing_is_built_coplanar(void)
          * than a hope: a frame that overflows does not crash, it silently
          * stops adding geometry.
          */
+        /*
+         * Cover is built by hand now, panel by panel, so which way each
+         * side faces is a decision rather than something a box helper
+         * guarantees. A block whose sides face inwards is invisible from
+         * outside and solid from within, which is exactly backwards.
+         */
+        for (int iBox = 0; iBox < world.arena.iObstacleCount; iBox++) {
+            const tMechaObstacle *pBox = &world.arena.aObstacles[iBox];
+            int iChecked = 0;
+            int iQuad;
+
+            for (iQuad = 0; iQuad < list.iCount; iQuad++) {
+                const tMechaQuad *pQuad = &aStorage[iQuad];
+                float fCx = 0.0f;
+                float fCz = 0.0f;
+                int v;
+
+                if (fabsf(pQuad->afNormal[1]) > 0.5f)
+                    continue;                   /* a roof, not a side */
+                for (v = 0; v < 4; v++) {
+                    fCx += 0.25f * pQuad->afVert[v][0];
+                    fCz += 0.25f * pQuad->afVert[v][2];
+                }
+                /* On this block's surface, near enough. */
+                if (fabsf(fCx - pBox->fX) > pBox->fHalfX + 1.0f
+                    || fabsf(fCz - pBox->fZ) > pBox->fHalfZ + 1.0f)
+                    continue;
+                CHECK(pQuad->afNormal[0] * (fCx - pBox->fX)
+                      + pQuad->afNormal[2] * (fCz - pBox->fZ) > 0.0f);
+                iChecked++;
+            }
+            CHECK(iChecked > 0);
+        }
+
         printf("   arena %d: %d quads, %d dropped\n", iArena, list.iCount,
                list.iDropped);
         CHECK(list.iDropped == 0);

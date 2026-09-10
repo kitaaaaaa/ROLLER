@@ -351,6 +351,11 @@ Both are read every frame, so either works at any time.
   arena, which is why the tests now assert the budget rather than hoping:
   around 1750 quads for a full scene against a capacity of 4096, and nothing
   dropped.
+- **Cover is panelled too.** Same reason as the walls, same tile size: a
+  block twenty metres across wore one tile stretched over the whole face.
+  Its sides are wound the other way round, because cover is seen from
+  outside and a wall from inside, and it has no underside -- the only way to
+  see one is to get beneath the world.
 - **Surfaces use the game's own textures.** Ground, walls and cover are
   drawn from the retail texture banks when they are installed -- track1.drh
   for ground and walls, building.drh for the faces of cover -- through the

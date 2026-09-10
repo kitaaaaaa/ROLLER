@@ -318,9 +318,10 @@ static void mecha_tag_texture(tMechaQuadList *pList, int iBank, int iTile);
  */
 static void mecha_add_wall(tMechaQuadList *pList,
                            float fX0, float fZ0, float fX1, float fZ1,
-                           float fHeight, float fTile,
-                           uint8_t byPalette, uint8_t byTile)
+                           float fLowY, float fHighY, float fTile,
+                           int iBank, uint8_t byPalette, uint8_t byTile)
 {
+  float fHeight = fHighY - fLowY;
   float fRunX = fX1 - fX0;
   float fRunZ = fZ1 - fZ0;
   float fLength = mecha_length2(fRunX, fRunZ);
@@ -339,8 +340,8 @@ static void mecha_add_wall(tMechaQuadList *pList,
     iUp = 1;
 
   for (iRow = 0; iRow < iUp; iRow++) {
-    float fLowY = fHeight * (float)iRow / (float)iUp;
-    float fHighY = fHeight * (float)(iRow + 1) / (float)iUp;
+    float fBandLow = fLowY + fHeight * (float)iRow / (float)iUp;
+    float fBandHigh = fLowY + fHeight * (float)(iRow + 1) / (float)iUp;
 
     for (iCol = 0; iCol < iAcross; iCol++) {
       float fNear = (float)iCol / (float)iAcross;
@@ -348,8 +349,68 @@ static void mecha_add_wall(tMechaQuadList *pList,
 
       mecha_add_panel(pList, fX0 + fRunX * fNear, fZ0 + fRunZ * fNear,
                       fX0 + fRunX * fFar, fZ0 + fRunZ * fFar,
-                      fLowY, fHighY, byPalette, 0);
-      mecha_tag_texture(pList, MECHA_TEX_WORLD, byTile);
+                      fBandLow, fBandHigh, byPalette, 0);
+      mecha_tag_texture(pList, iBank, byTile);
+    }
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * A block of cover, in panels for the same reason the walls are. Its sides
+ * face outwards, which is the opposite winding to an arena wall: the normal
+ * comes a quarter turn anticlockwise from the run seen from above, so each
+ * side is walked from the end that puts it on the outside.
+ *
+ * No underside. It is sitting on the floor and the only way to see one is
+ * to get beneath the world.
+ */
+static void mecha_add_tiled_box(tMechaQuadList *pList, float fX, float fZ,
+                                float fHalfX, float fHalfZ, float fBaseY,
+                                float fTopY, float fTile, int iBank,
+                                uint8_t byPalette, uint8_t byTopPalette,
+                                uint8_t byTile, uint8_t byTopTile)
+{
+  float fLowX = fX - fHalfX;
+  float fHighX = fX + fHalfX;
+  float fLowZ = fZ - fHalfZ;
+  float fHighZ = fZ + fHalfZ;
+  int iCols;
+  int iRows;
+  int iCol;
+  int iRow;
+
+  mecha_add_wall(pList, fHighX, fHighZ, fHighX, fLowZ, fBaseY, fTopY, fTile,
+                 iBank, byPalette, byTile);
+  mecha_add_wall(pList, fLowX, fLowZ, fLowX, fHighZ, fBaseY, fTopY, fTile,
+                 iBank, byPalette, byTile);
+  mecha_add_wall(pList, fLowX, fHighZ, fHighX, fHighZ, fBaseY, fTopY, fTile,
+                 iBank, byPalette, byTile);
+  mecha_add_wall(pList, fHighX, fLowZ, fLowX, fLowZ, fBaseY, fTopY, fTile,
+                 iBank, byPalette, byTile);
+
+  /* And the roof, tiled the same way, because a wide one stretched its
+   * tile exactly as the walls did. */
+  iCols = (int)(2.0f * fHalfX / fTile + 0.5f);
+  iRows = (int)(2.0f * fHalfZ / fTile + 0.5f);
+  if (iCols < 1)
+    iCols = 1;
+  if (iRows < 1)
+    iRows = 1;
+  for (iRow = 0; iRow < iRows; iRow++) {
+    for (iCol = 0; iCol < iCols; iCol++) {
+      mecha_add_floor_quad(pList,
+                           fLowX + 2.0f * fHalfX * (float)iCol
+                                   / (float)iCols,
+                           fLowZ + 2.0f * fHalfZ * (float)iRow
+                                   / (float)iRows,
+                           fLowX + 2.0f * fHalfX * (float)(iCol + 1)
+                                   / (float)iCols,
+                           fLowZ + 2.0f * fHalfZ * (float)(iRow + 1)
+                                   / (float)iRows,
+                           fTopY, byTopPalette, 0);
+      mecha_tag_texture(pList, iBank, byTopTile);
     }
   }
 }
@@ -396,30 +457,25 @@ void mecha_mesh_arena(tMechaQuadList *pList, const tMechaArena *pArena)
    * sees straight through them rather than at a wall of solid colour,
    * because they are one-sided and get culled from behind. */
   mecha_add_wall(pList,  fExtent, -fExtent,  fExtent,  fExtent,
-                 pArena->fWallHeight, fTile, pArena->byWallPalette,
-                 pArena->byWallTile);
+                 0.0f, pArena->fWallHeight, fTile, MECHA_TEX_WORLD,
+                 pArena->byWallPalette, pArena->byWallTile);
   mecha_add_wall(pList, -fExtent,  fExtent, -fExtent, -fExtent,
-                 pArena->fWallHeight, fTile, pArena->byWallPalette,
-                 pArena->byWallTile);
+                 0.0f, pArena->fWallHeight, fTile, MECHA_TEX_WORLD,
+                 pArena->byWallPalette, pArena->byWallTile);
   mecha_add_wall(pList,  fExtent,  fExtent, -fExtent,  fExtent,
-                 pArena->fWallHeight, fTile, pArena->byWallPalette,
-                 pArena->byWallTile);
+                 0.0f, pArena->fWallHeight, fTile, MECHA_TEX_WORLD,
+                 pArena->byWallPalette, pArena->byWallTile);
   mecha_add_wall(pList, -fExtent, -fExtent,  fExtent, -fExtent,
-                 pArena->fWallHeight, fTile, pArena->byWallPalette,
-                 pArena->byWallTile);
+                 0.0f, pArena->fWallHeight, fTile, MECHA_TEX_WORLD,
+                 pArena->byWallPalette, pArena->byWallTile);
 
   for (i = 0; i < pArena->iObstacleCount; i++) {
     const tMechaObstacle *pBox = &pArena->aObstacles[i];
-    tMechaPose pose;
 
-    int iFirst = pList->iCount;
-
-    mecha_pose_build(&pose, 0, 0, 0, pBox->fX, 0.0f, pBox->fZ, 1.0f);
-    mecha_add_box(pList, &pose, 0.0f, pBox->fHeight * 0.5f, 0.0f,
-                  pBox->fHalfX, pBox->fHeight * 0.5f, pBox->fHalfZ,
-                  pBox->byPalette, pBox->byTrimPalette, 0);
-    mecha_tag_box(pList, iFirst, MECHA_TEX_STRUCT, pBox->byTile,
-                  pBox->byTopTile);
+    mecha_add_tiled_box(pList, pBox->fX, pBox->fZ, pBox->fHalfX,
+                        pBox->fHalfZ, 0.0f, pBox->fHeight, fTile,
+                        MECHA_TEX_STRUCT, pBox->byPalette,
+                        pBox->byTrimPalette, pBox->byTile, pBox->byTopTile);
   }
 }
 

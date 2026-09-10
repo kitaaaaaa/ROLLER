@@ -43,15 +43,15 @@
 #define MECHA_QUAD_DECAL     0x08
 
 /*
- * Lay this quad's tile on the other way round.
+ * This quad wears artwork out of the game's own data files.
  *
  * POLYTEX works its own texture coordinates out from the projected polygon,
- * so the order the four corners reach it in is what decides which way round
- * the artwork sits. The mode hands them over in one order and the race
- * game's own geometry wants the other, and there is no reconciling the two
- * in the winding itself without moving the geometry -- so a quad carrying a
- * texture that came out of the game's data says so, and the renderer turns
- * that one over on its way past.
+ * so the order the four corners reach it in decides which way round the
+ * artwork sits -- and everything the mode builds itself is wound the
+ * opposite way round its faces from what POLYTEX wants, so the renderer
+ * turns those over. Retail geometry is not: it arrives already reflected
+ * once, by the frame change that got it here, and turning it over again is
+ * what put the car's own name on backwards.
  */
 #define MECHA_QUAD_TEX_FLIP  0x10
 

@@ -13,18 +13,22 @@ wound backwards still culls, sorts and fills correctly, and grass, tarmac,
 concrete and a plasma bolt all look the same mirrored. Put a road sign on
 one and it reads backwards.
 
-The second is the car's alone, and it is a different flip. Its tiles come
-out of the game's own data laid out for the way the race game hands its
-polygons over, so turning them round like everything else in the mode leaves
-them mirrored -- the flank reads NIZIZ. What they want is the corners
-swapped in pairs, which is a plain horizontal mirror of the tile. Nothing
-about the geometry needs touching to get there, and touching it would be
-wrong: the axes only swap, so the body keeps the plan's own handedness and
-its wheels, exhausts and livery stay on the sides they belong on.
+The second is in the mesh, and it is about the body rather than the paint.
+The race game's frame is right-handed -- x along the car, y across it, z up
+-- and the arena's is not: x across, y up, z forward. Swapping the three
+axes without negating one builds the car's mirror image, with its wheel
+arches, its exhausts and both flanks of its livery on the wrong sides. The
+lateral axis is negated to put that right.
+
+The two interact, which is what made them hard to separate. Reflecting the
+body reverses every winding the plan had, so retail geometry reaches POLYTEX
+already turned round once -- and turning it round again, the way the mode's
+own quads need, is what put ZIZIN on the car as NIZIZ. So a quad carrying
+artwork out of the game's data says so, and keeps the order it arrived in.
 
 Neither is measurable from a headless C test -- both live past the
 renderer's boundary and are only visible as pixels -- so what this pins is
-that both are still there and still different from each other, with the
+that both are still there and still opposite to each other, with the
 reasoning above being the part worth keeping.
 """
 
@@ -57,12 +61,12 @@ class TexturedQuadsAreTurnedRoundOnTheWayOut(unittest.TestCase):
         block = body(source, "static void mecha_render_scene")
         self.assertIn("3 - iCorner", block)
 
-    def test_retail_artwork_is_mirrored_instead(self) -> None:
-        """Corners swapped in pairs, which is the horizontal flip."""
+    def test_retail_artwork_keeps_the_order_it_arrived_in(self) -> None:
+        """Its geometry was reflected on the way in; that is the flip."""
         source = read(RENDER)
         block = body(source, "static void mecha_render_scene")
         self.assertIn("MECHA_QUAD_TEX_FLIP", block)
-        self.assertIn("(1 - iCorner) & 3", block)
+        self.assertRegex(block, r"MECHA_QUAD_TEX_FLIP\)\s*\?\s*iCorner")
 
     def test_it_only_touches_the_textured_path(self) -> None:
         """Flat fills must keep the winding their normals were built from."""
@@ -76,14 +80,20 @@ class TexturedQuadsAreTurnedRoundOnTheWayOut(unittest.TestCase):
         self.assertNotIn("aTexVerts", block[flat_at:])
 
 
-class TheCarPlanIsNotReflected(unittest.TestCase):
-    def test_the_axes_only_swap(self) -> None:
-        """Negating one would mirror the body to fix the paint on it."""
+class TheCarPlanIsReflectedIntoTheArena(unittest.TestCase):
+    def test_the_lateral_axis_is_negated(self) -> None:
+        """Without it the car is built as its own mirror image."""
+        source = read(MESH)
+        block = body(source, "static void mecha_add_zizin_body")
+        self.assertRegex(block, r"mecha_pose_apply\(pPose,\s*-pPlan->fY")
+
+    def test_exactly_one_axis_is_negated(self) -> None:
+        """A second negation is a rotation, and puts the mirror back."""
         source = read(MESH)
         block = body(source, "static void mecha_add_zizin_body")
         call = re.search(r"mecha_pose_apply\(pPose,(.*?)\);", block,
                          re.S).group(1)
-        self.assertEqual(call.count("-pPlan->"), 0)
+        self.assertEqual(call.count("-pPlan->"), 1)
         for axis in ("pPlan->fX", "pPlan->fY", "pPlan->fZ"):
             self.assertIn(axis, call)
 

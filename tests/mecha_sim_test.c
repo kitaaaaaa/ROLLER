@@ -2842,13 +2842,16 @@ static int test_the_gun_car_is_a_car_with_a_gun(void)
     CHECK(fGunOut > pDef->fRadius);
 
     /*
-     * --- and the body is the plan's, not a reflection of it -------------
+     * --- and it is the car, not its reflection --------------------------
      *
-     * The plans are wound so their faces look outwards, and the axis swap
-     * that brings one into this frame leaves that alone. Nothing here is
-     * negated: turning the car round to fix the artwork on it would have
-     * put its wheels, its exhausts and its livery on the wrong sides, and
-     * the artwork is the renderer's problem rather than the geometry's.
+     * The race game's frame is right-handed and this one is not, so
+     * swapping the three axes without negating one builds the car's mirror
+     * image: same silhouette, wheel arches and exhausts and both flanks of
+     * the livery on the wrong sides. Negating the lateral axis puts it
+     * right, and a reflection reverses a winding -- so a correctly
+     * reflected body is one whose panels all face inwards. Drop the
+     * negation and all fifty turn round, which is what this catches,
+     * because nothing about the car's outline would.
      */
     {
         float fCentreY = world.aMechs[0].fY + pDef->fHeight * 0.5f;
@@ -2875,7 +2878,7 @@ static int test_the_gun_car_is_a_car_with_a_gun(void)
         }
         printf("   %d of its panels face outwards, %d in\n", iOutward,
                iInward);
-        CHECK(iOutward == MECHA_ZIZIN_BODY_QUADS);
+        CHECK(iInward == MECHA_ZIZIN_BODY_QUADS);
     }
     return 0;
 }

@@ -1092,9 +1092,14 @@ static int mecha_mesh_lean_pitch(const tMechaMech *pMech)
  *
  * Two things are converted on the way in. The plan is in the race game's
  * axes -- x along the car, y across it, z up -- where the arena's are x
- * across, y up, z forward, so the three swap. Nothing is negated: the body
- * is the plan's body, wheel for wheel and panel for panel, and the only
- * thing that needed turning round was the artwork on it. And the plan's polygons carry
+ * across, y up, z forward, so the three swap and the lateral one is
+ * negated. The negation is what keeps the car the right way round: those
+ * two frames are of opposite handedness, so swapping the axes alone builds
+ * the car's reflection, with its wheel arches, its exhausts and both flanks
+ * of its livery on the wrong sides. Reflecting it back reverses every
+ * winding the plan had, which is why its panels all face inwards here and
+ * why the artwork on them needs a different treatment from the one the rest
+ * of the mode gets. And the plan's polygons carry
  * a texture word rather than a colour, indexing a per-car bank this mode
  * does not load, so they are flat-shaded in the machine's own two palette
  * entries instead, picked apart by which way each face looks. The shape is
@@ -1175,7 +1180,7 @@ static void mecha_add_zizin_body(tMechaQuadList *pList,
     for (iCorner = 0; iCorner < 4; iCorner++) {
       const tVec3 *pPlan = &xzizin_coords[xzizin_pols[iPoly].verts[iCorner]];
 
-      mecha_pose_apply(pPose, pPlan->fY * fScale,
+      mecha_pose_apply(pPose, -pPlan->fY * fScale,
                        pPlan->fZ * fScale - fSink, pPlan->fX * fScale,
                        afVert[iCorner]);
     }
@@ -1200,11 +1205,14 @@ static void mecha_add_zizin_body(tMechaQuadList *pList,
    * bonnet and roof in the lighter, flanks in the darker, picked off each
    * panel's own normal once it has been worked out rather than off where
    * the panel sits -- the plan is a real car body and its sills are as high
-   * off the ground as some of its bonnet.
+   * off the ground as some of its bonnet. Downwards, because reflecting the
+   * plan into this frame reversed every winding in it and so every normal:
+   * the panel looking at the sky is the one whose normal points at the
+   * floor.
    */
   if (!s_bCarSkin) {
     for (i = iFirst; i < pList->iCount; i++) {
-      if (pList->paQuads[i].afNormal[1] > MECHA_ZIZIN_ROOF_FACING)
+      if (pList->paQuads[i].afNormal[1] < -MECHA_ZIZIN_ROOF_FACING)
         pList->paQuads[i].byPalette = byTop;
     }
   }

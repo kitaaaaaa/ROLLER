@@ -313,15 +313,21 @@ drives.
   correctly, and every texture the mode had worn until the car turned up --
   grass, tarmac, concrete, a plasma bolt -- was near enough symmetrical to
   look right mirrored. Put lettering on one and it reads backwards.
-- **The car's tiles are mirrored rather than turned round.** They come out
-  of the game's own data laid out for the way the race game hands its
-  polygons over, so giving them the same treatment as the mode's own
-  geometry leaves them the wrong way round -- the flank reads NIZIZ. What
-  they want is the corners swapped in pairs, which is a plain horizontal
-  flip of the tile, and a quad carrying retail artwork says so with a flag.
-  None of it touches the geometry: the axes only swap, so the body keeps the
-  plan's own handedness and its wheels, exhausts and livery stay on the
-  sides they belong on.
+- **And the car is reflected into this frame, not just rotated.** The race
+  game's frame is right-handed -- x along the car, y across it, z up -- and
+  this one is not: x across, y up, z forward. Swapping the three axes alone
+  builds the car's mirror image, with its wheel arches, its exhausts and
+  both flanks of its livery on the wrong sides, so the lateral axis is
+  negated.
+- **Which is why its artwork is the exception to the rule above.**
+  Reflecting the body reverses every winding the plan had, so its panels
+  reach POLYTEX already turned round once and all face inwards in this
+  frame. Turning them round again, the way the mode's own quads need, is
+  what put ZIZIN on the car as NIZIZ; a quad carrying retail artwork says so
+  with a flag and keeps the order it arrived in. Both halves have to be
+  right together, which is what made them hard to separate: fix either one
+  alone and the car is either mirrored with readable paint or the right way
+  round with the paint backwards.
 - **Its body is the game's own car, paint and all.** `xzizin_coords` and
   `xzizin_pols` out of `carplans.c` -- the same fifty quads the Zizin is
   drawn with on the track -- with the axes swapped from the race game's (x

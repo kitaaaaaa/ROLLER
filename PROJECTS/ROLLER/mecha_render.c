@@ -915,9 +915,15 @@ static void mecha_render_scene(GameRenderer *pRenderer,
          * them back the right way round. Everything the mode builds itself
          * just needs turning round.
          */
-        int iFrom = (pQuad->byFlags & MECHA_QUAD_TEX_FLIP)
-                      ? (1 - iCorner) & 3
-                      : 3 - iCorner;
+        /*
+         * Everything the mode builds itself is wound the opposite way round
+         * its faces from the way POLYTEX wants them and gets turned round;
+         * a quad carrying artwork out of the game's own data files says so,
+         * and keeps the order it arrived in. Its geometry was already
+         * reflected once on the way into this frame, and that is the flip.
+         */
+        int iFrom = (pQuad->byFlags & MECHA_QUAD_TEX_FLIP) ? iCorner
+                                                           : 3 - iCorner;
 
         aTexVerts[iCorner] = aVerts[iFrom];
         aTexVerts[iCorner].u = 0.0f;

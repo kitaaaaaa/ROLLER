@@ -313,14 +313,15 @@ drives.
   correctly, and every texture the mode had worn until the car turned up --
   grass, tarmac, concrete, a plasma bolt -- was near enough symmetrical to
   look right mirrored. Put lettering on one and it reads backwards.
-- **And the car plan is reflected, not just rotated.** The race game's plans
-  are in a right-handed frame -- x along the car, y across it, z up -- and
-  this one is not: x across, y up, z forward. Swapping the three axes alone
-  maps the body onto its own reflection, which is invisible on a car right
-  up until the numberplate. The lateral axis is negated to put it right, and
-  that reverses every winding the plan had, so its panels all face inwards
-  in this frame and the flat-paint fallback looks for the panel whose normal
-  points at the floor.
+- **The car's tiles are mirrored rather than turned round.** They come out
+  of the game's own data laid out for the way the race game hands its
+  polygons over, so giving them the same treatment as the mode's own
+  geometry leaves them the wrong way round -- the flank reads NIZIZ. What
+  they want is the corners swapped in pairs, which is a plain horizontal
+  flip of the tile, and a quad carrying retail artwork says so with a flag.
+  None of it touches the geometry: the axes only swap, so the body keeps the
+  plan's own handedness and its wheels, exhausts and livery stay on the
+  sides they belong on.
 - **Its body is the game's own car, paint and all.** `xzizin_coords` and
   `xzizin_pols` out of `carplans.c` -- the same fifty quads the Zizin is
   drawn with on the track -- with the axes swapped from the race game's (x

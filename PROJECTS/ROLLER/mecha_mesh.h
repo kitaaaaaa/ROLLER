@@ -42,6 +42,19 @@
  */
 #define MECHA_QUAD_DECAL     0x08
 
+/*
+ * Lay this quad's tile on the other way round.
+ *
+ * POLYTEX works its own texture coordinates out from the projected polygon,
+ * so the order the four corners reach it in is what decides which way round
+ * the artwork sits. The mode hands them over in one order and the race
+ * game's own geometry wants the other, and there is no reconciling the two
+ * in the winding itself without moving the geometry -- so a quad carrying a
+ * texture that came out of the game's data says so, and the renderer turns
+ * that one over on its way past.
+ */
+#define MECHA_QUAD_TEX_FLIP  0x10
+
 //-------------------------------------------------------------------------------------------------
 
 typedef struct

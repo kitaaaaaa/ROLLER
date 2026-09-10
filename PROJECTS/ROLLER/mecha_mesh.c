@@ -1092,13 +1092,9 @@ static int mecha_mesh_lean_pitch(const tMechaMech *pMech)
  *
  * Two things are converted on the way in. The plan is in the race game's
  * axes -- x along the car, y across it, z up -- where the arena's are x
- * across, y up, z forward, so the three swap, and the lateral one is
- * negated as well. That negation is not a taste: the race game's frame is
- * right-handed and this one is not, so swapping the axes alone maps the car
- * onto its own reflection. It cost nothing anywhere else in the mode
- * because nothing else in the mode comes out of the race game's data, and
- * it is invisible on a car until something with writing on it -- a
- * numberplate, say -- turns up backwards. And the plan's polygons carry
+ * across, y up, z forward, so the three swap. Nothing is negated: the body
+ * is the plan's body, wheel for wheel and panel for panel, and the only
+ * thing that needed turning round was the artwork on it. And the plan's polygons carry
  * a texture word rather than a colour, indexing a per-car bank this mode
  * does not load, so they are flat-shaded in the machine's own two palette
  * entries instead, picked apart by which way each face looks. The shape is
@@ -1179,7 +1175,7 @@ static void mecha_add_zizin_body(tMechaQuadList *pList,
     for (iCorner = 0; iCorner < 4; iCorner++) {
       const tVec3 *pPlan = &xzizin_coords[xzizin_pols[iPoly].verts[iCorner]];
 
-      mecha_pose_apply(pPose, -pPlan->fY * fScale,
+      mecha_pose_apply(pPose, pPlan->fY * fScale,
                        pPlan->fZ * fScale - fSink, pPlan->fX * fScale,
                        afVert[iCorner]);
     }
@@ -1191,7 +1187,7 @@ static void mecha_add_zizin_body(tMechaQuadList *pList,
       uint32_t uiTex = mecha_zizin_surface(iPoly);
 
       mecha_quads_add(pList, afVert, (uint8_t)(uiTex & 0xFFu),
-                      MECHA_QUAD_TWO_SIDED);
+                      MECHA_QUAD_TWO_SIDED | MECHA_QUAD_TEX_FLIP);
       if ((uiTex & SURFACE_FLAG_APPLY_TEXTURE) != 0)
         mecha_tag_texture(pList, MECHA_TEX_CAR, (int)(uiTex & 0xFFu));
     } else {
@@ -1204,14 +1200,11 @@ static void mecha_add_zizin_body(tMechaQuadList *pList,
    * bonnet and roof in the lighter, flanks in the darker, picked off each
    * panel's own normal once it has been worked out rather than off where
    * the panel sits -- the plan is a real car body and its sills are as high
-   * off the ground as some of its bonnet. Downwards, because reflecting the
-   * plan into this frame reversed every winding in it and so every normal:
-   * the panel looking at the sky is the one whose normal points at the
-   * floor.
+   * off the ground as some of its bonnet.
    */
   if (!s_bCarSkin) {
     for (i = iFirst; i < pList->iCount; i++) {
-      if (pList->paQuads[i].afNormal[1] < -MECHA_ZIZIN_ROOF_FACING)
+      if (pList->paQuads[i].afNormal[1] > MECHA_ZIZIN_ROOF_FACING)
         pList->paQuads[i].byPalette = byTop;
     }
   }

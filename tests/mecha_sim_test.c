@@ -2842,24 +2842,13 @@ static int test_the_gun_car_is_a_car_with_a_gun(void)
     CHECK(fGunOut > pDef->fRadius);
 
     /*
-     * --- and it is the car, not its reflection -------------------------
+     * --- and the body is the plan's, not a reflection of it -------------
      *
-     * The race game's plans are wound so their faces look outwards, in a
-     * right-handed frame. This one is not right-handed -- x across, y up, z
-     * forward -- so swapping the three axes without negating one maps the
-     * whole car onto its mirror image: same shape, wrong way round, every
-     * panel facing inwards. Nothing about a car's silhouette gives that
-     * away, and nothing in the mode would have caught it either, because
-     * the body is drawn two-sided. What gives it away is the artwork: the
-     * numberplate comes out backwards.
-     *
-     * So this counts which way the panels face. Every one of them looks
-     * inwards, and that is the tell rather than an accident: the plan is
-     * wound to face outwards where it came from, and a reflection reverses
-     * a winding, so a body that has been correctly reflected is a body
-     * whose panels all face in. Drop the negation and all fifty turn round
-     * -- which is what this is here to catch, because nothing about the
-     * car's silhouette would.
+     * The plans are wound so their faces look outwards, and the axis swap
+     * that brings one into this frame leaves that alone. Nothing here is
+     * negated: turning the car round to fix the artwork on it would have
+     * put its wheels, its exhausts and its livery on the wrong sides, and
+     * the artwork is the renderer's problem rather than the geometry's.
      */
     {
         float fCentreY = world.aMechs[0].fY + pDef->fHeight * 0.5f;
@@ -2886,7 +2875,7 @@ static int test_the_gun_car_is_a_car_with_a_gun(void)
         }
         printf("   %d of its panels face outwards, %d in\n", iOutward,
                iInward);
-        CHECK(iInward == MECHA_ZIZIN_BODY_QUADS);
+        CHECK(iOutward == MECHA_ZIZIN_BODY_QUADS);
     }
     return 0;
 }

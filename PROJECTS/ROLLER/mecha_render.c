@@ -907,7 +907,19 @@ static void mecha_render_scene(GameRenderer *pRenderer,
       int iCorner;
 
       for (iCorner = 0; iCorner < 4; iCorner++) {
-        aTexVerts[iCorner] = aVerts[3 - iCorner];
+        /*
+         * Mirrored for anything wearing artwork out of the game's own data
+         * files, which is the car and nothing else so far: its tiles are
+         * laid out for the way the race game hands its polygons over, and
+         * swapping the corners in pairs is the horizontal flip that gets
+         * them back the right way round. Everything the mode builds itself
+         * just needs turning round.
+         */
+        int iFrom = (pQuad->byFlags & MECHA_QUAD_TEX_FLIP)
+                      ? (1 - iCorner) & 3
+                      : 3 - iCorner;
+
+        aTexVerts[iCorner] = aVerts[iFrom];
         aTexVerts[iCorner].u = 0.0f;
         aTexVerts[iCorner].v = 0.0f;
       }

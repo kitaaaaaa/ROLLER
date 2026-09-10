@@ -176,10 +176,7 @@ drives.
   sprites, billboarded, non-collidable and crowded in against the boundary
   by a squared draw so the edge of the fight reads as the edge of a
   clearing. None of them are inside: a tree with no collision standing where
-  the fight is would be a tree machines walk through. Each one is wound from
-  its top corners, because POLYTEX takes the first vertex as the origin of
-  the tile: start at the bottom and the whole wood is planted by its
-  canopy.
+  the fight is would be a tree machines walk through.
 - **The ground is drawn and shaped at different resolutions, and both are
   per-arena.** The meadow is twice the size of the others, so it takes both
   a finer terrain grid -- or its hills round off into bumps, and a bump is
@@ -306,6 +303,24 @@ drives.
   its own speed, so driving alongside is not a ram and a head-on is worse
   than catching them up, and there is a cooldown on it because a car resting
   against somebody is not running them over sixty times a second.
+- **The mode's quads reach POLYTEX reversed.** POLYTEX works its own texture
+  coordinates out from the projected polygon, so the order the four corners
+  arrive in is what decides how the tile lies on them -- and the arena winds
+  its quads the other way round their faces from the way the race game winds
+  the geometry in its own data files. Nothing else ever noticed: this
+  renderer rejects back faces off the stored normal rather than off the
+  projected winding, so a quad wound backwards still culls, sorts and fills
+  correctly, and every texture the mode had worn until the car turned up --
+  grass, tarmac, concrete, a plasma bolt -- was near enough symmetrical to
+  look right mirrored. Put lettering on one and it reads backwards.
+- **And the car plan is reflected, not just rotated.** The race game's plans
+  are in a right-handed frame -- x along the car, y across it, z up -- and
+  this one is not: x across, y up, z forward. Swapping the three axes alone
+  maps the body onto its own reflection, which is invisible on a car right
+  up until the numberplate. The lateral axis is negated to put it right, and
+  that reverses every winding the plan had, so its panels all face inwards
+  in this frame and the flat-paint fallback looks for the panel whose normal
+  points at the floor.
 - **Its body is the game's own car, paint and all.** `xzizin_coords` and
   `xzizin_pols` out of `carplans.c` -- the same fifty quads the Zizin is
   drawn with on the track -- with the axes swapped from the race game's (x

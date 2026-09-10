@@ -1092,7 +1092,13 @@ static int mecha_mesh_lean_pitch(const tMechaMech *pMech)
  *
  * Two things are converted on the way in. The plan is in the race game's
  * axes -- x along the car, y across it, z up -- where the arena's are x
- * across, y up, z forward, so the three swap. And the plan's polygons carry
+ * across, y up, z forward, so the three swap, and the lateral one is
+ * negated as well. That negation is not a taste: the race game's frame is
+ * right-handed and this one is not, so swapping the axes alone maps the car
+ * onto its own reflection. It cost nothing anywhere else in the mode
+ * because nothing else in the mode comes out of the race game's data, and
+ * it is invisible on a car until something with writing on it -- a
+ * numberplate, say -- turns up backwards. And the plan's polygons carry
  * a texture word rather than a colour, indexing a per-car bank this mode
  * does not load, so they are flat-shaded in the machine's own two palette
  * entries instead, picked apart by which way each face looks. The shape is
@@ -1173,7 +1179,7 @@ static void mecha_add_zizin_body(tMechaQuadList *pList,
     for (iCorner = 0; iCorner < 4; iCorner++) {
       const tVec3 *pPlan = &xzizin_coords[xzizin_pols[iPoly].verts[iCorner]];
 
-      mecha_pose_apply(pPose, pPlan->fY * fScale,
+      mecha_pose_apply(pPose, -pPlan->fY * fScale,
                        pPlan->fZ * fScale - fSink, pPlan->fX * fScale,
                        afVert[iCorner]);
     }
@@ -1198,11 +1204,14 @@ static void mecha_add_zizin_body(tMechaQuadList *pList,
    * bonnet and roof in the lighter, flanks in the darker, picked off each
    * panel's own normal once it has been worked out rather than off where
    * the panel sits -- the plan is a real car body and its sills are as high
-   * off the ground as some of its bonnet.
+   * off the ground as some of its bonnet. Downwards, because reflecting the
+   * plan into this frame reversed every winding in it and so every normal:
+   * the panel looking at the sky is the one whose normal points at the
+   * floor.
    */
   if (!s_bCarSkin) {
     for (i = iFirst; i < pList->iCount; i++) {
-      if (pList->paQuads[i].afNormal[1] > MECHA_ZIZIN_ROOF_FACING)
+      if (pList->paQuads[i].afNormal[1] < -MECHA_ZIZIN_ROOF_FACING)
         pList->paQuads[i].byPalette = byTop;
     }
   }
@@ -1878,24 +1887,17 @@ static void mecha_add_upright_billboard(tMechaQuadList *pList, int iCameraYaw,
   float fHalf = fHeight * 0.5f;
   float afVert[4][3];
 
-  /*
-   * Top corners first. POLYTEX works its own coordinates out from the
-   * projected polygon and takes the first vertex as the origin of the tile,
-   * so the corner this starts at is the corner the artwork's top-left lands
-   * on -- start at the bottom and every tree in the wood is planted by its
-   * canopy.
-   */
   afVert[0][0] = fX - fRightX * fHalf;
-  afVert[0][1] = fBase + fHeight;
+  afVert[0][1] = fBase;
   afVert[0][2] = fZ - fRightZ * fHalf;
   afVert[1][0] = fX + fRightX * fHalf;
-  afVert[1][1] = fBase + fHeight;
+  afVert[1][1] = fBase;
   afVert[1][2] = fZ + fRightZ * fHalf;
   afVert[2][0] = fX + fRightX * fHalf;
-  afVert[2][1] = fBase;
+  afVert[2][1] = fBase + fHeight;
   afVert[2][2] = fZ + fRightZ * fHalf;
   afVert[3][0] = fX - fRightX * fHalf;
-  afVert[3][1] = fBase;
+  afVert[3][1] = fBase + fHeight;
   afVert[3][2] = fZ - fRightZ * fHalf;
   mecha_quads_add(pList, afVert, byPalette, MECHA_QUAD_TWO_SIDED);
 }

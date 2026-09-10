@@ -2840,6 +2840,54 @@ static int test_the_gun_car_is_a_car_with_a_gun(void)
     printf("   the gun stands %.1f m off the right of it\n",
            fGunOut / MECHA_METRE);
     CHECK(fGunOut > pDef->fRadius);
+
+    /*
+     * --- and it is the car, not its reflection -------------------------
+     *
+     * The race game's plans are wound so their faces look outwards, in a
+     * right-handed frame. This one is not right-handed -- x across, y up, z
+     * forward -- so swapping the three axes without negating one maps the
+     * whole car onto its mirror image: same shape, wrong way round, every
+     * panel facing inwards. Nothing about a car's silhouette gives that
+     * away, and nothing in the mode would have caught it either, because
+     * the body is drawn two-sided. What gives it away is the artwork: the
+     * numberplate comes out backwards.
+     *
+     * So this counts which way the panels face. Every one of them looks
+     * inwards, and that is the tell rather than an accident: the plan is
+     * wound to face outwards where it came from, and a reflection reverses
+     * a winding, so a body that has been correctly reflected is a body
+     * whose panels all face in. Drop the negation and all fifty turn round
+     * -- which is what this is here to catch, because nothing about the
+     * car's silhouette would.
+     */
+    {
+        float fCentreY = world.aMechs[0].fY + pDef->fHeight * 0.5f;
+        int iOutward = 0;
+        int iInward = 0;
+
+        for (i = 0; i < MECHA_ZIZIN_BODY_QUADS && i < list.iCount; i++) {
+            float afMid[3] = { 0.0f, 0.0f, 0.0f };
+            float fDot;
+            int v;
+
+            for (v = 0; v < 4; v++) {
+                afMid[0] += aStorage[i].afVert[v][0] * 0.25f;
+                afMid[1] += aStorage[i].afVert[v][1] * 0.25f;
+                afMid[2] += aStorage[i].afVert[v][2] * 0.25f;
+            }
+            fDot = aStorage[i].afNormal[0] * (afMid[0] - world.aMechs[0].fX)
+                 + aStorage[i].afNormal[1] * (afMid[1] - fCentreY)
+                 + aStorage[i].afNormal[2] * (afMid[2] - world.aMechs[0].fZ);
+            if (fDot > 0.0f)
+                iOutward++;
+            else
+                iInward++;
+        }
+        printf("   %d of its panels face outwards, %d in\n", iOutward,
+               iInward);
+        CHECK(iInward == MECHA_ZIZIN_BODY_QUADS);
+    }
     return 0;
 }
 

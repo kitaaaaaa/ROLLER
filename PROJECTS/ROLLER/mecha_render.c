@@ -116,6 +116,9 @@ static const uint8 s_aabyFont[][MECHA_GLYPH_H] = {
 #define MECHA_HUD_ENEMY   231
 
 /* Camera framing, in metres. */
+/* TEMP knob */
+#define MECHA_TEX_CORNER_ROLL 7
+
 #define MECHA_CAM_BACK_NEAR  24.0f
 #define MECHA_CAM_BACK_FAR   42.0f
 /* Roughly two thirds of the way up a machine, which is where an arcade
@@ -880,17 +883,35 @@ static void mecha_render_scene(GameRenderer *pRenderer,
               && pQuad->byTexBank <= MECHA_TEX_EFFECT_GREEN))
         iSprite |= SURFACE_FLAG_PARTIAL_TRANS;
 
-      /* The legacy path works its own texture coordinates out inside
+      /*
+       * The legacy path works its own texture coordinates out inside
        * POLYTEX, from the tile index and the projected polygon -- the track
-       * renderer passes zeroes on every vertex and always has. Rasterise
-       * directly rather than subdividing, for the same reason the flat
-       * geometry does: subdivision exists for large perspective surfaces,
-       * and a billboard is neither. */
-      aVerts[0].u = 0.0f; aVerts[0].v = 0.0f;
-      aVerts[1].u = 0.0f; aVerts[1].v = 0.0f;
-      aVerts[2].u = 0.0f; aVerts[2].v = 0.0f;
-      aVerts[3].u = 0.0f; aVerts[3].v = 0.0f;
-      game_render_quad_world(pRenderer, aVerts,
+       * renderer passes zeroes on every vertex and always has.
+       *
+       * Which means the order the four corners arrive in is what decides
+       * how the tile lies on them, and the arena winds its quads the other
+       * way round the face from the way the track winds its own. Nothing
+       * else in the mode ever noticed: this renderer rejects back faces off
+       * the stored normal rather than off the projected winding, so a quad
+       * wound backwards still culls, sorts and fills correctly, and every
+       * texture it had worn until now -- grass, tarmac, concrete, a plasma
+       * bolt -- was near enough symmetrical to look right mirrored. Put
+       * lettering on one and it reads backwards. Handing them over
+       * reversed is what puts the artwork the right way round.
+       *
+       * Rasterise directly rather than subdividing, for the same reason the
+       * flat geometry does: subdivision exists for large perspective
+       * surfaces, and a billboard is neither.
+       */
+      GameRenderVertex aTexVerts[4];
+      int iCorner;
+
+      for (iCorner = 0; iCorner < 4; iCorner++) {
+        aTexVerts[iCorner] = aVerts[3 - iCorner];
+        aTexVerts[iCorner].u = 0.0f;
+        aTexVerts[iCorner].v = 0.0f;
+      }
+      game_render_quad_world(pRenderer, aTexVerts,
                              mecha_bank_handle((int)pQuad->byTexBank),
                              iSprite, 1.0f);
       continue;

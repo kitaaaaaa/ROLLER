@@ -880,6 +880,10 @@ fn configureRenderQueue3DTests(
             "PROJECTS/ROLLER/mecha_sim.c",
             "PROJECTS/ROLLER/mecha_ai.c",
             "PROJECTS/ROLLER/mecha_mesh.c",
+            // The gun car's body is the race game's own Zizin, and this is
+            // where its fifty polygons live. Pure data behind one header of
+            // typedefs, so it costs the SDL-free test module nothing.
+            "PROJECTS/ROLLER/carplans.c",
             "tests/mecha_sim_test.c",
         },
     });

@@ -750,8 +750,16 @@ static void mecha_update_facing(tMechaWorld *pWorld, int iMechIdx,
      * fast to aim by hand. Further out the machine points where it is
      * pointed -- which is what makes holding a lock at range a thing the
      * player does rather than a thing that happens. */
-    if (mecha_target_range(pWorld, iMechIdx) <= MECHA_CLOSE_QUARTERS
-        || pMech->iRecentreTicks > 0) {
+    if (!pDef->bWheeled
+        && (mecha_target_range(pWorld, iMechIdx) <= MECHA_CLOSE_QUARTERS
+            || pMech->iRecentreTicks > 0)) {
+      /*
+       * And never on wheels, at any range. A car points where it is
+       * driving; that is the whole of its handling and the whole of its
+       * aiming, and an auto-turn would be the machine steering itself.
+       * Holding a lock in one means driving at somebody and keeping them
+       * in the middle of the screen.
+       */
       pMech->iFacing = mecha_angle_approach(pMech->iFacing, iBearing,
                                             iMaxStep);
     }
@@ -763,7 +771,35 @@ static void mecha_update_facing(tMechaWorld *pWorld, int iMechIdx,
 
   /* Manual turn rides on top, for shaking a lock loose or for lining one up
    * again once it has gone. */
-  if ((bCanAct || bFreeTurn) && pInput->iTurn != 0) {
+  if (pDef->bWheeled) {
+    /*
+     * Steering, not turning. Whiplash works the lock out as
+     * `input * (1 + (top - speed) / k)` and then throws it away entirely
+     * below the car's own steering speed limit, and both halves are here:
+     * the lock is widest just off a standstill and narrows as the speed
+     * comes up, and a car that is not moving cannot be pointed at all.
+     *
+     * It is the stick as much as the turn axis, because a car has no
+     * strafe for the stick to mean anything else by.
+     */
+    float fSpeed = mecha_length2(pMech->fVelX, pMech->fVelZ);
+    int iSteer = pInput->iTurn + pInput->iMoveX;
+
+    if (bCanAct && iSteer != 0 && fSpeed >= pDef->fSteerFloor
+        && pDef->fWalkSpeed > 0.0f) {
+      float fSlack = 1.0f - mecha_clampf(fSpeed / pDef->fWalkSpeed, 0.0f,
+                                         1.0f);
+      float fLock = 1.0f + MECHA_CAR_STEER_GAIN * fSlack;
+      int iStep = (int)(pDef->fTurnRate * MECHA_DT * fLock
+                        * (float)mecha_clampi(iSteer, -100, 100) / 100.0f);
+
+      /* Backwards, the wheels point the other way round. */
+      if (pMech->fVelX * mecha_sin(pMech->iFacing)
+          + pMech->fVelZ * mecha_cos(pMech->iFacing) < 0.0f)
+        iStep = -iStep;
+      pMech->iFacing = mecha_angle_wrap(pMech->iFacing + iStep);
+    }
+  } else if ((bCanAct || bFreeTurn) && pInput->iTurn != 0) {
     int iManual = (int)(pDef->fTurnRate * MECHA_DT
                         * (float)pInput->iTurn / 100.0f);
 
@@ -945,6 +981,140 @@ static void mecha_drive(tMechaMech *pMech, const tMechaMechDef *pDef,
   pMech->fVelZ = fDirZ * fAlong + fPerpZ;
 }
 
+/*
+ * The states nobody drives: floored, getting up, reeling from a hit, or
+ * still absorbing a landing. Each runs on its own clock and none of them
+ * takes input, so both the legged machines and the wheeled one hand them
+ * the same few ticks of bookkeeping before deciding anything else. Returns
+ * true when the machine is in one of them and the caller should keep its
+ * hands off.
+ */
+static bool mecha_advance_recovery(tMechaMech *pMech,
+                                   const tMechaMechDef *pDef, bool bAirborne)
+{
+  if (!mecha_mech_alive(pMech)) {
+    pMech->fVelX = 0.0f;
+    pMech->fVelZ = 0.0f;
+    return true;
+  }
+  if (pMech->byMove == MECHA_MOVE_DOWN) {
+    if (pMech->iStunTicks <= 0) {
+      pMech->byMove = MECHA_MOVE_RISE;
+      pMech->iStateTicks = 0;
+      pMech->iStunTicks = MECHA_RISE_TICKS;
+      pMech->iInvulnTicks = MECHA_RISE_INVULN;
+    }
+    return true;
+  }
+  if (pMech->byMove == MECHA_MOVE_RISE) {
+    if (pMech->iStunTicks <= 0) {
+      pMech->byMove = MECHA_MOVE_STAND;
+      pMech->iStateTicks = 0;
+    }
+    return true;
+  }
+  if (pMech->byMove == MECHA_MOVE_STAGGER) {
+    if (pMech->iStunTicks <= 0) {
+      pMech->byMove = bAirborne ? MECHA_MOVE_JUMP : MECHA_MOVE_STAND;
+      pMech->iStateTicks = 0;
+    }
+    return true;
+  }
+  if (pMech->byMove == MECHA_MOVE_LAND) {
+    if (pMech->iStateTicks >= pDef->iLandTicks) {
+      pMech->byMove = MECHA_MOVE_STAND;
+      pMech->iStateTicks = 0;
+    }
+    return true;
+  }
+  return false;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * Driving.
+ *
+ * A wheeled machine has one number for its motion and it points along the
+ * nose: throttle and brakes move it, the tyres kill anything sideways, and
+ * the steering turns the nose rather than the machine. There is no strafe
+ * because a car has none, no boost because it does not need one, and no
+ * jump because it has no legs to jump with -- but gravity still applies, so
+ * driving off a roof does exactly what driving off a roof does.
+ *
+ * The steering is the race game's, in shape and in both of its rules: the
+ * lock is widest just off a standstill and narrows as the speed comes up,
+ * and below the machine's own steering floor there is no steering at all.
+ * That second rule is why this thing has to keep moving to point at
+ * anybody, which is the whole of how it fights.
+ */
+static void mecha_update_wheels(tMechaWorld *pWorld, int iMechIdx,
+                                const tMechaInput *pInput, bool bCanAct)
+{
+  tMechaMech *pMech = &pWorld->aMechs[iMechIdx];
+  const tMechaMechDef *pDef = mecha_mech_def(pMech);
+  float fGround = mecha_arena_ground_height(&pWorld->arena, pMech->fX,
+                                            pMech->fZ, pMech->fY);
+  bool bAirborne = pMech->fY > fGround + MECHA_GROUND_EPS;
+  float fNoseX = mecha_sin(pMech->iFacing);
+  float fNoseZ = mecha_cos(pMech->iFacing);
+  float fAlong = pMech->fVelX * fNoseX + pMech->fVelZ * fNoseZ;
+  float fTop = pDef->fWalkSpeed;
+  float fTarget = 0.0f;
+  float fScale = 1.0f;
+  int iThrottle = 0;
+
+  pMech->iStateTicks++;
+  if (mecha_advance_recovery(pMech, pDef, bAirborne))
+    return;
+
+  /*
+   * Boost is the accelerator and guard is the brake, which is what the two
+   * buttons are for on a machine with no gauge to spend and nothing to
+   * guard with. The stick answers as well, because a car nobody can drive
+   * with the same keys they walk everything else with is a car nobody
+   * drives.
+   */
+  if (bCanAct) {
+    if (pInput->bDash || pInput->iMoveZ > 40)
+      iThrottle = 1;
+    else if (pInput->bGuard || pInput->iMoveZ < -40)
+      iThrottle = -1;
+  }
+
+  if (iThrottle > 0) {
+    pMech->byMove = MECHA_MOVE_DASH;
+    fTarget = fTop;
+  } else if (iThrottle < 0) {
+    /* Brakes first, reverse afterwards: standing on it while rolling
+     * forwards stops the car, and only once it has stopped does it back
+     * up, at a fraction of the speed it goes forwards. */
+    pMech->byMove = MECHA_MOVE_GUARD;
+    fTarget = fAlong > 0.0f ? 0.0f : -fTop * MECHA_CAR_REVERSE;
+    fScale = pDef->fDriveAccel > 0.0f ? pDef->fBrake / pDef->fDriveAccel
+                                      : 1.0f;
+  } else {
+    /* Freewheeling: it slows, but nothing like as fast as it stops. */
+    pMech->byMove = fAlong * fAlong > MECHA_CAR_ROLLING * MECHA_CAR_ROLLING
+                      ? MECHA_MOVE_WALK : MECHA_MOVE_STAND;
+    fTarget = 0.0f;
+    fScale = MECHA_CAR_DRAG;
+  }
+
+  /*
+   * In the air a car is a thrown object: the wheels have nothing to push
+   * against and nothing to grip with, so it keeps what it had.
+   */
+  if (bAirborne)
+    pMech->byMove = MECHA_MOVE_JUMP;
+  else
+    mecha_drive(pMech, pDef, fNoseX, fNoseZ, fTarget, fScale, 1.0f);
+
+  pMech->iCoastTicks = 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 //-------------------------------------------------------------------------------------------------
 
 static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
@@ -961,35 +1131,26 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
   float fStick = bCanAct ? mecha_stick_direction(pMech, pInput, &fDirX, &fDirZ)
                          : 0.0f;
 
+  if (pDef->bWheeled) {
+    /*
+     * Everything from here to the integration below is legs: states a
+     * walker moves between, a stick that can push it sideways, a gauge it
+     * spends. A wheeled machine has none of it and gets its own few lines
+     * instead -- but it shares every line after that, because falling,
+     * hitting a wall, standing on the ground and going off the edge of the
+     * world are the same problems whatever a machine runs on.
+     */
+    mecha_update_wheels(pWorld, iMechIdx, pInput, bCanAct);
+    goto integrate;
+  }
+
   pMech->iStateTicks++;
 
   /* --- state selection ------------------------------------------------- */
 
-  if (!mecha_mech_alive(pMech)) {
-    pMech->fVelX = 0.0f;
-    pMech->fVelZ = 0.0f;
-  } else if (pMech->byMove == MECHA_MOVE_DOWN) {
-    if (pMech->iStunTicks <= 0) {
-      pMech->byMove = MECHA_MOVE_RISE;
-      pMech->iStateTicks = 0;
-      pMech->iStunTicks = MECHA_RISE_TICKS;
-      pMech->iInvulnTicks = MECHA_RISE_INVULN;
-    }
-  } else if (pMech->byMove == MECHA_MOVE_RISE) {
-    if (pMech->iStunTicks <= 0) {
-      pMech->byMove = MECHA_MOVE_STAND;
-      pMech->iStateTicks = 0;
-    }
-  } else if (pMech->byMove == MECHA_MOVE_STAGGER) {
-    if (pMech->iStunTicks <= 0) {
-      pMech->byMove = bAirborne ? MECHA_MOVE_JUMP : MECHA_MOVE_STAND;
-      pMech->iStateTicks = 0;
-    }
-  } else if (pMech->byMove == MECHA_MOVE_LAND) {
-    if (pMech->iStateTicks >= pDef->iLandTicks) {
-      pMech->byMove = MECHA_MOVE_STAND;
-      pMech->iStateTicks = 0;
-    }
+  if (mecha_advance_recovery(pMech, pDef, bAirborne)) {
+    /* Floored, getting up, reeling or landing: none of those are steered,
+     * and every one of them runs on its own clock. */
   } else if (bAirborne) {
     if (pMech->byMove == MECHA_MOVE_JUMP && bCanAct
         && pInput->bGuard && !pMech->bGuardHeld) {
@@ -1153,7 +1314,9 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
 
   /* --- integration ------------------------------------------------------ */
 
-  if (pMech->byMove == MECHA_MOVE_DASH && pMech->fVelY <= 0.0f) {
+integrate:
+  if (pMech->byMove == MECHA_MOVE_DASH && !pDef->bWheeled
+      && pMech->fVelY <= 0.0f) {
     /*
      * A burst is flat, in the air as much as on the ground: gravity waits
      * until it is over. Only while the machine is level or sinking, mind --
@@ -1467,6 +1630,33 @@ static void mecha_fire_weapon(tMechaWorld *pWorld, int iMechIdx, int iSlot)
     pMech->aiAmmo[iSlot] = 0;
     pMech->aiReload[iSlot] = pWeapon->iReloadTicks;
   }
+  /*
+   * One gun, three triggers, one magazine.
+   *
+   * A machine that carries a single weapon still has all three slots, so it
+   * plays and reads like everything else on the roster -- but they are the
+   * same gun, and a long reload that could be skipped by rolling across the
+   * other two triggers would not be a long reload. So firing any of them
+   * empties all of them.
+   */
+  if (pDef->bWheeled) {
+    int iOther;
+
+    for (iOther = 0; iOther < MECHA_WEAPON_SLOTS; iOther++) {
+      if (iOther == iSlot)
+        continue;
+      pMech->aiAmmo[iOther] = 0;
+      if (pMech->aiReload[iOther] < pMech->aiReload[iSlot])
+        pMech->aiReload[iOther] = pMech->aiReload[iSlot];
+    }
+  }
+  /* And it shoves the machine. A gun the size of the car it is bolted to
+   * does not go off quietly, and the kick is the other half of what makes
+   * a long reload bearable: it buys distance. */
+  if (pDef->fRecoilPush > 0.0f) {
+    pMech->fVelX -= fFwdX * pDef->fRecoilPush;
+    pMech->fVelZ -= fFwdZ * pDef->fRecoilPush;
+  }
   pMech->iRecovery = pWeapon->iRecoveryTicks;
   pMech->iLastFiredSlot = iSlot;
   pMech->iLastFiredStance = (int)eStance;
@@ -1619,6 +1809,8 @@ static void mecha_update_weapons(tMechaWorld *pWorld, int iMechIdx,
 
   if (pMech->iRecovery > 0)
     pMech->iRecovery--;
+  if (pMech->iRamCooldown > 0)
+    pMech->iRamCooldown--;
 
   for (iSlot = 0; iSlot < MECHA_WEAPON_SLOTS; iSlot++) {
     if (pMech->aiReload[iSlot] > 0) {
@@ -2180,6 +2372,49 @@ static void mecha_update_effects(tMechaWorld *pWorld)
   }
 }
 
+/*
+ * One machine running into another. fClosing is how fast the gap between
+ * them is shutting, and the direction is from the rammer towards the rammed.
+ * Nothing happens unless the rammer is on wheels, is doing it fast enough to
+ * be worth anything, and is actually driving into them rather than being
+ * shunted by them: a car that has just been knocked into somebody has not
+ * run them over.
+ */
+static void mecha_try_ram(tMechaWorld *pWorld, int iRammer, int iVictim,
+                          const tMechaMechDef *pDef, float fClosing,
+                          float fDirX, float fDirZ)
+{
+  tMechaMech *pRammer = &pWorld->aMechs[iRammer];
+  float fNoseX;
+  float fNoseZ;
+  float fOver;
+
+  if (!pDef->bWheeled || pDef->fRamDamage <= 0.0f
+      || pRammer->iRamCooldown > 0)
+    return;
+  if (fClosing <= pDef->fRamSpeed)
+    return;
+
+  /* Driving into them: the closing has to be happening down the nose, not
+   * sideways and not backwards. */
+  fNoseX = mecha_sin(pRammer->iFacing);
+  fNoseZ = mecha_cos(pRammer->iFacing);
+  if (fNoseX * fDirX + fNoseZ * fDirZ < MECHA_CAR_RAM_DOT)
+    return;
+
+  fOver = (fClosing - pDef->fRamSpeed) / MECHA_METRE;
+  pRammer->iRamCooldown = MECHA_CAR_RAM_TICKS;
+  mecha_sim_damage(pWorld, iVictim, iRammer, fOver * pDef->fRamDamage,
+                   fOver * pDef->fRamDamage * MECHA_CAR_RAM_STAGGER,
+                   fDirX, fDirZ);
+  mecha_sim_spawn_effect(pWorld, MECHA_FX_DUST, pRammer->fX,
+                         pRammer->fY + pDef->fHeight * 0.5f, pRammer->fZ,
+                         pDef->fRadius * 1.6f, pDef->abyPalette[3],
+                         MECHA_SEC(0.35f));
+}
+
+//-------------------------------------------------------------------------------------------------
+
 //-------------------------------------------------------------------------------------------------
 
 /* Mechs are solid to each other: they shove rather than interpenetrate, with
@@ -2244,6 +2479,30 @@ static void mecha_resolve_overlaps(tMechaWorld *pWorld)
                                    pDefA->fHeight, &pA->fX, &pA->fZ);
       mecha_arena_resolve_cylinder(&pWorld->arena, pDefB->fRadius, pB->fY,
                                    pDefB->fHeight, &pB->fX, &pB->fZ);
+
+      /*
+       * And a machine that runs on wheels can run somebody over.
+       *
+       * It is the only thing this one has at close quarters -- it carries
+       * no melee row at all -- so it has to hurt, and it is charged on the
+       * speed it is closing at rather than on its own speed: driving
+       * alongside somebody is not a ram, and a head-on is worse than
+       * catching them up. Both machines can be doing it at once, which is
+       * fair, and neither can do it to a friend.
+       */
+      if (pA->byTeam != pB->byTeam) {
+        /* How fast the gap is shutting: the relative velocity resolved
+         * along the line between them, positive when they are coming
+         * together. Symmetric, so both of them get the same number. */
+        float fCloseX = pA->fVelX - pB->fVelX;
+        float fCloseZ = pA->fVelZ - pB->fVelZ;
+        float fClosing = (fCloseX * fDx + fCloseZ * fDz) / fDist;
+
+        mecha_try_ram(pWorld, i, j, pDefA, fClosing, fDx / fDist,
+                      fDz / fDist);
+        mecha_try_ram(pWorld, j, i, pDefB, fClosing, -fDx / fDist,
+                      -fDz / fDist);
+      }
     }
   }
 }

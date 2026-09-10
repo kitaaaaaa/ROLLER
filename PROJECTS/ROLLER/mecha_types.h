@@ -301,6 +301,32 @@ typedef struct
   int   iDashTicks;         /* how long one dash burst lasts */
   int   iLandTicks;         /* touchdown recovery */
 
+  /*
+   * Wheels instead of legs.
+   *
+   * A wheeled machine is driven, not walked: it has no strafe, no boost and
+   * no jump, its speed is a single signed number along its own nose, and it
+   * steers rather than turning on the spot. Everything else about it -- the
+   * lock, the weapon slots, the armour, the stagger -- works exactly as it
+   * does for anything else on the roster, which is the point: it is another
+   * machine in the fight and not a different game.
+   *
+   * fWalkSpeed is its top speed, fDriveAccel the throttle, fBrake the
+   * brakes and fGrip what it sheds freewheeling. fSteerFloor is the speed
+   * below which the wheels do nothing at all, which is the race game's own
+   * rule and the reason a car has to keep moving to point at anything.
+   */
+  bool  bWheeled;
+  float fSteerFloor;
+  /* What running into somebody costs them, per metre a second over the
+   * speed it takes to be worth anything. A machine with no close-quarters
+   * weapon still has to have an answer at close quarters. */
+  float fRamDamage;
+  float fRamSpeed;
+  /* How hard firing shoves the machine backwards. A gun the size of the
+   * car it is bolted to does not go off quietly. */
+  float fRecoilPush;
+
   /* Palette indices the mesh builder paints with: body, trim, joints, glow. */
   uint8_t abyPalette[4];
 
@@ -371,6 +397,8 @@ typedef struct
   int   aiAmmo[MECHA_WEAPON_SLOTS];
   int   aiReload[MECHA_WEAPON_SLOTS];
   int   iRecovery;          /* ticks of firing recovery left */
+  /* Stops a car resting against somebody billing them every tick. */
+  int   iRamCooldown;
   int   iLastFiredSlot;     /* -1 when nothing has been fired yet */
   int   iLastFiredStance;
 

@@ -91,6 +91,13 @@ each, and the pad mapping keeps that shape.
 
 Both are read every frame, so either works at any time.
 
+On the ZIZIN KLR 330 the same two buttons drive it: **dash is the
+accelerator and guard is the brake**, the stick and the turn axis both
+steer, and jump does nothing because it has no legs to jump with. The stick
+answers the throttle as well, forward and back, because a car nobody can
+drive with the same keys they walk everything else with is a car nobody
+drives.
+
 ## How it plays
 
 - **You point the machine; the lock aims the guns.** The auto-turn only
@@ -268,6 +275,48 @@ Both are read every frame, so either works at any time.
   passes through straight, and with no depth buffer there is nothing to sort
   that out; a knee that bulges is both the fix and what the reference art
   draws anyway.
+- **One of them is a car.** The ZIZIN KLR 330 is the race game's own Zizin
+  with a handgun the size of itself floating off the front right wheel, and
+  it plays by different rules on purpose. No boost, no jump, no strafe, no
+  gauge to spend: one signed number of speed along its own nose, boost as
+  the accelerator and guard as the brake, and steering rather than turning.
+  It is a sixth of a machine's height and roughly two thirds its armour, so
+  it is hard to hit and does not survive being hit.
+- **Its steering is the race game's steering.** Whiplash works the lock out
+  as `input * (1 + (360 - speed) / 600)` and then throws it away entirely
+  below the car's own steering speed limit. Both halves are here: the lock
+  is widest just off a standstill and narrows as the speed comes up, and a
+  car that is not moving cannot be pointed at all. That second rule is the
+  whole of how this machine fights, because it also has no auto-turn at any
+  range -- the only way it holds a lock, or lines up its gun, is to drive at
+  somebody and keep them in the middle of the screen.
+- **One gun, three triggers, one magazine.** It carries all three weapon
+  slots so it reads and plays like everything else on the roster, but they
+  are the same gun: one heavy, accurate, fast round in the chamber and two
+  and a half seconds to put another one in. Firing any trigger empties all
+  three, because a long reload that could be skipped by rolling across the
+  other two would not be a long reload. And it shoves the car -- the recoil
+  is a real push in the simulation, not a drawing, which is the other half
+  of what makes the reload bearable: it buys distance.
+- **With no melee row, its close-quarters answer is the bumper.** Running
+  somebody over is charged on the speed the gap is closing at rather than on
+  its own speed, so driving alongside is not a ram and a head-on is worse
+  than catching them up, and there is a cooldown on it because a car resting
+  against somebody is not running them over sixty times a second.
+- **Its body is the game's own car, polygon for polygon.** `xzizin_coords`
+  and `xzizin_pols` out of `carplans.c` -- the same fifty quads the Zizin is
+  drawn with on the track -- with the axes swapped from the race game's (x
+  along, y across, z up) into the arena's. The polygons carry a texture word
+  indexing a per-car bank this mode does not load, so they are flat-shaded
+  in the machine's own two palette entries, split by which way each panel
+  looks. The shape is the game's; the paint is the mode's. The gun is built
+  here, out of the same boxes everything else is.
+- **The chase camera scales with what it is behind.** It was written around
+  a fourteen-metre machine, which is what the roster mostly is; a car a
+  sixth of that would be a speck under a camera hung fourteen metres over
+  it. Not all the way down, though -- a car doing seventy metres a second
+  needs to see further ahead of itself than two metres of camera height
+  would give it.
 - **Machines read by silhouette.** Each carries build multipliers for
   shoulder, torso, limb, head and gun, so a siege platform is wide and
   thick-limbed with an oversized gun on each arm while an interceptor is a

@@ -257,6 +257,43 @@
 #define MECHA_BOUNCE_RESTITUTION 0.55f
 #define MECHA_BOUNCE_MIN_SPEED   MECHA_MPS(9.0f)
 
+/*
+ * Steering, the way the race game does it.
+ *
+ * Whiplash works the lock out as `input * (1 + (360 - speed) / 600)` and
+ * then throws it away entirely below the car's own steering speed limit --
+ * so a car turns hardest just above a walking pace, loses lock as it gets
+ * quicker, and cannot turn at all standing still. Both halves are what
+ * makes driving one feel like driving rather than like walking on wheels,
+ * and the second half is why a machine on wheels has to keep moving to
+ * point at anything.
+ */
+#define MECHA_CAR_STEER_GAIN 0.60f
+/* How much of its forward speed it will do backwards, how hard it slows
+ * with nothing pressed, and above what speed the wheels are rolling rather
+ * than the car standing still. */
+#define MECHA_CAR_REVERSE    0.34f
+#define MECHA_CAR_DRAG       0.22f
+#define MECHA_CAR_ROLLING    MECHA_MPS(2.0f)
+/*
+ * Running somebody over. How square the hit has to be to count as driving
+ * into them, how long before the same car can do it again -- without which
+ * a car resting against somebody bills them sixty times a second -- and how
+ * much stagger comes with the damage.
+ */
+#define MECHA_CAR_RAM_DOT     0.4f
+#define MECHA_CAR_RAM_TICKS   MECHA_SEC(0.55f)
+#define MECHA_CAR_RAM_STAGGER 0.9f
+
+/*
+ * How the computer pilot drives. Inside the first it stops steering, which
+ * is what lets the gun settle; outside the second it lifts off, because the
+ * wheels bite hardest below the top speed and a car flat out understeers
+ * past everything it is aiming at.
+ */
+#define MECHA_AI_DRIVE_STRAIGHT MECHA_DEG(4)
+#define MECHA_AI_DRIVE_LIFT     MECHA_DEG(52)
+
 #define MECHA_ARM_YAW_LIMIT    MECHA_DEG(46)
 #define MECHA_ARM_PITCH_LIMIT  MECHA_DEG(38)
 #define MECHA_ARM_DROOP        MECHA_DEG(22)

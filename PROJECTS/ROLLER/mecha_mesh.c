@@ -4,6 +4,8 @@
 #include "mecha_defs.h"
 #include "mecha_sim.h"
 
+#include "carplans.h"
+
 #include <math.h>
 #include <string.h>
 
@@ -20,6 +22,20 @@
  * all. It is the canopy green the built trees use, for the one case where a
  * bank loads but a tile in it does not. */
 #define MECHA_PAL_CANOPY 252
+
+/*
+ * The gun car. How square to the sky a panel has to look to be painted as
+ * the top of the car, how far the gun swings off the nose, how it is held,
+ * and what firing does to it.
+ */
+#define MECHA_ZIZIN_ROOF_FACING 0.55f
+#define MECHA_GUN_YAW_LIMIT   MECHA_DEG(40)
+#define MECHA_GUN_ROLL        MECHA_DEG(84)
+/* How far across the bonnet it points on top of wherever it is aiming. */
+#define MECHA_GUN_ACROSS      MECHA_DEG(9)
+#define MECHA_GUN_GRIP_RAKE   MECHA_DEG(22)
+#define MECHA_GUN_KICK_TICKS  16
+#define MECHA_GUN_KICK_PITCH  MECHA_DEG(34)
 
 /*
  * Translucent quads carry a SHADE LEVEL in the low byte, not a colour.
@@ -1057,6 +1073,210 @@ static int mecha_mesh_lean_pitch(const tMechaMech *pMech)
 }
 
 //-------------------------------------------------------------------------------------------------
+/* The one machine on wheels */
+
+/*
+ * The ZIZIN KLR 330's body is the race game's own Zizin, polygon for
+ * polygon: `xzizin_coords` and `xzizin_pols` out of carplans.c, the same
+ * fifty quads the car is drawn with on the track.
+ *
+ * Two things are converted on the way in. The plan is in the race game's
+ * axes -- x along the car, y across it, z up -- where the arena's are x
+ * across, y up, z forward, so the three swap. And the plan's polygons carry
+ * a texture word rather than a colour, indexing a per-car bank this mode
+ * does not load, so they are flat-shaded in the machine's own two palette
+ * entries instead, picked apart by which way each face looks. The shape is
+ * the game's; the paint is the mode's.
+ */
+#define MECHA_ZIZIN_POLYS 50
+#define MECHA_ZIZIN_VERTS 86
+
+static void mecha_zizin_extent(float *pfLength, float *pfHeight)
+{
+  float fMinX = xzizin_coords[0].fX;
+  float fMaxX = fMinX;
+  float fMinZ = xzizin_coords[0].fZ;
+  float fMaxZ = fMinZ;
+  int i;
+
+  for (i = 1; i < MECHA_ZIZIN_VERTS; i++) {
+    if (xzizin_coords[i].fX < fMinX) fMinX = xzizin_coords[i].fX;
+    if (xzizin_coords[i].fX > fMaxX) fMaxX = xzizin_coords[i].fX;
+    if (xzizin_coords[i].fZ < fMinZ) fMinZ = xzizin_coords[i].fZ;
+    if (xzizin_coords[i].fZ > fMaxZ) fMaxZ = xzizin_coords[i].fZ;
+  }
+  *pfLength = fMaxX - fMinX;
+  *pfHeight = fMaxZ - fMinZ;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static void mecha_add_zizin_body(tMechaQuadList *pList,
+                                 const tMechaPose *pPose, float fScale,
+                                 float fSink, uint8_t byBody, uint8_t byTop)
+{
+  int iFirst = pList->iCount;
+  int iPoly;
+  int i;
+
+  for (iPoly = 0; iPoly < MECHA_ZIZIN_POLYS; iPoly++) {
+    float afVert[4][3];
+    int iCorner;
+
+    /*
+     * Straight off the plan, with nothing nudged apart. The race game draws
+     * this body through a sorted polygon list of its own -- that is what the
+     * nNextPolIdx links in the plan are -- and a painter's algorithm has no
+     * such list, so two of its panels sharing a plane would have flickered.
+     * They do not: the fifty are tested against each other by the coplanar
+     * check, and the body is rigid, so passing at one pose is passing at
+     * all of them.
+     */
+    for (iCorner = 0; iCorner < 4; iCorner++) {
+      const tVec3 *pPlan = &xzizin_coords[xzizin_pols[iPoly].verts[iCorner]];
+
+      mecha_pose_apply(pPose, pPlan->fY * fScale,
+                       pPlan->fZ * fScale - fSink, pPlan->fX * fScale,
+                       afVert[iCorner]);
+    }
+    mecha_quads_add(pList, afVert, byBody, MECHA_QUAD_TWO_SIDED);
+  }
+
+  /*
+   * Bonnet and roof in the lighter of the two, flanks in the darker, picked
+   * off each panel's own normal once it has been worked out rather than off
+   * where the panel sits: the plan is a real car body and its sills are as
+   * high off the ground as some of its bonnet.
+   */
+  for (i = iFirst; i < pList->iCount; i++) {
+    if (pList->paQuads[i].afNormal[1] > MECHA_ZIZIN_ROOF_FACING)
+      pList->paQuads[i].byPalette = byTop;
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * And the gun.
+ *
+ * It is a handgun, it is about as long as the car, and it is not attached
+ * to anything -- it floats off the front right wheel, held over on its side
+ * so the slide is horizontal and the shot goes out across the bonnet. That
+ * is the whole character of the machine: no arms, no turret, just an
+ * absurd pistol keeping station beside a race car.
+ *
+ * Firing kicks it. The recovery counts down from the shot, so the kick is
+ * strongest on the tick it goes off and has run out by the time the next
+ * one is chambered -- and the same kick shoves the car itself, in the
+ * simulation, so what you see is what happened.
+ */
+static void mecha_add_zizin_gun(tMechaQuadList *pList,
+                                const tMechaPose *pCar, const tMechaMech *pMech,
+                                const tMechaMechDef *pDef, int iAimYaw,
+                                int iAimPitch, float fLength, uint8_t byBody,
+                                uint8_t byTrim, uint8_t byGlow)
+{
+  float fKick = pMech->iRecovery > 0
+                  ? (float)mecha_clampi(pMech->iRecovery, 0, MECHA_GUN_KICK_TICKS)
+                    / (float)MECHA_GUN_KICK_TICKS
+                  : 0.0f;
+  int iYaw = mecha_clampi(mecha_angle_delta(pMech->iFacing, iAimYaw),
+                          -MECHA_GUN_YAW_LIMIT, MECHA_GUN_YAW_LIMIT);
+  tMechaPose gun;
+  float fBarrel = fLength * 0.52f;
+  float fThick = fLength * 0.11f;
+
+  /*
+   * Beside the front right wheel, at about the height of one, and held over
+   * on its side -- that roll is the sideways part, and it is what puts the
+   * grip out to the left instead of underneath and lays the slide flat so
+   * the shot goes out across the bonnet rather than over the roof.
+   *
+   * Firing throws it up and back. The recovery counts down from the shot,
+   * so the kick is hardest on the tick it goes off and has run out by the
+   * time the next round is chambered, and the same kick shoves the car in
+   * the simulation: what you see is what happened.
+   */
+  mecha_pose_child(&gun, pCar,
+                   pDef->fRadius * (1.45f + 0.12f * fKick),
+                   pDef->fHeight * (0.42f + 0.42f * fKick),
+                   pDef->fRadius * (1.25f - 0.80f * fKick),
+                   iYaw - MECHA_GUN_ACROSS,
+                   -iAimPitch + (int)((float)MECHA_GUN_KICK_PITCH * fKick),
+                   MECHA_GUN_ROLL);
+
+  /* Slide and barrel, out along the line of fire. */
+  mecha_add_box(pList, &gun, 0.0f, 0.0f, fBarrel * 0.5f,
+                fThick * 0.85f, fThick, fBarrel * 0.5f, byBody, byTrim, 0);
+  /* The muzzle, which is the only part of it anybody looks at. */
+  mecha_add_box(pList, &gun, 0.0f, 0.0f, fBarrel,
+                fThick * 0.5f, fThick * 0.5f, fThick * 0.35f,
+                byGlow, byGlow, MECHA_QUAD_GLOW);
+  /*
+   * Frame under the slide, and the grip hanging off the back of it at the
+   * angle a pistol grip sits at. The frame deliberately does not start
+   * where the slide does: two boxes that share a back face share a plane,
+   * and two coplanar quads that overlap have no answer to which is in
+   * front.
+   */
+  mecha_add_box(pList, &gun, 0.0f, -fThick * 1.3f, fBarrel * 0.36f,
+                fThick * 0.7f, fThick * 0.32f, fBarrel * 0.30f,
+                byTrim, byTrim, 0);
+  {
+    tMechaPose grip;
+
+    mecha_pose_child(&grip, &gun, 0.0f, -fThick * 0.8f, -fThick * 0.2f,
+                     0, MECHA_GUN_GRIP_RAKE, 0);
+    mecha_add_box(pList, &grip, 0.0f, -fLength * 0.17f, 0.0f,
+                  fThick * 0.62f, fLength * 0.17f, fThick * 0.9f,
+                  byTrim, byTrim, 0);
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static void mecha_mesh_car(tMechaQuadList *pList, const tMechaWorld *pWorld,
+                           int iMechIdx)
+{
+  const tMechaMech *pMech = &pWorld->aMechs[iMechIdx];
+  const tMechaMechDef *pDef = mecha_def_get((int)pMech->byDefIdx);
+  tMechaPose pose;
+  float fPlanLength;
+  float fPlanHeight;
+  float fScale;
+  int iAimYaw;
+  int iAimPitch;
+
+  mecha_zizin_extent(&fPlanLength, &fPlanHeight);
+  if (fPlanHeight <= 0.0f)
+    return;
+  /* Scaled by height, because height is what the roster is measured in and
+   * what says this thing is a sixth of a machine. */
+  fScale = pDef->fHeight / fPlanHeight;
+
+  mecha_pose_build(&pose, pMech->iFacing, mecha_mesh_fall_pitch(pMech),
+                   (int)(pMech->fLeanRoll
+                         * mecha_clampf((pMech->fVelX
+                                           * mecha_cos(pMech->iFacing)
+                                         - pMech->fVelZ
+                                           * mecha_sin(pMech->iFacing))
+                                        / (pDef->fWalkSpeed > 1.0f
+                                             ? pDef->fWalkSpeed : 1.0f),
+                                        -1.0f, 1.0f)),
+                   pMech->fX, pMech->fY, pMech->fZ, 1.0f);
+
+  mecha_add_zizin_body(pList, &pose, fScale, 0.0f, pDef->abyPalette[0],
+                       pDef->abyPalette[1]);
+
+  mecha_mech_aim(pWorld, iMechIdx, &iAimYaw, &iAimPitch);
+  iAimPitch = mecha_clampi(iAimPitch, -MECHA_ARM_PITCH_LIMIT,
+                           MECHA_ARM_PITCH_LIMIT);
+  mecha_add_zizin_gun(pList, &pose, pMech, pDef, iAimYaw, iAimPitch,
+                      fPlanLength * fScale, pDef->abyPalette[0],
+                      pDef->abyPalette[1], pDef->abyPalette[3]);
+}
+
+//-------------------------------------------------------------------------------------------------
 
 void mecha_mesh_mech(tMechaQuadList *pList, const tMechaWorld *pWorld,
                      int iMechIdx)
@@ -1105,6 +1325,12 @@ void mecha_mesh_mech(tMechaQuadList *pList, const tMechaWorld *pWorld,
     return;
 
   pDef = mecha_def_get((int)pMech->byDefIdx);
+  if (pDef->bWheeled) {
+    /* No legs to walk, no arms to aim: everything below this line is a
+     * skeleton the one machine on wheels does not have. */
+    mecha_mesh_car(pList, pWorld, iMechIdx);
+    return;
+  }
   byBody = pDef->abyPalette[0];
   byTrim = pDef->abyPalette[1];
   byJoint = pDef->abyPalette[2];

@@ -133,6 +133,17 @@ static const uint8 s_aabyFont[][MECHA_GLYPH_H] = {
 #define MECHA_CAM_LIFT_STEP   3.0f
 #define MECHA_CAM_LIFT_STEPS  6
 #define MECHA_CAM_FLOOR       2.5f
+/*
+ * The chase is written around a machine fourteen metres tall, which is what
+ * the roster mostly is. The one that is not -- a car a sixth of that -- would
+ * be a speck under a camera hung fourteen metres over it, so the whole rig
+ * scales with the machine it is behind. Not all the way down, though: a car
+ * doing seventy metres a second needs to see further ahead of itself than
+ * two metres of camera height would give it, and the floor below is what
+ * stops the view ending up in the bodywork.
+ */
+#define MECHA_CAM_REF_HEIGHT 14.0f
+#define MECHA_CAM_MIN_SCALE   0.34f
 
 /* The projection reference frame the software rasteriser works in: it
  * projects into a 320x200 space and then scales by scr_size >> 6. */
@@ -417,6 +428,7 @@ void mecha_camera_update(tMechaCamera *pCamera, const tMechaWorld *pWorld,
   float fWantZ;
   float fGround;
   float fFlat;
+  float fRig;
   int iWantYaw;
   int iTargetIdx;
 
@@ -478,11 +490,13 @@ void mecha_camera_update(tMechaCamera *pCamera, const tMechaWorld *pWorld,
     fFocusZ = pMech->fZ + mecha_cos(iWantYaw) * pDef->fHeight;
     fFocusY = mecha_mech_centre_height(pWorld, iViewMech);
   }
-  fBack *= MECHA_METRE;
+  fRig = mecha_clampf(pDef->fHeight / (MECHA_CAM_REF_HEIGHT * MECHA_METRE),
+                      MECHA_CAM_MIN_SCALE, 1.0f);
+  fBack *= MECHA_METRE * fRig;
 
   fWantX = pMech->fX - mecha_sin(iWantYaw) * fBack;
   fWantZ = pMech->fZ - mecha_cos(iWantYaw) * fBack;
-  fWantY = pMech->fY + MECHA_CAM_HEIGHT * MECHA_METRE;
+  fWantY = pMech->fY + MECHA_CAM_HEIGHT * MECHA_METRE * fRig;
 
   if (!pCamera->bSettled) {
     pCamera->fX = fWantX;
@@ -504,8 +518,8 @@ void mecha_camera_update(tMechaCamera *pCamera, const tMechaWorld *pWorld,
    * box it has drifted over. */
   fGround = mecha_arena_ground_height(&pWorld->arena, pCamera->fX,
                                       pCamera->fZ, pCamera->fY);
-  if (pCamera->fY < fGround + MECHA_CAM_FLOOR * MECHA_METRE)
-    pCamera->fY = fGround + MECHA_CAM_FLOOR * MECHA_METRE;
+  if (pCamera->fY < fGround + MECHA_CAM_FLOOR * MECHA_METRE * fRig)
+    pCamera->fY = fGround + MECHA_CAM_FLOOR * MECHA_METRE * fRig;
 
   /* Lift over anything standing in the way. Stepping rather than solving
    * because the trace is cheap and the answer only has to be good enough to

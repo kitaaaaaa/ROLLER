@@ -703,6 +703,52 @@ int main(int argc, char **argv)
         }
     }
 
+    /* --- the gun car -----------------------------------------------------
+     *
+     * It is the one machine on the roster with no skeleton at all, so it is
+     * the one most likely to come out as nothing.
+     */
+    {
+        int iCar = -1;
+        int i;
+
+        for (i = 0; i < mecha_def_count(); i++) {
+            if (mecha_def_get(i)->bWheeled)
+                iCar = i;
+        }
+        CHECK(iCar >= 0);
+
+        mecha_sim_init(&s_World, 0, 0x5EED1234u, 2);
+        CHECK(mecha_sim_add_mech(&s_World, iCar, MECHA_CONTROL_HUMAN, 0) >= 0);
+        CHECK(mecha_sim_add_mech(&s_World, iCar, MECHA_CONTROL_AI, 1) >= 0);
+        mecha_sim_begin_match(&s_World);
+        s_World.aMechs[0].byLock = MECHA_LOCK_HELD;
+        s_World.aMechs[0].iTargetIdx = 1;
+        s_World.aMechs[0].iRecovery = 12;
+        mecha_camera_reset(&s_Camera);
+        /* A camera set for a fourteen-metre machine is inside a two-metre
+         * one, so this shot places its own: back, up and looking down. */
+        /* Placed by hand, three quarters on, so the body and the gun are
+         * both in the shot. The chase camera has its own scaling and is
+         * exercised by the sim tests; this one is here to be looked at. */
+        s_World.aMechs[0].iFacing = MECHA_DEG(35);
+        s_World.aMechs[1].fX = s_World.aMechs[0].fX + MECHA_M(60.0f);
+        s_World.aMechs[1].fZ = s_World.aMechs[0].fZ + MECHA_M(40.0f);
+        s_Camera.fX = s_World.aMechs[0].fX - MECHA_M(3.0f);
+        s_Camera.fY = s_World.aMechs[0].fY + MECHA_M(3.4f);
+        s_Camera.fZ = s_World.aMechs[0].fZ - MECHA_M(11.0f);
+        s_Camera.iYaw = MECHA_DEG(14);
+        s_Camera.iPitch = -MECHA_DEG(11);
+        s_Camera.bSettled = true;
+        mecha_render_frame(pRenderer, &s_World, &s_Camera, 0, s_aFrame,
+                           FRAME_W, FRAME_H, s_aQuads, MECHA_QUAD_CAPACITY);
+        histogram(s_aFrame, aiCounts);
+        dump_frame(szOutDir, "arena_guncar.png");
+        printf("   %s: %d colours\n", mecha_def_get(iCar)->szName,
+               distinct_colours(aiCounts));
+        CHECK(!single_colour(aiCounts));
+    }
+
     /* --- the briefing screen draws ---------------------------------------
      *
      * It is the first thing the mode shows and the thing every match returns

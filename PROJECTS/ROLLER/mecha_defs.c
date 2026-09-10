@@ -451,6 +451,140 @@ static const tMechaMechDef s_aMechDefs[] = {
   },
 },
 
+//-------------------------------------------------------------------------------------------------
+{
+  /*
+   * The odd one out, and deliberately so.
+   *
+   * It is a race car with a handgun on it: no legs, no arms, no boost and
+   * no jump. What it has instead is speed it does not have to spend
+   * anything on and a body small enough to be hard to hit, and the price is
+   * that it can only point where it is driving. There is no auto-turn on
+   * this machine at any range, so the only way it holds a lock is to drive
+   * at somebody and keep them in the middle of the screen -- which is also
+   * the only way it lines up its one gun.
+   *
+   * That gun is the whole armament. All three triggers are the same weapon,
+   * because there is only one of it: one shot in the chamber, two and a
+   * half seconds to put another one in, and enough behind it that landing
+   * one matters. Firing shoves the car. And with no melee row at all, its
+   * answer at close quarters is to drive into you, which is the other thing
+   * a car is for.
+   */
+  .szName = "ZIZIN KLR 330", .szClass = "GUN CAR",
+  .bWheeled = true,
+  .fGrip = MECHA_MPS(11.0f), .fDriveAccel = MECHA_MPS(34.0f),
+  .fBrake = MECHA_MPS(72.0f),
+  .fSteerFloor = MECHA_MPS(4.0f),
+  .fRamDamage = 3.4f, .fRamSpeed = MECHA_MPS(28.0f),
+  .fRecoilPush = MECHA_MPS(13.0f),
+  .fBuildShoulder = 1.00f, .fBuildTorso = 1.00f, .fBuildLimb = 1.00f,
+  .fBuildHead = 1.00f, .fBuildGun = 1.00f,
+  /* A sixth of a machine's height, and about as wide as it is tall, which
+   * is what a car is. */
+  .fHeight = MECHA_M(2.4f), .fRadius = MECHA_M(2.0f), .fMass = 0.55f,
+  .fArmour = 720.0f,
+  .fWalkSpeed = MECHA_MPS(66.0f), .fDashSpeed = MECHA_MPS(66.0f),
+  .fAirSpeed = MECHA_MPS(66.0f), .fTurnRate = (float)MECHA_DEG(150),
+  .fJumpVelocity = 0.0f,
+  .iBoostMax = 1000, .iBoostDashDrain = 0, .iBoostJumpCost = 0,
+  .iBoostJumpDrain = 0, .iBoostRegen = 1000, .iBoostGuardRegen = 1000,
+  .iDashTicks = MECHA_SEC(1.0f), .iLandTicks = MECHA_SEC(0.10f),
+  .abyPalette = { PAL_HULL_PALE, PAL_HULL_DARK, PAL_JOINT, PAL_TRACER_AMBER },
+  .aWeapons = {
+    [MECHA_SLOT_LEFT] = {
+      [MECHA_STANCE_STAND] = { .szName = "KLR SHOT", .byKind = MECHA_PROJ_BULLET,
+        .byCount = 1, .byPalette = PAL_TRACER_AMBER,
+        .fSpeed = MECHA_MPS(320.0f), .fDamage = 178.0f,
+        .fRadius = MECHA_M(1.1f),
+        .iLifeTicks = 110, .iAmmo = 1, .iReloadTicks = MECHA_SEC(2.4f),
+        .iRecoveryTicks = 16, .fStagger = 86.0f,
+        .fMuzzleHeight = 0.62f, .fMuzzleSide = 0.85f },
+      [MECHA_STANCE_GUARD] = { .szName = "KLR SHOT", .byKind = MECHA_PROJ_BULLET,
+        .byCount = 1, .byPalette = PAL_TRACER_AMBER,
+        .fSpeed = MECHA_MPS(320.0f), .fDamage = 178.0f,
+        .fRadius = MECHA_M(1.1f),
+        .iLifeTicks = 110, .iAmmo = 1, .iReloadTicks = MECHA_SEC(2.4f),
+        .iRecoveryTicks = 16, .fStagger = 86.0f,
+        .fMuzzleHeight = 0.62f, .fMuzzleSide = 0.85f },
+      [MECHA_STANCE_DASH] = { .szName = "KLR SHOT", .byKind = MECHA_PROJ_BULLET,
+        .byCount = 1, .byPalette = PAL_TRACER_AMBER,
+        .fSpeed = MECHA_MPS(320.0f), .fDamage = 178.0f,
+        .fRadius = MECHA_M(1.1f),
+        .iLifeTicks = 110, .iAmmo = 1, .iReloadTicks = MECHA_SEC(2.4f),
+        .iRecoveryTicks = 16, .fStagger = 86.0f,
+        .fMuzzleHeight = 0.62f, .fMuzzleSide = 0.85f },
+      [MECHA_STANCE_JUMP] = { .szName = "KLR SHOT", .byKind = MECHA_PROJ_BULLET,
+        .byCount = 1, .byPalette = PAL_TRACER_AMBER,
+        .fSpeed = MECHA_MPS(320.0f), .fDamage = 178.0f,
+        .fRadius = MECHA_M(1.1f),
+        .iLifeTicks = 110, .iAmmo = 1, .iReloadTicks = MECHA_SEC(2.4f),
+        .iRecoveryTicks = 16, .fStagger = 86.0f,
+        .fMuzzleHeight = 0.62f, .fMuzzleSide = 0.85f },
+    },
+    [MECHA_SLOT_CENTER] = {
+      [MECHA_STANCE_STAND] = { .szName = "KLR SHOT", .byKind = MECHA_PROJ_BULLET,
+        .byCount = 1, .byPalette = PAL_TRACER_AMBER,
+        .fSpeed = MECHA_MPS(320.0f), .fDamage = 178.0f,
+        .fRadius = MECHA_M(1.1f),
+        .iLifeTicks = 110, .iAmmo = 1, .iReloadTicks = MECHA_SEC(2.4f),
+        .iRecoveryTicks = 16, .fStagger = 86.0f,
+        .fMuzzleHeight = 0.62f, .fMuzzleSide = 0.85f },
+      [MECHA_STANCE_GUARD] = { .szName = "KLR SHOT", .byKind = MECHA_PROJ_BULLET,
+        .byCount = 1, .byPalette = PAL_TRACER_AMBER,
+        .fSpeed = MECHA_MPS(320.0f), .fDamage = 178.0f,
+        .fRadius = MECHA_M(1.1f),
+        .iLifeTicks = 110, .iAmmo = 1, .iReloadTicks = MECHA_SEC(2.4f),
+        .iRecoveryTicks = 16, .fStagger = 86.0f,
+        .fMuzzleHeight = 0.62f, .fMuzzleSide = 0.85f },
+      [MECHA_STANCE_DASH] = { .szName = "KLR SHOT", .byKind = MECHA_PROJ_BULLET,
+        .byCount = 1, .byPalette = PAL_TRACER_AMBER,
+        .fSpeed = MECHA_MPS(320.0f), .fDamage = 178.0f,
+        .fRadius = MECHA_M(1.1f),
+        .iLifeTicks = 110, .iAmmo = 1, .iReloadTicks = MECHA_SEC(2.4f),
+        .iRecoveryTicks = 16, .fStagger = 86.0f,
+        .fMuzzleHeight = 0.62f, .fMuzzleSide = 0.85f },
+      [MECHA_STANCE_JUMP] = { .szName = "KLR SHOT", .byKind = MECHA_PROJ_BULLET,
+        .byCount = 1, .byPalette = PAL_TRACER_AMBER,
+        .fSpeed = MECHA_MPS(320.0f), .fDamage = 178.0f,
+        .fRadius = MECHA_M(1.1f),
+        .iLifeTicks = 110, .iAmmo = 1, .iReloadTicks = MECHA_SEC(2.4f),
+        .iRecoveryTicks = 16, .fStagger = 86.0f,
+        .fMuzzleHeight = 0.62f, .fMuzzleSide = 0.85f },
+    },
+    [MECHA_SLOT_RIGHT] = {
+      [MECHA_STANCE_STAND] = { .szName = "KLR SHOT", .byKind = MECHA_PROJ_BULLET,
+        .byCount = 1, .byPalette = PAL_TRACER_AMBER,
+        .fSpeed = MECHA_MPS(320.0f), .fDamage = 178.0f,
+        .fRadius = MECHA_M(1.1f),
+        .iLifeTicks = 110, .iAmmo = 1, .iReloadTicks = MECHA_SEC(2.4f),
+        .iRecoveryTicks = 16, .fStagger = 86.0f,
+        .fMuzzleHeight = 0.62f, .fMuzzleSide = 0.85f },
+      [MECHA_STANCE_GUARD] = { .szName = "KLR SHOT", .byKind = MECHA_PROJ_BULLET,
+        .byCount = 1, .byPalette = PAL_TRACER_AMBER,
+        .fSpeed = MECHA_MPS(320.0f), .fDamage = 178.0f,
+        .fRadius = MECHA_M(1.1f),
+        .iLifeTicks = 110, .iAmmo = 1, .iReloadTicks = MECHA_SEC(2.4f),
+        .iRecoveryTicks = 16, .fStagger = 86.0f,
+        .fMuzzleHeight = 0.62f, .fMuzzleSide = 0.85f },
+      [MECHA_STANCE_DASH] = { .szName = "KLR SHOT", .byKind = MECHA_PROJ_BULLET,
+        .byCount = 1, .byPalette = PAL_TRACER_AMBER,
+        .fSpeed = MECHA_MPS(320.0f), .fDamage = 178.0f,
+        .fRadius = MECHA_M(1.1f),
+        .iLifeTicks = 110, .iAmmo = 1, .iReloadTicks = MECHA_SEC(2.4f),
+        .iRecoveryTicks = 16, .fStagger = 86.0f,
+        .fMuzzleHeight = 0.62f, .fMuzzleSide = 0.85f },
+      [MECHA_STANCE_JUMP] = { .szName = "KLR SHOT", .byKind = MECHA_PROJ_BULLET,
+        .byCount = 1, .byPalette = PAL_TRACER_AMBER,
+        .fSpeed = MECHA_MPS(320.0f), .fDamage = 178.0f,
+        .fRadius = MECHA_M(1.1f),
+        .iLifeTicks = 110, .iAmmo = 1, .iReloadTicks = MECHA_SEC(2.4f),
+        .iRecoveryTicks = 16, .fStagger = 86.0f,
+        .fMuzzleHeight = 0.62f, .fMuzzleSide = 0.85f },
+    },
+  },
+},
+
 };
 
 //-------------------------------------------------------------------------------------------------

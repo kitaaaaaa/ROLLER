@@ -377,6 +377,68 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
       bAmmoLeft = true;
   }
 
+  /* --- driving, for the one machine that does ---------------------------- */
+
+  /*
+   * A car is a different problem and gets a different pilot. There is no
+   * footwork to think about, no gauge to spend and no dodging worth the
+   * name: it can only point where it is going, so lining the gun up and
+   * closing the distance are the same act, and the answer to almost
+   * everything is to keep the throttle down and steer.
+   */
+  if (pDef->bWheeled) {
+    int iDriveBearing = mecha_atan2_angle(pTarget->fX - pSelf->fX,
+                                          pTarget->fZ - pSelf->fZ);
+    int iDriveOff = mecha_angle_delta(pSelf->iFacing, iDriveBearing);
+    float fSpeed = mecha_length2(pSelf->fVelX, pSelf->fVelZ);
+    bool bClear = true;
+
+    pOut->iTurn = iDriveOff >= 0 ? pProfile->iTurnPercent
+                                 : -pProfile->iTurnPercent;
+    /* Nearly straight at them: stop sawing at the wheel, or the gun never
+     * settles long enough to be worth firing. */
+    if (iDriveOff < MECHA_AI_DRIVE_STRAIGHT
+        && iDriveOff > -MECHA_AI_DRIVE_STRAIGHT)
+      pOut->iTurn = 0;
+
+    /*
+     * Where this is going, and whether there is any arena there. A car
+     * cannot step back, so the only thing it can do about an edge is get
+     * off the throttle and turn -- which is what a driver does.
+     */
+    if (fSpeed > 0.01f) {
+      bClear = mecha_ai_footing_clear(
+          pWorld, pSelf, pSelf->fVelX, pSelf->fVelZ,
+          MECHA_AI_FOOTING_WALK + fSpeed * MECHA_AI_FOOTING_CANCEL,
+          pWorld->arena.byShape == MECHA_ARENA_OPEN);
+    }
+
+    if (!bClear) {
+      /* Hard over and off the gas. Which way it turns hardly matters as
+       * long as it is away from straight ahead. */
+      pOut->bGuard = true;
+      pOut->iTurn = iDriveOff >= 0 ? 100 : -100;
+    } else {
+      /*
+       * Otherwise: drive at them. Backing off the throttle a little when
+       * the nose is well off line is the only steering aid it has, since
+       * the wheels bite hardest below the top speed.
+       */
+      pOut->bDash = iDriveOff < MECHA_AI_DRIVE_LIFT
+                    && iDriveOff > -MECHA_AI_DRIVE_LIFT;
+      /* Too slow to steer at all is worse than any of it: get moving. */
+      if (fSpeed < pDef->fSteerFloor * 1.5f)
+        pOut->bDash = true;
+    }
+
+    pOut->bJump = false;
+    pOut->iMoveX = 0;
+    pOut->iMoveZ = 0;
+    iBearing = iDriveBearing;
+    iOff = iDriveOff < 0 ? -iDriveOff : iDriveOff;
+    goto shooting;
+  }
+
   /* --- footwork --------------------------------------------------------- */
 
   /* Circling direction is held for about a second at a time so the mech
@@ -626,6 +688,8 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
   }
 
   /* --- shooting --------------------------------------------------------- */
+
+shooting:
 
   /*
    * Held fire is a debug switch, and it is applied here rather than at the

@@ -176,10 +176,24 @@ static int test_roster(void)
         CHECK(pDef->fMass > 0.0f);
         CHECK(pDef->iBoostMax > 0);
         CHECK(pDef->iDashTicks > 0 && pDef->iLandTicks > 0);
-        /* Dashing has to be faster than walking or the gauge means nothing. */
-        CHECK(pDef->fDashSpeed > pDef->fWalkSpeed);
-        /* Guarding is the fast refill; that is one of two reasons to do it. */
-        CHECK(pDef->iBoostGuardRegen > pDef->iBoostRegen);
+        if (pDef->bWheeled) {
+            /*
+             * A machine on wheels has none of the gauge rules, because it
+             * has no gauge to spend: no boost, no jump, one speed. What it
+             * does have to have is somewhere to put its speed and something
+             * to do at close quarters, since it carries no melee row.
+             */
+            CHECK(pDef->fWalkSpeed > 0.0f);
+            CHECK(pDef->fDriveAccel > 0.0f && pDef->fBrake > 0.0f);
+            CHECK(pDef->fSteerFloor > 0.0f);
+            CHECK(pDef->fRamDamage > 0.0f && pDef->fRamSpeed > 0.0f);
+        } else {
+            /* Dashing has to be faster than walking or the gauge means
+             * nothing. */
+            CHECK(pDef->fDashSpeed > pDef->fWalkSpeed);
+            /* Guarding is the fast refill; one of two reasons to do it. */
+            CHECK(pDef->iBoostGuardRegen > pDef->iBoostRegen);
+        }
 
         for (iSlot = 0; iSlot < MECHA_WEAPON_SLOTS; iSlot++) {
             int iStance;
@@ -2747,6 +2761,293 @@ static int test_the_meadow_is_an_octagon_with_hills(void)
 
 //-------------------------------------------------------------------------------------------------
 
+static int test_the_gun_car_is_a_car_with_a_gun(void)
+{
+    static tMechaQuad aStorage[MECHA_QUAD_CAPACITY];
+    tMechaQuadList list;
+    tMechaWorld world;
+    const tMechaMechDef *pDef;
+    const tMechaMechDef *pWalker = mecha_def_get(0);
+    int iCar = -1;
+    float afLow[3] = { 1e30f, 1e30f, 1e30f };
+    float afHigh[3] = { -1e30f, -1e30f, -1e30f };
+    float fGunOut = 0.0f;
+    int i;
+
+    for (i = 0; i < mecha_def_count(); i++) {
+        if (mecha_def_get(i)->bWheeled)
+            iCar = i;
+    }
+    CHECK(iCar >= 0);
+    pDef = mecha_def_get(iCar);
+
+    /* A sixth of a machine, near enough, and no taller than it is long. */
+    printf("   %s: %.1f m tall against a machine's %.1f\n", pDef->szName,
+           pDef->fHeight / MECHA_METRE, pWalker->fHeight / MECHA_METRE);
+    CHECK(pDef->fHeight < pWalker->fHeight / 5.0f);
+    CHECK(pDef->fHeight > pWalker->fHeight / 7.0f);
+
+    start_duel(&world, 0, iCar, iCar, 0x2A2Au, 1);
+    world.aMechs[0].iFacing = 0;
+    world.aMechs[0].byLock = MECHA_LOCK_HELD;
+    world.aMechs[0].iTargetIdx = 1;
+    mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
+    mecha_mesh_mech(&list, &world, 0);
+    CHECK(list.iCount > 40);
+
+    for (i = 0; i < list.iCount; i++) {
+        int v;
+
+        for (v = 0; v < 4; v++) {
+            int iAxis;
+
+            for (iAxis = 0; iAxis < 3; iAxis++) {
+                float f = aStorage[i].afVert[v][iAxis];
+
+                if (f < afLow[iAxis])
+                    afLow[iAxis] = f;
+                if (f > afHigh[iAxis])
+                    afHigh[iAxis] = f;
+            }
+        }
+    }
+
+    printf("   built out of %d quads: %.1f m long, %.1f wide, %.1f tall,"
+           " sitting %.2f m into the ground\n", list.iCount,
+           (afHigh[2] - afLow[2]) / MECHA_METRE,
+           (afHigh[0] - afLow[0]) / MECHA_METRE,
+           (afHigh[1] - afLow[1]) / MECHA_METRE,
+           (world.aMechs[0].fY - afLow[1]) / MECHA_METRE);
+
+    /* Longer than it is wide and much longer than it is tall, which is what
+     * says the body came out as a car rather than as a box. */
+    CHECK(afHigh[2] - afLow[2] > afHigh[0] - afLow[0]);
+    CHECK(afHigh[2] - afLow[2] > (afHigh[1] - afLow[1]) * 2.0f);
+    /* And it sits on the ground rather than in it. */
+    CHECK(afLow[1] > world.aMechs[0].fY - MECHA_M(0.2f));
+
+    /* The gun is off to the right of it, which is the only place it is. */
+    for (i = 0; i < list.iCount; i++) {
+        int v;
+
+        for (v = 0; v < 4; v++) {
+            float fSide = aStorage[i].afVert[v][0] - world.aMechs[0].fX;
+
+            if (fSide > fGunOut)
+                fGunOut = fSide;
+        }
+    }
+    printf("   the gun stands %.1f m off the right of it\n",
+           fGunOut / MECHA_METRE);
+    CHECK(fGunOut > pDef->fRadius);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/* The one machine on wheels, wherever it is on the roster. */
+static int wheeled_def(void)
+{
+    int i;
+
+    for (i = 0; i < mecha_def_count(); i++) {
+        if (mecha_def_get(i)->bWheeled)
+            return i;
+    }
+    return -1;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_the_gun_car_drives(void)
+{
+    tMechaWorld world;
+    tMechaInput aInputs[2];
+    const tMechaMechDef *pDef;
+    int iCar = wheeled_def();
+    int iStart;
+    float fTop = 0.0f;
+    int i;
+
+    CHECK(iCar >= 0);
+    pDef = mecha_def_get(iCar);
+    start_duel(&world, 0, iCar, 0, 0x0CA5u, 1);
+    CHECK(clear_runway(&world, 0));
+    memset(aInputs, 0, sizeof(aInputs));
+
+    /* --- the throttle is the boost button ------------------------------- */
+    aInputs[0].bDash = true;
+    for (i = 0; i < MECHA_TICK_HZ * 3; i++) {
+        mecha_sim_tick(&world, aInputs, 2);
+        if (mecha_length2(world.aMechs[0].fVelX, world.aMechs[0].fVelZ) > fTop)
+            fTop = mecha_length2(world.aMechs[0].fVelX, world.aMechs[0].fVelZ);
+    }
+    printf("   the car reaches %.0f m/s on the throttle\n", fTop / MECHA_METRE);
+    CHECK(fTop > pDef->fWalkSpeed * 0.9f);
+    /* And it spends nothing doing it: there is no gauge on this machine. */
+    CHECK(mecha_mech_boost_fraction(&world, 0) > 0.99f);
+    /* All of which is along its own nose. A car does not go sideways. */
+    {
+        float fSide = world.aMechs[0].fVelX * mecha_cos(world.aMechs[0].iFacing)
+                      - world.aMechs[0].fVelZ
+                        * mecha_sin(world.aMechs[0].iFacing);
+
+        CHECK(fSide < pDef->fWalkSpeed * 0.05f
+              && fSide > -pDef->fWalkSpeed * 0.05f);
+    }
+
+    /* --- guard is the brake --------------------------------------------- */
+    aInputs[0].bDash = false;
+    aInputs[0].bGuard = true;
+    for (i = 0; i < MECHA_TICK_HZ; i++)
+        mecha_sim_tick(&world, aInputs, 2);
+    printf("   and stops inside a second of the brake\n");
+    CHECK(mecha_length2(world.aMechs[0].fVelX, world.aMechs[0].fVelZ)
+          < pDef->fWalkSpeed * 0.25f);
+
+    /* --- and it cannot turn standing still ------------------------------ */
+    memset(aInputs, 0, sizeof(aInputs));
+    for (i = 0; i < MECHA_TICK_HZ * 2; i++)
+        mecha_sim_tick(&world, aInputs, 2);
+    iStart = world.aMechs[0].iFacing;
+    aInputs[0].iTurn = 100;
+    for (i = 0; i < MECHA_TICK_HZ; i++)
+        mecha_sim_tick(&world, aInputs, 2);
+    printf("   stationary, a second of full lock turns it %d units\n",
+           mecha_angle_delta(iStart, world.aMechs[0].iFacing));
+    /*
+     * The race game's own rule: below the car's steering speed the wheels
+     * do nothing. It is what makes this machine have to drive at somebody
+     * to point at them, which is the whole of how it aims.
+     */
+    CHECK(world.aMechs[0].iFacing == iStart);
+
+    /* Moving, the same lock turns it a long way -- far enough that the
+     * shortest way round stops being the way it went, which is why this
+     * adds up the ticks instead of measuring the ends. */
+    {
+        int iTurned = 0;
+
+        aInputs[0].bDash = true;
+        for (i = 0; i < MECHA_TICK_HZ; i++) {
+            int iWas = world.aMechs[0].iFacing;
+
+            mecha_sim_tick(&world, aInputs, 2);
+            iTurned += mecha_angle_delta(iWas, world.aMechs[0].iFacing);
+        }
+        printf("   rolling, the same second turns it %d units\n", iTurned);
+        CHECK(iTurned > MECHA_DEG(60));
+    }
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_the_gun_car_has_one_gun_and_a_bumper(void)
+{
+    tMechaWorld world;
+    tMechaInput aInputs[2];
+    const tMechaMechDef *pDef;
+    int iCar = wheeled_def();
+    float fArmour;
+    int iSlot;
+    int i;
+
+    CHECK(iCar >= 0);
+    pDef = mecha_def_get(iCar);
+
+    /* --- three triggers, one magazine ----------------------------------- */
+    start_duel(&world, 0, iCar, 0, 0x6C0Fu, 1);
+    memset(aInputs, 0, sizeof(aInputs));
+    world.aMechs[0].byLock = MECHA_LOCK_HELD;
+    world.aMechs[0].iTargetIdx = 1;
+    for (iSlot = 0; iSlot < MECHA_WEAPON_SLOTS; iSlot++)
+        CHECK(world.aMechs[0].aiAmmo[iSlot] > 0);
+
+    aInputs[0].bFireLeft = true;
+    mecha_sim_tick(&world, aInputs, 2);
+    printf("   one trigger empties all three: %d %d %d rounds left\n",
+           world.aMechs[0].aiAmmo[0], world.aMechs[0].aiAmmo[1],
+           world.aMechs[0].aiAmmo[2]);
+    for (iSlot = 0; iSlot < MECHA_WEAPON_SLOTS; iSlot++) {
+        CHECK(world.aMechs[0].aiAmmo[iSlot] == 0);
+        CHECK(world.aMechs[0].aiReload[iSlot] > 0);
+    }
+    /* And firing shoved it: the kick is real, not a drawing. */
+    CHECK(mecha_length2(world.aMechs[0].fVelX, world.aMechs[0].fVelZ) > 0.0f);
+
+    /* --- and running into somebody hurts them --------------------------- */
+    start_duel(&world, 0, iCar, 0, 0x0BADu, 1);
+    memset(aInputs, 0, sizeof(aInputs));
+    CHECK(clear_runway(&world, 0));
+    /* Squared up on the other machine with a long run at it. */
+    world.aMechs[1].fX = world.aMechs[0].fX
+                         + mecha_sin(world.aMechs[0].iFacing)
+                           * MECHA_M(70.0f);
+    world.aMechs[1].fZ = world.aMechs[0].fZ
+                         + mecha_cos(world.aMechs[0].iFacing)
+                           * MECHA_M(70.0f);
+    world.aMechs[1].iInvulnTicks = 0;
+    fArmour = world.aMechs[1].fArmour;
+
+    aInputs[0].bDash = true;
+    for (i = 0; i < MECHA_TICK_HZ * 6; i++) {
+        mecha_sim_tick(&world, aInputs, 2);
+        world.aMechs[1].iInvulnTicks = 0;
+        if (world.aMechs[1].fArmour < fArmour)
+            break;
+    }
+    printf("   ramming took %.0f armour off it\n",
+           fArmour - world.aMechs[1].fArmour);
+    CHECK(world.aMechs[1].fArmour < fArmour);
+    /* Not every tick, though: a car resting against somebody is not
+     * running them over sixty times a second. */
+    {
+        float fAfter = world.aMechs[1].fArmour;
+
+        mecha_sim_tick(&world, aInputs, 2);
+        CHECK(world.aMechs[1].fArmour == fAfter);
+    }
+    (void)pDef;
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_the_gun_car_never_turns_itself(void)
+{
+    tMechaWorld world;
+    tMechaInput aInputs[2];
+    int iCar = wheeled_def();
+    int iStart;
+    int i;
+
+    CHECK(iCar >= 0);
+    start_duel(&world, 0, iCar, 0, 0x7A11u, 1);
+    memset(aInputs, 0, sizeof(aInputs));
+    CHECK(clear_runway(&world, 0));
+
+    /* An enemy right beside it, held in the lock: a legged machine squares
+     * up to that on its own, at knife range, and this one must not. */
+    world.aMechs[0].byLock = MECHA_LOCK_HELD;
+    world.aMechs[0].iTargetIdx = 1;
+    world.aMechs[1].fX = world.aMechs[0].fX + MECHA_M(12.0f);
+    world.aMechs[1].fZ = world.aMechs[0].fZ + MECHA_M(12.0f);
+    iStart = world.aMechs[0].iFacing;
+
+    for (i = 0; i < MECHA_TICK_HZ; i++) {
+        world.aMechs[0].byLock = MECHA_LOCK_HELD;
+        world.aMechs[0].iTargetIdx = 1;
+        mecha_sim_tick(&world, aInputs, 2);
+    }
+    printf("   a second of knife range turned it %d units\n",
+           mecha_angle_delta(iStart, world.aMechs[0].iFacing));
+    CHECK(world.aMechs[0].iFacing == iStart);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static int test_the_forest_stands_outside_the_fight(void)
 {
     static tMechaQuad aStorage[MECHA_QUAD_CAPACITY];
@@ -3057,8 +3358,13 @@ static int test_nothing_is_built_coplanar(void)
     int iArena;
 
     CHECK(iArenas <= (int)(sizeof(aiPairs) / sizeof(aiPairs[0])));
+    /* One machine per arena, walking the roster alongside the arenas, so
+     * every body in the game gets held up against itself somewhere -- the
+     * one built out of the race game's own car plan included. */
+    CHECK(iArenas >= mecha_def_count());
     for (iArena = 0; iArena < iArenas; iArena++) {
-        start_duel(&world, iArena, iArena, (iArena + 1) % 4, 0xC0D1u, 1);
+        start_duel(&world, iArena, iArena % mecha_def_count(),
+                   (iArena + 1) % 4, 0xC0D1u, 1);
         mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
         mecha_mesh_arena(&list, &world.arena);
         mecha_mesh_mech(&list, &world, 0);
@@ -4279,6 +4585,13 @@ int main(void)
           test_the_meadow_is_an_octagon_with_hills },
         { "the forest stands outside the fight",
           test_the_forest_stands_outside_the_fight },
+        { "the gun car is a car with a gun",
+          test_the_gun_car_is_a_car_with_a_gun },
+        { "the gun car drives", test_the_gun_car_drives },
+        { "the gun car has one gun and a bumper",
+          test_the_gun_car_has_one_gun_and_a_bumper },
+        { "the gun car never turns itself",
+          test_the_gun_car_never_turns_itself },
         { "the roof has no walls and a tabletop",
           test_the_roof_has_no_walls_and_a_tabletop },
         { "a boost up a slope leaves the ground",

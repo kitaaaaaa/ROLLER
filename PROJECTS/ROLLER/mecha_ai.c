@@ -335,6 +335,9 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
   int iSlot;
   int iBearing;
   int iOff;
+  /* Set by the footwork below when the machine is about to be somewhere
+   * there is no arena. */
+  bool bFooting = false;
   const tMechaAiProfile *pProfile;
   float fDistance;
   float fPreferred;
@@ -522,6 +525,7 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
     if (bBack) {
       pOut->iMoveX = -pOut->iMoveX;
       pOut->iMoveZ = -pOut->iMoveZ;
+      bFooting = true;
     }
 
     /*
@@ -547,6 +551,7 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
       pOut->iMoveX = (int)((fOutX * fForwardZ - fOutZ * fForwardX) * 100.0f);
       pOut->bDash = false;
       pOut->bGuard = false;
+      bFooting = true;
     }
 
     /*
@@ -571,6 +576,7 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
         pOut->iMoveX = (int)((fOutX * fForwardZ - fOutZ * fForwardX)
                              * 100.0f);
         pOut->bGuard = false;
+        bFooting = true;
       }
     }
 
@@ -614,6 +620,7 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
          */
         pOut->bDash = !pSelf->bDashHeld;
         pOut->bGuard = false;
+        bFooting = true;
       }
     }
   }
@@ -627,7 +634,14 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
    * a trigger, which is the point -- a machine that stopped fighting would
    * not show you anything about how the fighting looks.
    */
-  iSlot = pWorld->bAiHoldFire
+  /*
+   * And a pilot that is busy not falling off the world does not take the
+   * shot. Firing locks a machine out of acting for the recovery, and a
+   * machine that cannot act cannot steer -- so a shot taken while sliding
+   * towards an edge is a shot that spends the only ticks it had to stop
+   * itself. It was the last way the computer pilots were leaving the roof.
+   */
+  iSlot = (pWorld->bAiHoldFire || bFooting)
               ? -1
               : mecha_ai_choose_weapon(pWorld, iMechIdx, fDistance, bHasLine);
   if (iSlot >= 0 && pSelf->iRecovery <= 0 && iOff <= MECHA_AI_FIRE_CONE

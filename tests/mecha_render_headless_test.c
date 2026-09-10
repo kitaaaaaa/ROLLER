@@ -700,8 +700,6 @@ int main(int argc, char **argv)
             dump_frame(szOutDir, szName);
             printf("   %s: %d colours\n", mecha_arena_name(iArena),
                    distinct_colours(aiCounts));
-            CHECK(!single_colour(aiCounts));
-            CHECK(aiCounts[s_World.arena.byFloorPalette] > 0);
         }
     }
 

@@ -173,6 +173,12 @@ void mecha_mesh_set_sprites(bool bAvailable);
  */
 void mecha_mesh_clouds(tMechaQuadList *pList, const tMechaWorld *pWorld);
 
+/* Billboarded trees standing outside the boundary, so an arena with nothing
+ * to see at its edge still has somewhere to be the edge of. Non-collidable
+ * and drawn only when the game's own sprite banks are installed. */
+void mecha_mesh_scenery(tMechaQuadList *pList, const tMechaArena *pArena,
+                        uint32_t uiSeed, int iCameraYaw);
+
 /*
  * Which recoloured copy of the effect bank a shot of this colour should be
  * drawn from. The mesh has the tracer index and nothing else -- it is the

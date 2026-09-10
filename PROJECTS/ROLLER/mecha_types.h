@@ -35,8 +35,16 @@
  * angular, the ground is flat-shaded, and a mech is twelve metres tall, so
  * anything finer would be detail nobody can stand on.
  */
-#define MECHA_TERRAIN_CELLS 12
+/*
+ * The most the ground can be divided into, which is not how much any given
+ * arena divides it: an arena carries its own count in iTerrainCells, and a
+ * bigger one needs more of them or its hills come out as broad bumps with
+ * no shape to them. This is only the size of the arrays.
+ */
+#define MECHA_TERRAIN_CELLS 24
 #define MECHA_TERRAIN_NODES (MECHA_TERRAIN_CELLS + 1)
+/* What an arena gets when it does not ask for anything else. */
+#define MECHA_TERRAIN_CELLS_DEFAULT 12
 
 /*
  * Surface bits, and they are the engine's own values -- SURFACE_FLAG_PIT,
@@ -560,6 +568,43 @@ typedef struct
   uint32_t auiSurface[MECHA_TERRAIN_CELLS][MECHA_TERRAIN_CELLS];
   /* Below this a machine is gone, however it got there. */
   float    fKillY;
+
+  /*
+   * A tabletop: a raised hexagonal mesa in the middle of the arena, sloped
+   * so it can be walked up. Unlike the hills it is not written into the
+   * grid -- it is answered analytically by the height query, so its edges
+   * stay hexagonal instead of being rounded off to whatever the nearest
+   * grid corners happen to be. Zero height is no tabletop.
+   *
+   * Both radii are apothems: centre to the middle of a face, which is the
+   * measurement a hexagon's own distance metric returns.
+   */
+  float    fMesaTop;
+  float    fMesaBase;
+  float    fMesaHeight;
+
+  /*
+   * How far below itself an open arena's edge is drawn. Six metres reads as
+   * a platform; two hundred reads as the top of a tower.
+   */
+  float    fSkirt;
+
+  /*
+   * Ground drawn past the boundary, and scenery to put on it. The ground
+   * out there is not walkable -- the boundary still stops a machine at the
+   * arena's own edge -- it is there so the edge is a place the fight stops
+   * rather than a place the world does. Zero reach draws none of it.
+   */
+  float    fOuterReach;
+  int      iBillboards;
+
+  /* How finely the ground is drawn, which is not how finely it is shaped:
+   * zero takes the default. A bigger arena wants more of them or its tiles
+   * come out stretched. */
+  int      iFloorTiles;
+  /* And how finely it is shaped, which is the grid above. Zero takes
+   * MECHA_TERRAIN_CELLS_DEFAULT; nothing may exceed MECHA_TERRAIN_CELLS. */
+  int      iTerrainCells;
 } tMechaArena;
 
 //-------------------------------------------------------------------------------------------------

@@ -60,17 +60,32 @@
  * enough to be a ramp and a top wide enough for two machines to argue on. */
 #define MECHA_HILL_FLAT_TOP 0.34f
 
+/* How many cells this arena's ground is divided into, whatever it asked
+ * for, clamped to what the arrays can hold. */
+static int mecha_arena_cells(const tMechaArena *pArena)
+{
+  int iCells = pArena->iTerrainCells > 0 ? pArena->iTerrainCells
+                                         : MECHA_TERRAIN_CELLS_DEFAULT;
+
+  if (iCells > MECHA_TERRAIN_CELLS)
+    iCells = MECHA_TERRAIN_CELLS;
+  return iCells;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static void mecha_arena_raise(tMechaArena *pArena, float fX, float fZ,
                               float fReach, float fHeight)
 {
-  float fCell = pArena->fHalfExtent * 2.0f / (float)MECHA_TERRAIN_CELLS;
+  int iCells = mecha_arena_cells(pArena);
+  float fCell = pArena->fHalfExtent * 2.0f / (float)iCells;
   int iRow;
   int iCol;
 
   if (fReach <= 0.0f || fCell <= 0.0f)
     return;
-  for (iRow = 0; iRow < MECHA_TERRAIN_NODES; iRow++) {
-    for (iCol = 0; iCol < MECHA_TERRAIN_NODES; iCol++) {
+  for (iRow = 0; iRow <= iCells; iRow++) {
+    for (iCol = 0; iCol <= iCells; iCol++) {
       float fNodeX = -pArena->fHalfExtent + fCell * (float)iCol;
       float fNodeZ = -pArena->fHalfExtent + fCell * (float)iRow;
       float fAway = mecha_length2(fNodeX - fX, fNodeZ - fZ);
@@ -108,14 +123,15 @@ static void mecha_arena_raise(tMechaArena *pArena, float fX, float fZ,
 static void mecha_arena_mark(tMechaArena *pArena, float fX, float fZ,
                              float fReach, uint32_t uiFlags)
 {
-  float fCell = pArena->fHalfExtent * 2.0f / (float)MECHA_TERRAIN_CELLS;
+  int iCells = mecha_arena_cells(pArena);
+  float fCell = pArena->fHalfExtent * 2.0f / (float)iCells;
   int iRow;
   int iCol;
 
   if (fCell <= 0.0f)
     return;
-  for (iRow = 0; iRow < MECHA_TERRAIN_CELLS; iRow++) {
-    for (iCol = 0; iCol < MECHA_TERRAIN_CELLS; iCol++) {
+  for (iRow = 0; iRow < iCells; iRow++) {
+    for (iCol = 0; iCol < iCells; iCol++) {
       float fMidX = -pArena->fHalfExtent + fCell * ((float)iCol + 0.5f);
       float fMidZ = -pArena->fHalfExtent + fCell * ((float)iRow + 0.5f);
 
@@ -129,11 +145,12 @@ static void mecha_arena_mark(tMechaArena *pArena, float fX, float fZ,
 
 static void mecha_arena_mark_all(tMechaArena *pArena, uint32_t uiFlags)
 {
+  int iCells = mecha_arena_cells(pArena);
   int iRow;
   int iCol;
 
-  for (iRow = 0; iRow < MECHA_TERRAIN_CELLS; iRow++)
-    for (iCol = 0; iCol < MECHA_TERRAIN_CELLS; iCol++)
+  for (iRow = 0; iRow < iCells; iRow++)
+    for (iCol = 0; iCol < iCells; iCol++)
       pArena->auiSurface[iRow][iCol] |= uiFlags;
 }
 
@@ -306,12 +323,25 @@ void mecha_arena_init(tMechaArena *pArena, int iArenaIdx)
      * Open country: eight sides, hills you can be thrown off, and nothing
      * built on it. The ground is not magnetic, which is the whole point --
      * boost up one of these and you leave it at the top.
+     *
+     * And no walls you can see. The boundary is still there and still stops
+     * a machine, but what is drawn past it is more forest: ground running
+     * out to twice the arena again with trees standing on it, so the edge
+     * of the fight is a place the fight stops rather than a place the world
+     * does. A wall in a meadow is a fence around a field.
      */
     int iTree;
 
     pArena->byShape = MECHA_ARENA_OCTAGON;
-    pArena->fHalfExtent = 130.0f * m;
-    pArena->fWallHeight = 16.0f * m;
+    pArena->fHalfExtent = 260.0f * m;
+    pArena->fWallHeight = 0.0f;
+    pArena->iFloorTiles = 40;
+    /* Twice the arena, twice the grid: the hills are the same size they
+     * always were, and a grid stretched to cover twice the ground would
+     * have rounded them off into bumps. */
+    pArena->iTerrainCells = 24;
+    pArena->fOuterReach = 560.0f * m;
+    pArena->iBillboards = 420;
     pArena->byFloorPalette = MECHA_PAL_GRASS_A;
     pArena->byGridPalette = MECHA_PAL_GRASS_B;
     pArena->byFloorTile = MECHA_TILE_GRASS_A;
@@ -324,17 +354,21 @@ void mecha_arena_init(tMechaArena *pArena, int iArenaIdx)
      * ramps: a hill a hundred metres across is a walk up whatever you do,
      * because the boost has run out before the crest.
      */
-    mecha_arena_raise(pArena, -55.0f * m, -40.0f * m, 40.0f * m, 22.0f * m);
-    mecha_arena_raise(pArena,  62.0f * m,  30.0f * m, 46.0f * m, 26.0f * m);
-    mecha_arena_raise(pArena,  10.0f * m, -85.0f * m, 34.0f * m, 16.0f * m);
-    mecha_arena_raise(pArena, -80.0f * m,  75.0f * m, 32.0f * m, 15.0f * m);
+    mecha_arena_raise(pArena, -110.0f * m, -80.0f * m, 44.0f * m, 22.0f * m);
+    mecha_arena_raise(pArena,  124.0f * m,  60.0f * m, 50.0f * m, 26.0f * m);
+    mecha_arena_raise(pArena,   20.0f * m, -170.0f * m, 38.0f * m, 16.0f * m);
+    mecha_arena_raise(pArena, -160.0f * m,  150.0f * m, 36.0f * m, 15.0f * m);
+    mecha_arena_raise(pArena,   30.0f * m,  120.0f * m, 46.0f * m, 24.0f * m);
+    mecha_arena_raise(pArena, -190.0f * m,  -20.0f * m, 40.0f * m, 18.0f * m);
+    mecha_arena_raise(pArena,  170.0f * m, -140.0f * m, 42.0f * m, 20.0f * m);
     mecha_arena_mark_all(pArena, MECHA_SURF_NON_MAGNETIC);
 
-    for (iTree = 0; iTree < 9; iTree++) {
+    for (iTree = 0; iTree < 14; iTree++) {
       /* Spread round a ring and then pushed about, so it is a wood rather
-       * than an orchard. */
-      int iAngle = iTree * MECHA_ANGLE_FULL / 9;
-      float fReach = (52.0f + 11.0f * (float)(iTree % 4)) * m;
+       * than an orchard. These are the ones you can hide behind; the rest
+       * of the forest is scenery, drawn but not there. */
+      int iAngle = iTree * MECHA_ANGLE_FULL / 14;
+      float fReach = (96.0f + 26.0f * (float)(iTree % 4)) * m;
 
       mecha_arena_add_prop(pArena, MECHA_PROP_TREE,
                            mecha_sin(iAngle) * fReach,
@@ -342,21 +376,28 @@ void mecha_arena_init(tMechaArena *pArena, int iArenaIdx)
                            (5.0f + (float)(iTree % 3)) * m,
                            (26.0f + 4.0f * (float)(iTree % 3)) * m);
     }
-    mecha_arena_add_prop(pArena, MECHA_PROP_ROCK, -18.0f * m, 16.0f * m,
+    mecha_arena_add_prop(pArena, MECHA_PROP_ROCK, -36.0f * m, 32.0f * m,
                          12.0f * m, 11.0f * m);
-    mecha_arena_add_prop(pArena, MECHA_PROP_ROCK, 34.0f * m, -52.0f * m,
+    mecha_arena_add_prop(pArena, MECHA_PROP_ROCK, 68.0f * m, -104.0f * m,
                          9.0f * m, 8.0f * m);
-    mecha_arena_add_prop(pArena, MECHA_PROP_ROCK, -74.0f * m, -8.0f * m,
+    mecha_arena_add_prop(pArena, MECHA_PROP_ROCK, -148.0f * m, -16.0f * m,
                          10.0f * m, 9.0f * m);
+    mecha_arena_add_prop(pArena, MECHA_PROP_ROCK, 150.0f * m, 96.0f * m,
+                         11.0f * m, 10.0f * m);
     break;
   }
 
   case 4:
     /*
      * A roof. No walls at all -- walk off it and you are falling -- with a
-     * hole through the middle of it and a block in each corner to fight
-     * around. The hole is a surface like any other: flagged as a pit and
-     * flagged not to be drawn, which is how the race game builds one.
+     * raised hexagonal tabletop in the middle of it and a block in each
+     * corner to fight around. The tabletop is sloped rather than sheer, so
+     * it is high ground you take rather than a wall you go round, and its
+     * edges stay hexagonal because it is answered by the height query
+     * instead of being pressed into the terrain grid.
+     *
+     * The edge runs a long way down. It is the top of a tower, and a tower
+     * that stops six metres below its own roof is a table.
      */
     pArena->byShape = MECHA_ARENA_OPEN;
     pArena->fHalfExtent = 78.0f * m;
@@ -366,8 +407,10 @@ void mecha_arena_init(tMechaArena *pArena, int iArenaIdx)
     pArena->byWallTile = MECHA_TILE_RUST;
     pArena->byWallPalette = MECHA_PAL_BLOCK;
     pArena->fKillY = -90.0f * m;
-    mecha_arena_mark(pArena, 0.0f, 0.0f, 26.0f * m,
-                     MECHA_SURF_PIT | MECHA_SURF_SKIP_RENDER);
+    pArena->fSkirt = 150.0f * m;
+    pArena->fMesaTop = 20.0f * m;
+    pArena->fMesaBase = 30.0f * m;
+    pArena->fMesaHeight = 9.0f * m;
     mecha_arena_add_box(pArena, -52.0f * m, -52.0f * m, 9.0f * m, 9.0f * m,
                         14.0f * m, MECHA_PAL_BLOCK, MECHA_PAL_BLOCK_TOP);
     mecha_arena_add_box(pArena,  52.0f * m, -52.0f * m, 9.0f * m, 9.0f * m,
@@ -434,8 +477,71 @@ bool mecha_arena_contains(const tMechaArena *pArena, float fX, float fZ)
  */
 static float mecha_arena_cell_size(const tMechaArena *pArena)
 {
-  return pArena->fHalfExtent * 2.0f / (float)MECHA_TERRAIN_CELLS;
+  return pArena->fHalfExtent * 2.0f / (float)mecha_arena_cells(pArena);
 }
+
+/*
+ * How far out a point is, measured the way a hexagon measures: the largest
+ * of its distances along the three axes that run perpendicular to the three
+ * pairs of faces. Inside the apothem on all three is inside the hexagon.
+ */
+static float mecha_hex_distance(float fX, float fZ)
+{
+  static const float kafAxis[3][2] = {
+    { 1.0f, 0.0f },
+    { 0.5f, 0.86602540f },
+    { -0.5f, 0.86602540f },
+  };
+  float fWorst = 0.0f;
+  int i;
+
+  for (i = 0; i < 3; i++) {
+    float fAlong = fX * kafAxis[i][0] + fZ * kafAxis[i][1];
+
+    if (fAlong < 0.0f)
+      fAlong = -fAlong;
+    if (fAlong > fWorst)
+      fWorst = fAlong;
+  }
+  return fWorst;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * The tabletop, answered rather than baked.
+ *
+ * The hills go into the grid because they are meant to be lumpy -- a dozen
+ * facets is what a hill built out of corners should look like. A tabletop
+ * is not: it is a made thing with six straight edges, and rounding those
+ * off to the nearest grid corner would lose the only thing that says
+ * somebody built it. So it is computed here instead, and the ground mesh
+ * picks it up for free because the mesh samples this same query at every
+ * corner it draws.
+ */
+static float mecha_arena_mesa(const tMechaArena *pArena, float fX, float fZ)
+{
+  float fOut;
+
+  if (pArena->fMesaHeight <= 0.0f || pArena->fMesaBase <= pArena->fMesaTop)
+    return 0.0f;
+  fOut = mecha_hex_distance(fX, fZ);
+  if (fOut <= pArena->fMesaTop)
+    return pArena->fMesaHeight;
+  if (fOut >= pArena->fMesaBase)
+    return 0.0f;
+  return pArena->fMesaHeight * (pArena->fMesaBase - fOut)
+         / (pArena->fMesaBase - pArena->fMesaTop);
+}
+
+//-------------------------------------------------------------------------------------------------
+
+float mecha_arena_mesa_height(const tMechaArena *pArena, float fX, float fZ)
+{
+  return pArena ? mecha_arena_mesa(pArena, fX, fZ) : 0.0f;
+}
+
+//-------------------------------------------------------------------------------------------------
 
 static float mecha_arena_terrain(const tMechaArena *pArena, float fX,
                                  float fZ)
@@ -460,10 +566,10 @@ static float mecha_arena_terrain(const tMechaArena *pArena, float fX,
     fGridZ = 0.0f;
   iX = (int)fGridX;
   iZ = (int)fGridZ;
-  if (iX > MECHA_TERRAIN_CELLS - 1)
-    iX = MECHA_TERRAIN_CELLS - 1;
-  if (iZ > MECHA_TERRAIN_CELLS - 1)
-    iZ = MECHA_TERRAIN_CELLS - 1;
+  if (iX > mecha_arena_cells(pArena) - 1)
+    iX = mecha_arena_cells(pArena) - 1;
+  if (iZ > mecha_arena_cells(pArena) - 1)
+    iZ = mecha_arena_cells(pArena) - 1;
   fFracX = mecha_clampf(fGridX - (float)iX, 0.0f, 1.0f);
   fFracZ = mecha_clampf(fGridZ - (float)iZ, 0.0f, 1.0f);
 
@@ -472,7 +578,8 @@ static float mecha_arena_terrain(const tMechaArena *pArena, float fX,
   fHigh = pArena->afNode[iZ + 1][iX]
           + (pArena->afNode[iZ + 1][iX + 1] - pArena->afNode[iZ + 1][iX])
             * fFracX;
-  return fLow + (fHigh - fLow) * fFracZ;
+  return fLow + (fHigh - fLow) * fFracZ
+         + mecha_arena_mesa(pArena, fX, fZ);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -500,8 +607,8 @@ uint32_t mecha_arena_surface(const tMechaArena *pArena, float fX, float fZ)
     return 0u;
   iX = (int)((fX + pArena->fHalfExtent) / fCell);
   iZ = (int)((fZ + pArena->fHalfExtent) / fCell);
-  if (iX < 0 || iX >= MECHA_TERRAIN_CELLS || iZ < 0
-      || iZ >= MECHA_TERRAIN_CELLS)
+  if (iX < 0 || iX >= mecha_arena_cells(pArena) || iZ < 0
+      || iZ >= mecha_arena_cells(pArena))
     return 0u;
   return pArena->auiSurface[iZ][iX];
 }

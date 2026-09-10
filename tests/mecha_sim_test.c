@@ -2608,8 +2608,15 @@ static int roof_excursions(uint32_t uiSeed, int *piStroll, int *piPushed)
                  */
                 if (pMech->fStagger > 0.0f)
                     (*piPushed)++;
-                else
+                else {
                     (*piStroll)++;
+                    printf("      stroll: move=%d coast=%d y=%.1f sp=%.1f "
+                           "x=%.0f z=%.0f\n", pMech->byMove,
+                           pMech->iCoastTicks, pMech->fY / MECHA_METRE,
+                           mecha_length2(pMech->fVelX, pMech->fVelZ)
+                               / MECHA_METRE,
+                           pMech->fX / MECHA_METRE, pMech->fZ / MECHA_METRE);
+                }
             }
             abWasLethal[iMech] = bLethal;
         }
@@ -2706,18 +2713,104 @@ static int test_the_meadow_is_an_octagon_with_hills(void)
     /* And nothing built out of a building. */
     for (i = 0; i < arena.iObstacleCount; i++)
         CHECK(arena.aObstacles[i].byKind != MECHA_PROP_BLOCK);
+
+    /* --- and it is a clearing, not a field ------------------------------
+     *
+     * Room to fight in: a good deal more than the walled arenas have, which
+     * is what the hills and the distances are for. Nothing to see at the
+     * edge of it: the boundary is still there and still stops a machine,
+     * but there is no wall drawn on it. And past that, more forest -- ground
+     * running well beyond anywhere anyone can stand, with trees on it.
+     */
+    {
+        tMechaArena yard;
+
+        mecha_arena_init(&yard, 0);
+        printf("   meadow: %.0f m across against the yard's %.0f, no wall,"
+               " ground out to %.0f m, %d billboards\n",
+               arena.fHalfExtent * 2.0f / MECHA_METRE,
+               yard.fHalfExtent * 2.0f / MECHA_METRE,
+               arena.fOuterReach / MECHA_METRE, arena.iBillboards);
+        CHECK(arena.fHalfExtent > yard.fHalfExtent * 2.0f);
+        CHECK(arena.fWallHeight == 0.0f);
+        CHECK(arena.fOuterReach > arena.fHalfExtent * 1.5f);
+        CHECK(arena.iBillboards > 100);
+    }
+
+    /* The ground it grows the hills on has to be fine enough to hold their
+     * shape. Doubling the arena without doubling this rounded them off into
+     * bumps, and a bump is not a ramp. */
+    CHECK(arena.iTerrainCells > MECHA_TERRAIN_CELLS_DEFAULT);
+    CHECK(arena.iTerrainCells <= MECHA_TERRAIN_CELLS);
     return 0;
 }
 
 //-------------------------------------------------------------------------------------------------
 
-static int test_the_roof_has_no_walls_and_a_hole(void)
+static int test_the_forest_stands_outside_the_fight(void)
+{
+    static tMechaQuad aStorage[MECHA_QUAD_CAPACITY];
+    tMechaQuadList list;
+    tMechaArena arena;
+    int iArena = arena_by_name("COLDWATER MEADOW");
+    float fFurthest = 0.0f;
+    int iInside = 0;
+    int i;
+
+    CHECK(iArena >= 0);
+    mecha_arena_init(&arena, iArena);
+
+    /* Nothing at all without the game's own sprite banks: a billboarded
+     * tree is its sprite and nothing else, and a flat green square standing
+     * in a field is worse than no tree. */
+    mecha_mesh_set_sprites(false);
+    mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
+    mecha_mesh_scenery(&list, &arena, 0x1234u, 0);
+    CHECK(list.iCount == 0);
+
+    mecha_mesh_set_sprites(true);
+    mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
+    mecha_mesh_scenery(&list, &arena, 0x1234u, 0);
+    CHECK(list.iCount > 80);
+
+    for (i = 0; i < list.iCount; i++) {
+        float fX = 0.0f;
+        float fZ = 0.0f;
+        float fAway;
+        int v;
+
+        for (v = 0; v < 4; v++) {
+            fX += aStorage[i].afVert[v][0] * 0.25f;
+            fZ += aStorage[i].afVert[v][2] * 0.25f;
+        }
+        fAway = mecha_length2(fX, fZ);
+        if (fAway > fFurthest)
+            fFurthest = fAway;
+        /*
+         * Every one of them outside the boundary. They do not collide and
+         * they do not stop a shot, so one standing where the fight is would
+         * be a tree machines walk through.
+         */
+        if (mecha_arena_contains(&arena, fX, fZ))
+            iInside++;
+    }
+
+    printf("   forest: %d trees, none of them inside, furthest %.0f m out\n",
+           list.iCount, fFurthest / MECHA_METRE);
+    CHECK(iInside == 0);
+    CHECK(fFurthest > arena.fHalfExtent * 1.4f);
+    mecha_mesh_set_sprites(false);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_the_roof_has_no_walls_and_a_tabletop(void)
 {
     tMechaWorld world;
     tMechaInput aInputs[2];
     tMechaArena arena;
     int iArena = arena_by_name("TOWER SEVEN ROOF");
-    float fArmour;
     int iCorners = 0;
     int i;
 
@@ -2735,11 +2828,65 @@ static int test_the_roof_has_no_walls_and_a_hole(void)
     }
     CHECK(iCorners == 4);
 
-    /* The hole in the middle is a surface, and it is both flagged as a pit
-     * and flagged not to be drawn -- which is how the race game makes one. */
-    CHECK((mecha_arena_surface(&arena, 0.0f, 0.0f)
-           & (MECHA_SURF_PIT | MECHA_SURF_SKIP_RENDER))
-          == (MECHA_SURF_PIT | MECHA_SURF_SKIP_RENDER));
+    /* --- the tabletop is a hexagon, and it is a ramp ---------------------
+     *
+     * A hexagon and not a circle: measured across a face it is exactly its
+     * apothem, and measured towards a corner it reaches further by the two
+     * over root three that a hexagon does. A circle would come out the same
+     * in both, and a square would come out further at forty-five degrees
+     * than at thirty.
+     */
+    {
+        float fTop = arena.fMesaTop;
+        float fCorner = fTop * 2.0f / 1.7320508f;
+        int iAngle;
+        float fFlat = 0.0f;
+        float fSlope = 0.0f;
+
+        CHECK(arena.fMesaHeight > 0.0f);
+        CHECK(mecha_arena_mesa_height(&arena, 0.0f, 0.0f)
+              == arena.fMesaHeight);
+
+        /* Every direction: the flat top reaches the apothem across a face
+         * and the corner distance towards a corner, and nothing outside the
+         * base is raised at all. */
+        for (iAngle = 0; iAngle < MECHA_ANGLE_FULL; iAngle += 128) {
+            float fS = mecha_sin(iAngle);
+            float fC = mecha_cos(iAngle);
+            float fOnTop = mecha_arena_mesa_height(&arena, fS * fTop * 0.98f,
+                                                   fC * fTop * 0.98f);
+            /*
+             * Past the corners, not past the faces: a hexagon reaches
+             * further towards a corner than across a face by exactly two
+             * over root three, so a circle drawn at the base apothem is
+             * still inside it in six directions.
+             */
+            float fOutside =
+                mecha_arena_mesa_height(&arena, fS * arena.fMesaBase * 1.20f,
+                                        fC * arena.fMesaBase * 1.20f);
+
+            CHECK(fOnTop == arena.fMesaHeight);
+            CHECK(fOutside == 0.0f);
+        }
+        /* Across a face against towards a corner. */
+        fFlat = mecha_arena_mesa_height(&arena, fTop * 1.05f, 0.0f);
+        fSlope = mecha_arena_mesa_height(&arena, 0.0f, fCorner * 0.98f);
+        printf("   tabletop: %.1f m up, still full height %.0f m towards a"
+               " corner and already sloping %.0f m across a face\n",
+               arena.fMesaHeight / MECHA_METRE, fCorner / MECHA_METRE,
+               fTop * 1.05f / MECHA_METRE);
+        CHECK(fSlope == arena.fMesaHeight);
+        CHECK(fFlat > 0.0f);
+        CHECK(fFlat < arena.fMesaHeight);
+
+        /* And it is ground: standing on the middle of it is standing nine
+         * metres up, not falling through it. */
+        CHECK(mecha_arena_ground_height(&arena, 0.0f, 0.0f, MECHA_M(20.0f))
+              == arena.fMesaHeight);
+    }
+
+    /* Nothing is a pit any more, and nothing is hidden. */
+    CHECK(mecha_arena_surface(&arena, 0.0f, 0.0f) == 0u);
     CHECK(mecha_arena_surface(&arena, arena.fHalfExtent * 0.8f, 0.0f) == 0u);
 
     /* Nothing stops you walking off, and off the edge there is no floor. */
@@ -2754,22 +2901,16 @@ static int test_the_roof_has_no_walls_and_a_hole(void)
               < arena.fKillY);
     }
 
-    /* --- and walking into the hole costs everything --------------------- */
+    /* --- and it is the top of a tower ------------------------------------
+     *
+     * The edge is drawn a long way down. Six metres of lip reads as a table
+     * standing in the sky; this is what makes it a building.
+     */
+    CHECK(arena.fSkirt > arena.fHalfExtent);
+
+    /* --- going over the side still costs everything --------------------- */
     start_duel(&world, iArena, 0, 0, 0x9017u, 1);
     memset(aInputs, 0, sizeof(aInputs));
-    fArmour = world.aMechs[0].fArmour;
-    CHECK(fArmour > 0.0f);
-    world.aMechs[0].fX = 0.0f;
-    world.aMechs[0].fZ = 0.0f;
-    world.aMechs[0].fY = 0.0f;
-    world.aMechs[0].iInvulnTicks = 0;
-    mecha_sim_tick(&world, aInputs, 2);
-    printf("   the pit took %.0f of %.0f armour\n",
-           fArmour - world.aMechs[0].fArmour, fArmour);
-    CHECK(world.aMechs[0].fArmour <= 0.0f);
-
-    /* --- as does going over the side ------------------------------------ */
-    start_duel(&world, iArena, 0, 0, 0x9017u, 1);
     world.aMechs[1].fX = world.arena.fHalfExtent * 2.0f;   /* off the edge */
     world.aMechs[1].fY = world.arena.fKillY - MECHA_M(1.0f);
     world.aMechs[1].iInvulnTicks = 0;
@@ -2777,7 +2918,7 @@ static int test_the_roof_has_no_walls_and_a_hole(void)
     CHECK(world.aMechs[1].fArmour <= 0.0f);
 
     /* And underneath the roof is not standing on it. */
-    CHECK(mecha_arena_ground_height(&arena, 0.0f, MECHA_M(40.0f),
+    CHECK(mecha_arena_ground_height(&arena, 0.0f, MECHA_M(60.0f),
                                     -MECHA_M(30.0f)) < arena.fKillY);
     return 0;
 }
@@ -2879,12 +3020,6 @@ static int test_a_boost_up_a_slope_leaves_the_ground(void)
                 fBest = world.aMechs[0].fY - fGround;
             if (world.aMechs[0].fY - fGround > MECHA_M(0.5f))
                 aiAir[iPass]++;
-            if (iPass == 1 && i < 40)
-                printf("      dbg %d y=%.1f g=%.1f vy=%.1f move=%d\n", i,
-                       world.aMechs[0].fY / MECHA_METRE,
-                       fGround / MECHA_METRE,
-                       world.aMechs[0].fVelY / MECHA_METRE,
-                       (int)world.aMechs[0].byMove);
         }
         if (iPass == 0)
             fWalkedAir = fBest;
@@ -2896,17 +3031,17 @@ static int test_a_boost_up_a_slope_leaves_the_ground(void)
            " clears %.1f m over %d\n", fWalkedAir / MECHA_METRE, aiAir[0],
            fBoostedAir / MECHA_METRE, aiAir[1]);
     /*
-     * What says a machine was launched is time spent off the ground, not
-     * height: the ground is rising underneath it for the whole climb and
-     * falling away underneath it afterwards, so the gap between the two
-     * stays small either way. Walking over the top of a cone hops the apex
-     * for a few ticks -- the ground really does drop out from under you
-     * there -- and boosting up the same slope is airborne for the better
-     * part of a second and a half.
+     * Height cleared, not time spent clear of the ground. Both machines
+     * come off the top -- the ground falls away behind a crest and a walker
+     * hangs over it for a moment, which is a hill and not a launch -- so
+     * what separates them is how far above it they get: a couple of metres
+     * against most of the hill's own height again. That is the difference
+     * between cresting a rise and going off a ramp.
      */
-    CHECK(aiAir[0] < 15);
-    CHECK(aiAir[1] > 45);
-    CHECK(aiAir[1] > aiAir[0] * 4);
+    CHECK(fWalkedAir < MECHA_M(5.0f));
+    CHECK(fBoostedAir > MECHA_M(25.0f));
+    CHECK(fBoostedAir > fWalkedAir * 6.0f);
+    CHECK(aiAir[1] > aiAir[0]);
     return 0;
 }
 
@@ -4142,8 +4277,10 @@ int main(void)
           test_the_computer_pilot_stays_on_the_roof },
         { "the meadow is an octagon with hills",
           test_the_meadow_is_an_octagon_with_hills },
-        { "the roof has no walls and a hole",
-          test_the_roof_has_no_walls_and_a_hole },
+        { "the forest stands outside the fight",
+          test_the_forest_stands_outside_the_fight },
+        { "the roof has no walls and a tabletop",
+          test_the_roof_has_no_walls_and_a_tabletop },
         { "a boost up a slope leaves the ground",
           test_a_boost_up_a_slope_leaves_the_ground },
         { "nothing is built coplanar", test_nothing_is_built_coplanar },

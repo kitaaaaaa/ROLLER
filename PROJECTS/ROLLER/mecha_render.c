@@ -723,6 +723,7 @@ static void mecha_render_scene(GameRenderer *pRenderer,
   /* The bank is loaded on demand by the first quad that asks for a frame,
    * so this is last frame's answer on the frame it first comes up. */
   mecha_mesh_set_sprites(mecha_render_sprites_active());
+  mecha_mesh_scenery(&list, &pWorld->arena, pWorld->uiSeed, pCamera->iYaw);
   mecha_mesh_clouds(&list, pWorld);
   mecha_mesh_projectiles(&list, pWorld, pCamera->iYaw);
   mecha_mesh_effects(&list, pWorld, pCamera->iYaw);

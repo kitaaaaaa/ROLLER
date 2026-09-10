@@ -145,18 +145,50 @@ Both are read every frame, so either works at any time.
   default and settable on the briefing, decided on remaining armour if the
   clock runs out -- or on a deathmatch, not decided until somebody is down.
 - **Five arenas, and two of them are terrain.** Three are walled boxes with
-  cover in them. COLDWATER MEADOW is an octagon of open country: four
-  truncated cones of hill, a scattering of trees and rocks, and no
-  buildings. TOWER SEVEN ROOF is a square with no walls at all -- walk off
-  it and you are falling -- a hole through the middle and a block in each
-  corner to fight around.
+  cover in them. COLDWATER MEADOW is an octagon of open country half a
+  kilometre across -- seven truncated cones of hill, trees and rocks to
+  fight around, and no buildings and no walls. TOWER SEVEN ROOF is a square
+  with no walls either -- walk off it and you are falling -- with a raised
+  hexagonal tabletop in the middle of it and a block in each corner.
+- **The tabletop is answered, not baked.** The hills go into the terrain
+  grid because they are meant to be lumpy: a hill built out of grid corners
+  is a dozen facets, which is what a hill should look like. A made thing
+  with six straight edges is not, so the mesa is a function of position that
+  the height query adds on top -- and the ground mesh picks it up for free,
+  because the mesh samples that same query at every corner it draws. It
+  reaches its apothem across a face and two-over-root-three of it towards a
+  corner, which is what makes it a hexagon rather than a circle, and its
+  sides are a walkable ramp rather than a wall.
+- **The meadow has no wall, and the forest does the work.** The boundary is
+  still there and still stops a machine; what is missing is anything drawn
+  on it. Past it the ground runs on to more than twice the arena again, as
+  rings of the boundary's own shape rather than a grid with the middle
+  knocked out -- a grid coarse enough to be cheap drops a wedge of ground
+  for every tile that overlaps the arena, and the horizon comes out full of
+  holes. Standing on that ground are a few hundred of the game's own tree
+  sprites, billboarded, non-collidable and crowded in against the boundary
+  by a squared draw so the edge of the fight reads as the edge of a
+  clearing. None of them are inside: a tree with no collision standing where
+  the fight is would be a tree machines walk through.
+- **The ground is drawn and shaped at different resolutions, and both are
+  per-arena.** The meadow is twice the size of the others, so it takes both
+  a finer terrain grid -- or its hills round off into bumps, and a bump is
+  not a ramp -- and more floor tiles, or every one of them comes out
+  stretched over forty metres of grass.
 - **The ground is the race game's ground.** Every cell of an arena carries
-  the engine's own surface flags. A pit is not a hole in the floor: it is a
-  surface like any other, flagged `SURFACE_FLAG_PIT` and
-  `SURFACE_FLAG_SKIP_RENDER` together, which is exactly how the race game
-  builds one -- it still answers height queries, it simply is not drawn and
-  is fatal to stand on. Falling in one, or off the world past an arena's
-  kill plane, costs the machine everything it has left.
+  the engine's own surface flags, and the two that matter are the pit
+  (`SURFACE_FLAG_PIT` with `SURFACE_FLAG_SKIP_RENDER`, exactly how the race
+  game builds one: a surface that still answers height queries, is simply
+  not drawn, and is fatal to stand on) and the magnet, below. Nothing in the
+  roster uses a pit at the moment -- the roof had one and it did not work,
+  and a tabletop you take is a better fight than a hole you avoid -- but the
+  machinery is there and tested. Falling off the world past an arena's kill
+  plane still costs the machine everything it has left.
+- **A roof needs a tower under it.** An open arena draws its own edge
+  downwards, and how far is the difference between the top of a building and
+  a table standing in the sky. The roof's runs a hundred and fifty metres,
+  panelled coarsely because nothing that far below the player is being
+  looked at closely.
 - **A boost up a slope launches you.** Ground flagged
   `SURFACE_FLAG_NON_MAGNETIC` does not hold a machine down, which is the
   rule `control.c` applies to the cars: the rate the ground rose underneath

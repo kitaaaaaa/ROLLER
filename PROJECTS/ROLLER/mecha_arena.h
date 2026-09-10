@@ -54,6 +54,10 @@ uint32_t mecha_arena_surface(const tMechaArena *pArena, float fX, float fZ);
 float mecha_arena_terrain_height(const tMechaArena *pArena, float fX,
                                  float fZ);
 
+/* Just the tabletop's contribution, for anything that needs to know whether
+ * a point is on it rather than how high the ground is there. */
+float mecha_arena_mesa_height(const tMechaArena *pArena, float fX, float fZ);
+
 /*
  * Where there is no floor at all -- off the edge of an open arena. Far
  * enough down that nothing lands on it and gravity has time to do its work

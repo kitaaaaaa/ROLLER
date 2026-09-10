@@ -15,6 +15,11 @@
 #define MECHA_PAL_CLOUD 143
 /* What a puff of dust falls back to if it is ever drawn untextured. */
 #define MECHA_PAL_SMOKE 137
+/* A billboarded tree is nothing but its sprite, so this is only ever seen
+ * where the sprite banks are missing -- and there the trees are not drawn at
+ * all. It is the canopy green the built trees use, for the one case where a
+ * bank loads but a tile in it does not. */
+#define MECHA_PAL_CANOPY 252
 
 /*
  * Translucent quads carry a SHADE LEVEL in the low byte, not a colour.
@@ -35,6 +40,13 @@
  * roughly the size of a road panel, which is the scale the artwork was drawn
  * at. It costs a thousand quads on a four-thousand budget. */
 #define MECHA_FLOOR_TILES 32
+/* A bigger arena needs more of them or every tile comes out stretched, but
+ * the ground is most of the quad budget, so there is a ceiling. */
+#define MECHA_FLOOR_TILES_MAX 48
+/* How the ground outside the arena is drawn: rings of the boundary's own
+ * shape, each one cut into this many quads a side. It is scenery. */
+#define MECHA_OUTER_RINGS 4
+#define MECHA_OUTER_SPANS 3
 
 /* Number of ticks a knocked-down mech takes to actually hit the floor. */
 #define MECHA_FALL_TICKS 8
@@ -444,10 +456,49 @@ static void mecha_add_tiled_box(tMechaQuadList *pList, float fX, float fZ,
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * A corner of the arena's own boundary, wrapping. Eight of them for an
+ * octagon and four otherwise -- the same points the walls are built on and
+ * the same ones the boundary test uses, which is what lets the ground
+ * outside start exactly where the ground inside stops.
+ */
+static void mecha_boundary_corner(const tMechaArena *pArena, int iCorner,
+                                  float *pafOut)
+{
+  float fExtent = pArena->fHalfExtent;
+
+  if (pArena->byShape == MECHA_ARENA_OCTAGON) {
+    float fCut = 2.0f * fExtent / (2.0f + MECHA_OCTAGON_ROOT2);
+    float fIn = fExtent - fCut;
+    const float aafCorner[8][2] = {
+      {  fExtent, -fIn      }, {  fExtent,  fIn      },
+      {  fIn,      fExtent  }, { -fIn,      fExtent  },
+      { -fExtent,  fIn      }, { -fExtent, -fIn      },
+      { -fIn,     -fExtent  }, {  fIn,     -fExtent  },
+    };
+
+    pafOut[0] = aafCorner[iCorner & 7][0];
+    pafOut[1] = aafCorner[iCorner & 7][1];
+    return;
+  }
+  {
+    const float aafCorner[4][2] = {
+      {  fExtent, -fExtent }, {  fExtent,  fExtent },
+      { -fExtent,  fExtent }, { -fExtent, -fExtent },
+    };
+
+    pafOut[0] = aafCorner[iCorner & 3][0];
+    pafOut[1] = aafCorner[iCorner & 3][1];
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+
 void mecha_mesh_arena(tMechaQuadList *pList, const tMechaArena *pArena)
 {
   float fExtent;
   float fTile;
+  int iTiles;
   int iRow;
   int i;
 
@@ -455,12 +506,15 @@ void mecha_mesh_arena(tMechaQuadList *pList, const tMechaArena *pArena)
     return;
 
   fExtent = pArena->fHalfExtent;
-  fTile = fExtent * 2.0f / (float)MECHA_FLOOR_TILES;
+  iTiles = pArena->iFloorTiles > 0 ? pArena->iFloorTiles : MECHA_FLOOR_TILES;
+  if (iTiles > MECHA_FLOOR_TILES_MAX)
+    iTiles = MECHA_FLOOR_TILES_MAX;
+  fTile = fExtent * 2.0f / (float)iTiles;
 
-  for (iRow = 0; iRow < MECHA_FLOOR_TILES; iRow++) {
+  for (iRow = 0; iRow < iTiles; iRow++) {
     int iCol;
 
-    for (iCol = 0; iCol < MECHA_FLOOR_TILES; iCol++) {
+    for (iCol = 0; iCol < iTiles; iCol++) {
       float fX0 = -fExtent + fTile * (float)iCol;
       float fZ0 = -fExtent + fTile * (float)iRow;
 
@@ -503,21 +557,15 @@ void mecha_mesh_arena(tMechaQuadList *pList, const tMechaArena *pArena)
      * normal comes out facing the middle. The corner points are the square
      * with its corners cut, which is what the boundary test is too.
      */
-    float fCut = 2.0f * fExtent / (2.0f + MECHA_OCTAGON_ROOT2);
-    float fIn = fExtent - fCut;
-    const float aafCorner[8][2] = {
-      {  fExtent, -fIn      }, {  fExtent,  fIn      },
-      {  fIn,      fExtent  }, { -fIn,      fExtent  },
-      { -fExtent,  fIn      }, { -fExtent, -fIn      },
-      { -fIn,     -fExtent  }, {  fIn,     -fExtent  },
-    };
     int iSide;
 
     for (iSide = 0; iSide < 8; iSide++) {
-      const float *pfFrom = aafCorner[iSide];
-      const float *pfTo = aafCorner[(iSide + 1) & 7];
+      float afFrom[2];
+      float afTo[2];
 
-      mecha_add_wall(pList, pfFrom[0], pfFrom[1], pfTo[0], pfTo[1],
+      mecha_boundary_corner(pArena, iSide, afFrom);
+      mecha_boundary_corner(pArena, iSide + 1, afTo);
+      mecha_add_wall(pList, afFrom[0], afFrom[1], afTo[0], afTo[1],
                      0.0f, pArena->fWallHeight, fTile, MECHA_TEX_WORLD,
                      pArena->byWallPalette, pArena->byWallTile);
     }
@@ -540,20 +588,95 @@ void mecha_mesh_arena(tMechaQuadList *pList, const tMechaArena *pArena)
    * outside as you fall past it. Without it the roof is a paper cutout.
    */
   if (pArena->byShape == MECHA_ARENA_OPEN) {
-    float fLip = MECHA_M(6.0f);
+    float fLip = pArena->fSkirt > 0.0f ? pArena->fSkirt : MECHA_M(6.0f);
+    /*
+     * Its own panel size, and a coarse one. The skirt is the side of a
+     * tower rather than a wall of the arena: it runs far enough down that
+     * panelling it at the floor's scale would cost more quads than
+     * everything standing on the roof put together, and nothing that far
+     * below the player is being looked at closely.
+     */
+    float fPanel = MECHA_M(20.0f);
 
     mecha_add_wall(pList,  fExtent,  fExtent,  fExtent, -fExtent,
-                   -fLip, 0.0f, fTile, MECHA_TEX_WORLD,
+                   -fLip, 0.0f, fPanel, MECHA_TEX_WORLD,
                    pArena->byWallPalette, pArena->byWallTile);
     mecha_add_wall(pList, -fExtent, -fExtent, -fExtent,  fExtent,
-                   -fLip, 0.0f, fTile, MECHA_TEX_WORLD,
+                   -fLip, 0.0f, fPanel, MECHA_TEX_WORLD,
                    pArena->byWallPalette, pArena->byWallTile);
     mecha_add_wall(pList, -fExtent,  fExtent,  fExtent,  fExtent,
-                   -fLip, 0.0f, fTile, MECHA_TEX_WORLD,
+                   -fLip, 0.0f, fPanel, MECHA_TEX_WORLD,
                    pArena->byWallPalette, pArena->byWallTile);
     mecha_add_wall(pList,  fExtent, -fExtent, -fExtent, -fExtent,
-                   -fLip, 0.0f, fTile, MECHA_TEX_WORLD,
+                   -fLip, 0.0f, fPanel, MECHA_TEX_WORLD,
                    pArena->byWallPalette, pArena->byWallTile);
+  }
+
+  /*
+   * Ground past the boundary.
+   *
+   * Nobody can walk on it -- the boundary still stops a machine at the
+   * arena's own edge -- and it is drawn coarsely because it is only ever
+   * seen at a distance. What it buys is that the arena stops being an
+   * island: the forest runs on past where the fight does.
+   *
+   * It is built as rings of the boundary's own shape rather than as a grid
+   * with the middle knocked out, and that is not tidiness. A grid coarse
+   * enough to be cheap has tiles far wider than the boundary is straight,
+   * so every tile it drops for overlapping the arena takes a wedge of
+   * ground with it and the horizon comes out full of holes; every tile it
+   * keeps lies coplanar over the arena's own floor. Rings share the edge
+   * exactly, so there is neither.
+   */
+  if (pArena->fOuterReach > fExtent) {
+    float fGrow = pArena->fOuterReach / fExtent;
+    int iRing;
+
+    for (iRing = 0; iRing < MECHA_OUTER_RINGS; iRing++) {
+      /* Each ring a fixed multiple of the last, so they get wider as they
+       * get further away and the near ones stay the size of the arena. */
+      float fInner = powf(fGrow, (float)iRing / (float)MECHA_OUTER_RINGS);
+      float fOuter = powf(fGrow, (float)(iRing + 1)
+                                 / (float)MECHA_OUTER_RINGS);
+      int iEdge;
+      int iEdges = pArena->byShape == MECHA_ARENA_OCTAGON ? 8 : 4;
+
+      for (iEdge = 0; iEdge < iEdges; iEdge++) {
+        float afFrom[2];
+        float afTo[2];
+        int iSpan;
+
+        mecha_boundary_corner(pArena, iEdge, afFrom);
+        mecha_boundary_corner(pArena, iEdge + 1, afTo);
+        for (iSpan = 0; iSpan < MECHA_OUTER_SPANS; iSpan++) {
+          float fA = (float)iSpan / (float)MECHA_OUTER_SPANS;
+          float fB = (float)(iSpan + 1) / (float)MECHA_OUTER_SPANS;
+          float fAx = afFrom[0] + (afTo[0] - afFrom[0]) * fA;
+          float fAz = afFrom[1] + (afTo[1] - afFrom[1]) * fA;
+          float fBx = afFrom[0] + (afTo[0] - afFrom[0]) * fB;
+          float fBz = afFrom[1] + (afTo[1] - afFrom[1]) * fB;
+          float afVert[4][3];
+          int iCorner;
+
+          afVert[0][0] = fAx * fInner; afVert[0][2] = fAz * fInner;
+          afVert[1][0] = fBx * fInner; afVert[1][2] = fBz * fInner;
+          afVert[2][0] = fBx * fOuter; afVert[2][2] = fBz * fOuter;
+          afVert[3][0] = fAx * fOuter; afVert[3][2] = fAz * fOuter;
+          for (iCorner = 0; iCorner < 4; iCorner++) {
+            afVert[iCorner][1] =
+                mecha_arena_terrain_height(pArena, afVert[iCorner][0],
+                                           afVert[iCorner][2]);
+          }
+          mecha_quads_add(pList, afVert,
+                          ((iRing + iSpan + iEdge) & 1)
+                            ? pArena->byFloorPalette : pArena->byGridPalette,
+                          MECHA_QUAD_TWO_SIDED);
+          mecha_tag_texture(pList, MECHA_TEX_WORLD,
+                            ((iRing + iSpan + iEdge) & 1)
+                              ? pArena->byFloorTile : pArena->byGridTile);
+        }
+      }
+    }
   }
 
   for (i = 0; i < pArena->iObstacleCount; i++) {
@@ -1456,6 +1579,37 @@ static void mecha_add_billboard(tMechaQuadList *pList, int iCameraYaw,
                   MECHA_QUAD_TWO_SIDED | MECHA_QUAD_GLOW);
 }
 
+/*
+ * A billboard standing on the ground rather than centred on a point: its
+ * bottom edge is at fBase and it is as tall as it is wide, which is what a
+ * tree is. No glow -- a self-lit tree is a lamp -- so it sorts on its own
+ * middle like any other quad, which for something standing upright on the
+ * floor is where it actually is.
+ */
+static void mecha_add_upright_billboard(tMechaQuadList *pList, int iCameraYaw,
+                                        float fX, float fBase, float fZ,
+                                        float fHeight, uint8_t byPalette)
+{
+  float fRightX = mecha_cos(iCameraYaw);
+  float fRightZ = -mecha_sin(iCameraYaw);
+  float fHalf = fHeight * 0.5f;
+  float afVert[4][3];
+
+  afVert[0][0] = fX - fRightX * fHalf;
+  afVert[0][1] = fBase;
+  afVert[0][2] = fZ - fRightZ * fHalf;
+  afVert[1][0] = fX + fRightX * fHalf;
+  afVert[1][1] = fBase;
+  afVert[1][2] = fZ + fRightZ * fHalf;
+  afVert[2][0] = fX + fRightX * fHalf;
+  afVert[2][1] = fBase + fHeight;
+  afVert[2][2] = fZ + fRightZ * fHalf;
+  afVert[3][0] = fX - fRightX * fHalf;
+  afVert[3][1] = fBase + fHeight;
+  afVert[3][2] = fZ - fRightZ * fHalf;
+  mecha_quads_add(pList, afVert, byPalette, MECHA_QUAD_TWO_SIDED);
+}
+
 //-------------------------------------------------------------------------------------------------
 
 /* A streak along the segment the shot covered this tick, widened towards the
@@ -1686,6 +1840,95 @@ static uint32_t mecha_cloud_hash(uint32_t uiValue)
   uiValue ^= uiValue >> 13;
   return uiValue;
 }
+
+/*
+ * The forest.
+ *
+ * The trees a machine can hide behind are boxes built out of the same
+ * panels the cover is, and there are a dozen of them. These are the other
+ * hundred and fifty: the game's own tree sprites, stood upright and turned
+ * to face the camera, with nothing behind them at all. They do not collide,
+ * they do not block a shot and they are not on the ground mesh -- they are
+ * there so an arena with an invisible boundary reads as a clearing in a
+ * wood rather than as a field that stops.
+ *
+ * Placement is a hash of the tree's index and the match seed, exactly as
+ * the sky is: nothing is stored between frames, and the same match always
+ * grows the same forest. They are spread over the whole outer reach and
+ * simply skipped where they would stand somewhere a machine can walk, so
+ * the density falls off naturally at the boundary rather than stopping at a
+ * line.
+ */
+#define MECHA_TREE_TILE_FIRST 27
+#define MECHA_TREE_TILE_COUNT 3
+
+void mecha_mesh_scenery(tMechaQuadList *pList, const tMechaArena *pArena,
+                        uint32_t uiSeed, int iCameraYaw)
+{
+  float fGrow;
+  int iEdges;
+  int i;
+
+  if (!pList || !pArena || !s_bSprites || pArena->iBillboards <= 0
+      || pArena->fOuterReach <= pArena->fHalfExtent)
+    return;
+
+  fGrow = pArena->fOuterReach / pArena->fHalfExtent;
+  iEdges = pArena->byShape == MECHA_ARENA_OCTAGON ? 8 : 4;
+
+  for (i = 0; i < pArena->iBillboards; i++) {
+    uint32_t uiHash = mecha_cloud_hash((uint32_t)i * 2654435761u + uiSeed);
+    uint32_t uiJitter = mecha_cloud_hash(uiHash ^ 0x9E3779B9u);
+    float afFrom[2];
+    float afTo[2];
+    float fAlong = (float)(uiHash & 1023u) / 1024.0f;
+    float fOut = (float)((uiHash >> 10) & 1023u) / 1024.0f;
+    float fScale;
+    float fSpread;
+    float fX;
+    float fZ;
+    float fHigh;
+
+    /*
+     * Grown outwards off the boundary itself rather than scattered over a
+     * square. A square scatter puts as many trees five hundred metres away
+     * as fifty, which from inside the arena is a thin haze on the horizon
+     * and nothing at the edge -- and the edge is the whole point, because
+     * that is where the invisible wall is and where the player needs to
+     * see a wood rather than an ending. Squaring the draw crowds them in
+     * against the boundary and thins them out behind.
+     */
+    mecha_boundary_corner(pArena, (int)((uiHash >> 20) % (uint32_t)iEdges),
+                          afFrom);
+    mecha_boundary_corner(pArena,
+                          (int)((uiHash >> 20) % (uint32_t)iEdges) + 1, afTo);
+    fScale = 1.0f + (fGrow - 1.0f) * fOut * fOut;
+    fX = (afFrom[0] + (afTo[0] - afFrom[0]) * fAlong) * fScale;
+    fZ = (afFrom[1] + (afTo[1] - afFrom[1]) * fAlong) * fScale;
+
+    /* Pushed about by roughly the spacing they would otherwise sit at, so
+     * they are a wood and not a set of concentric fences. */
+    fSpread = pArena->fHalfExtent * 0.22f * fScale;
+    fX += ((float)(uiJitter & 2047u) / 1024.0f - 1.0f) * fSpread;
+    fZ += ((float)((uiJitter >> 11) & 2047u) / 1024.0f - 1.0f) * fSpread;
+
+    /* Not where the fight is. A sprite with no collision standing in the
+     * arena is a tree you walk through, which is worse than no tree. */
+    if (mecha_arena_contains(pArena, fX, fZ))
+      continue;
+
+    fHigh = MECHA_M(22.0f)
+            + MECHA_M(18.0f) * (float)((uiJitter >> 24) & 255u) / 255.0f;
+    mecha_add_upright_billboard(pList, iCameraYaw, fX,
+                                mecha_arena_terrain_height(pArena, fX, fZ),
+                                fZ, fHigh, MECHA_PAL_CANOPY);
+    mecha_tag_texture(pList, MECHA_TEX_STRUCT,
+                      MECHA_TREE_TILE_FIRST
+                        + (int)((uiHash >> 28) % MECHA_TREE_TILE_COUNT));
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
 
 void mecha_mesh_clouds(tMechaQuadList *pList, const tMechaWorld *pWorld)
 {

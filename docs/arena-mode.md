@@ -140,6 +140,25 @@ Both are read every frame, so either works at any time.
   thick-limbed with an oversized gun on each arm while an interceptor is a
   narrow torso on thin legs. Measured off the mesh as width over standing
   height they span 0.46 to 1.11.
+- **The camera chases you, not the enemy.** Beyond knife range it sits behind
+  your machine and looks where your machine is looking, so the view is steady
+  while you steer. Inside `MECHA_CLOSE_QUARTERS` it swings onto the lock and
+  centres the target instead, which is where an exchange is too fast to frame
+  by hand.
+- **Firing off a boost brings you back onto the lock.** A shot fired out of a
+  dash, out of a jump, or through a cancel snaps the machine onto its target
+  for half a second. A shot fired walking or standing does not: those are the
+  states where the heading is yours, and reclaiming it on every trigger pull
+  would be the old auto-turn under another name.
+- **Shots are plasma.** Beams keep their coloured streak and gain a boiling
+  head; homing pods and lobbed charges are the sprite outright. The frames
+  cycle on a fixed cadence rather than over a lifetime, so a bolt that lives
+  for a fifth of a second and one that arcs for two shimmer at the same rate.
+  Muzzle flashes come off the same sequence, hits walk the blast frames, and
+  thruster plumes walk the flame frames. Solid rounds stay solid -- a slug is
+  not made of light -- and the streak keeps the weapon's own colour, because a
+  textured quad draws the frame's colours and nothing else: skinning the
+  streak would make every machine's fire the same blue.
 - **Blasts throw debris.** A kill spawns a short flash plus a burst of
   particles that fly out, fall under gravity, shrink, and cool down a warm
   palette ramp.
@@ -249,9 +268,8 @@ zig build test-mecha-render -Dmecha-frames=/tmp/frames
 ## Known rough edges
 
 - At point-blank range the player's own machine overlaps the target on screen.
-  The chase camera centres the lock and drops your mech into the foreground,
-  which holds up at normal fighting distance, but two mechs in melee are simply
-  in the same place. This wants tuning against real play rather than against a
+  Inside knife range the camera centres the lock and drops your mech into the
+  foreground, and two mechs in melee are simply in the same place. This wants tuning against real play rather than against a
   still frame.
 - The palette indices are tuned by eye, not derived. They are named constants at
   the top of `mecha_arena.c`, `mecha_defs.c`, `mecha_mesh.c` and

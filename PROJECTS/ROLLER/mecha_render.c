@@ -650,6 +650,9 @@ static void mecha_render_scene(GameRenderer *pRenderer,
   mecha_mesh_shadows(&list, pWorld);
   for (iMech = 0; iMech < MECHA_MAX_MECHS; iMech++)
     mecha_mesh_mech(&list, pWorld, iMech);
+  /* The bank is loaded on demand by the first quad that asks for a frame,
+   * so this is last frame's answer on the frame it first comes up. */
+  mecha_mesh_set_sprites(mecha_render_sprites_active());
   mecha_mesh_projectiles(&list, pWorld, pCamera->iYaw);
   mecha_mesh_effects(&list, pWorld, pCamera->iYaw);
   (void)iViewMech;

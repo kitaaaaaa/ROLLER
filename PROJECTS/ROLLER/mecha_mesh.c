@@ -608,6 +608,33 @@ static int mecha_sprite_frame(int iFirst, int iLast, float fAge)
   return iFirst + iStep;
 }
 
+/*
+ * The plasma frames boil on a fixed cadence rather than over a fraction of
+ * a life. A shot in flight has no age that means anything to look at -- a
+ * beam that lives a third of a second and a lobbed charge that arcs for two
+ * should shimmer at the same rate -- so this walks the sequence by ticks and
+ * wraps, where the effect sprites walk theirs once and stop.
+ */
+#define MECHA_PLASMA_TICKS_PER_FRAME 2
+
+static bool s_bSprites = false;
+
+void mecha_mesh_set_sprites(bool bAvailable)
+{
+  s_bSprites = bAvailable;
+}
+
+static int mecha_plasma_frame(int iAge)
+{
+  int iCount = MECHA_SPRITE_PLASMA_LAST - MECHA_SPRITE_PLASMA_FIRST + 1;
+  int iStep;
+
+  if (iAge < 0)
+    iAge = 0;
+  iStep = (iAge / MECHA_PLASMA_TICKS_PER_FRAME) % iCount;
+  return MECHA_SPRITE_PLASMA_FIRST + iStep;
+}
+
 static void mecha_add_billboard(tMechaQuadList *pList, int iCameraYaw,
                                 float fX, float fY, float fZ, float fSize,
                                 uint8_t byPalette)
@@ -727,15 +754,45 @@ void mecha_mesh_projectiles(tMechaQuadList *pList, const tMechaWorld *pWorld,
       break;
 
     case MECHA_PROJ_BEAM:
+      /*
+       * Streak plus head. The streak stays flat and keeps the weapon's own
+       * colour, because that colour is how a player tells whose fire is
+       * crossing the arena -- a textured quad draws the frame's colours and
+       * nothing else, so a plasma-skinned streak would make every machine's
+       * beams the same blue. The head is small enough to read as the glow
+       * at the front of the bolt rather than as the bolt itself.
+       */
+      mecha_add_tracer(pList, iCameraYaw, pShot->fPrevX, pShot->fPrevY,
+                       pShot->fPrevZ, pShot->fX, pShot->fY, pShot->fZ,
+                       pShot->fRadius, pShot->byPalette);
+      if (s_bSprites) {
+        mecha_add_billboard(pList, iCameraYaw, pShot->fX, pShot->fY,
+                            pShot->fZ, pShot->fRadius * 1.8f,
+                            pShot->byPalette);
+        mecha_tag_texture(pList, MECHA_TEX_EFFECT,
+                          mecha_plasma_frame(pShot->iAge));
+      }
+      break;
+
     case MECHA_PROJ_BULLET:
+      /* Solid rounds stay solid: a slug is not made of light. */
       mecha_add_tracer(pList, iCameraYaw, pShot->fPrevX, pShot->fPrevY,
                        pShot->fPrevZ, pShot->fX, pShot->fY, pShot->fZ,
                        pShot->fRadius, pShot->byPalette);
       break;
 
     default:
+      /*
+       * Homing pods and lobbed charges travel slowly enough to be looked
+       * at, so they are the sprite rather than carrying one. Wider than the
+       * flat square they replace: most of a keyed frame is background, so
+       * the same quad reads smaller once it is textured.
+       */
       mecha_add_billboard(pList, iCameraYaw, pShot->fX, pShot->fY, pShot->fZ,
-                          pShot->fRadius * 1.4f, pShot->byPalette);
+                          pShot->fRadius * (s_bSprites ? 2.0f : 1.4f),
+                          pShot->byPalette);
+      mecha_tag_texture(pList, MECHA_TEX_EFFECT,
+                        mecha_plasma_frame(pShot->iAge));
       break;
     }
   }
@@ -831,6 +888,39 @@ void mecha_mesh_effects(tMechaQuadList *pList, const tMechaWorld *pWorld,
                            pFx->fX + fSize, pFx->fZ + fSize,
                            pFx->fY + 0.08f * MECHA_METRE, MECHA_SHADE_DUST,
                            MECHA_QUAD_TWO_SIDED | MECHA_QUAD_SHADOW);
+      break;
+
+    case MECHA_FX_MUZZLE:
+      /* The flash at the barrel is the front of the shot, so it is drawn
+       * from the same sequence the shot is -- otherwise a bolt leaves a
+       * flat square behind it every time one is fired. */
+      fSize = pFx->fScale * (1.0f - 0.6f * fAge);
+      mecha_add_billboard(pList, iCameraYaw, pFx->fX, pFx->fY, pFx->fZ,
+                          fSize, pFx->byPalette);
+      mecha_tag_texture(pList, MECHA_TEX_EFFECT,
+                        mecha_plasma_frame(pFx->iAge));
+      break;
+
+    case MECHA_FX_IMPACT:
+      /* A hit is a small explosion and walks the blast frames like one, just
+       * over a much shorter life. */
+      fSize = pFx->fScale * (1.0f - 0.6f * fAge);
+      mecha_add_billboard(pList, iCameraYaw, pFx->fX, pFx->fY, pFx->fZ,
+                          fSize, pFx->byPalette);
+      mecha_tag_texture(pList, MECHA_TEX_EFFECT,
+                        mecha_sprite_frame(MECHA_SPRITE_BLAST_FIRST,
+                                           MECHA_SPRITE_BLAST_LAST, fAge));
+      break;
+
+    case MECHA_FX_THRUSTER:
+      /* Burning fuel, not a bolt: the fire frames, cycling, because a boost
+       * lasts longer than one pass through them. */
+      fSize = pFx->fScale * (1.0f - 0.6f * fAge);
+      mecha_add_billboard(pList, iCameraYaw, pFx->fX, pFx->fY, pFx->fZ,
+                          fSize, pFx->byPalette);
+      mecha_tag_texture(pList, MECHA_TEX_EFFECT,
+                        mecha_sprite_frame(MECHA_SPRITE_FIRE_FIRST,
+                                           MECHA_SPRITE_FIRE_LAST, fAge));
       break;
 
     default:

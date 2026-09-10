@@ -1096,6 +1096,84 @@ static int test_guard_turns_melee_aside(void)
 
 //-------------------------------------------------------------------------------------------------
 
+static int test_shots_carry_plasma_frames(void)
+{
+    static tMechaQuad aStorage[MECHA_QUAD_CAPACITY];
+    tMechaQuadList list;
+    tMechaWorld world;
+    tMechaInput aInputs[2];
+    int aiFrames[MECHA_SPRITE_PLASMA_LAST + 1];
+    int iPlasma = 0;
+    int iDistinct = 0;
+    int iSpriteQuads = 0;
+    int iFlatQuads = 0;
+    int i;
+
+    memset(aiFrames, 0, sizeof(aiFrames));
+    start_duel(&world, 0, 2, 2, 0x9105u, 1);   /* HALCYON: beams and pods */
+    memset(aInputs, 0, sizeof(aInputs));
+
+    /*
+     * Fire, then walk the flight. The frame a bolt shows has to move as it
+     * travels -- one that picked a frame at launch and kept it would pass a
+     * "some quad is textured" check while looking like a decal in flight.
+     */
+    for (i = 0; i < MECHA_TICK_HZ; i++) {
+        aInputs[0].bFireCenter = (i == 0);
+        aInputs[0].bFireRight = (i == 0);
+        mecha_sim_tick(&world, aInputs, 2);
+
+        mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
+        mecha_mesh_set_sprites(true);
+        mecha_mesh_projectiles(&list, &world, 0);
+        if (i == 2) {
+            /* Same tick, bank absent: still geometry, and none of it
+             * claiming a frame the renderer would have to reject. */
+            int iTextured = 0;
+
+            iSpriteQuads = list.iCount;
+            mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
+            mecha_mesh_set_sprites(false);
+            mecha_mesh_projectiles(&list, &world, 0);
+            iFlatQuads = list.iCount;
+            for (int iQuad = 0; iQuad < list.iCount; iQuad++)
+                if (list.paQuads[iQuad].byTexBank == MECHA_TEX_EFFECT)
+                    iTextured++;
+            CHECK(iFlatQuads > 0);
+            CHECK(iTextured < iSpriteQuads);
+            mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
+            mecha_mesh_set_sprites(true);
+            mecha_mesh_projectiles(&list, &world, 0);
+        }
+        for (int iQuad = 0; iQuad < list.iCount; iQuad++) {
+            const tMechaQuad *pQuad = &list.paQuads[iQuad];
+
+            if (pQuad->byTexBank != MECHA_TEX_EFFECT)
+                continue;
+            CHECK(pQuad->byTile >= MECHA_SPRITE_PLASMA_FIRST);
+            CHECK(pQuad->byTile <= MECHA_SPRITE_PLASMA_LAST);
+            aiFrames[pQuad->byTile]++;
+            iPlasma++;
+        }
+    }
+
+    for (i = MECHA_SPRITE_PLASMA_FIRST; i <= MECHA_SPRITE_PLASMA_LAST; i++)
+        if (aiFrames[i] > 0)
+            iDistinct++;
+
+    printf("   %d plasma quads across %d of %d frames, %d/%d quads without"
+           " the bank\n", iPlasma, iDistinct,
+           MECHA_SPRITE_PLASMA_LAST - MECHA_SPRITE_PLASMA_FIRST + 1,
+           iFlatQuads, iSpriteQuads);
+    CHECK(iPlasma > 0);
+    CHECK(iDistinct == MECHA_SPRITE_PLASMA_LAST - MECHA_SPRITE_PLASMA_FIRST + 1);
+
+    CHECK(iFlatQuads > 0);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static int test_death_throws_debris(void)
 {
     static tMechaQuad aStorage[MECHA_QUAD_CAPACITY];
@@ -1691,6 +1769,7 @@ int main(void)
           test_auto_turn_is_close_quarters_only },
         { "jump cancel", test_jump_cancel },
         { "guard turns melee aside", test_guard_turns_melee_aside },
+        { "shots carry plasma frames", test_shots_carry_plasma_frames },
         { "death throws debris", test_death_throws_debris },
         { "machines carry their weight", test_machines_carry_their_weight },
     };

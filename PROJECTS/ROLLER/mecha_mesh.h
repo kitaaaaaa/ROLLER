@@ -72,6 +72,8 @@ typedef struct
  */
 #define MECHA_SPRITE_FIRE_FIRST   4
 #define MECHA_SPRITE_FIRE_LAST    7
+#define MECHA_SPRITE_PLASMA_FIRST 8
+#define MECHA_SPRITE_PLASMA_LAST 12
 #define MECHA_SPRITE_BLAST_FIRST 13
 #define MECHA_SPRITE_BLAST_LAST  20
 #define MECHA_SPRITE_SMOKE_FIRST 21
@@ -113,6 +115,16 @@ void mecha_mesh_mech(tMechaQuadList *pList, const tMechaWorld *pWorld,
 
 /* Projectiles and effects are camera-facing, so they need the view heading
  * the renderer is about to draw with. */
+/*
+ * Told by the render layer whether the game's sprite bank came up. The mesh
+ * has no way to ask -- it is libc only, by design -- and it matters here
+ * because a keyed frame and the flat square it falls back to want different
+ * sizes, and because a glow that is only a glow once it is textured is a
+ * blob when it is not. Defaults to false, so a caller that never says
+ * still gets geometry that reads.
+ */
+void mecha_mesh_set_sprites(bool bAvailable);
+
 void mecha_mesh_projectiles(tMechaQuadList *pList, const tMechaWorld *pWorld,
                             int iCameraYaw);
 void mecha_mesh_effects(tMechaQuadList *pList, const tMechaWorld *pWorld,

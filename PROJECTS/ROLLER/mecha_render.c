@@ -8,6 +8,9 @@
 #include "func2.h"
 #include "func3.h"
 #include "graphics.h"
+#include "horizon.h"
+#include "drawtrk3.h"
+#include "transfrm.h"
 #include "roller.h"
 #include "scene_render.h"
 
@@ -1488,72 +1491,77 @@ bool mecha_render_sprites_active(void)
 /* Sky */
 
 /*
- * The sky, top band first, running down to the one that sits on the horizon.
- * A flat fill was what the arena had, and against a horizon this low it read
- * as a wall rather than as distance -- the whole depth of an outdoor arena is
- * carried by the sky, because everything else on screen is untextured flat
- * shading.
+ * The sky is the game's own: DrawHorizon paints it, the same routine the
+ * race uses. It is two flat fills split by a line through the projection --
+ * blue above, a haze colour below -- and then the cloud dome on top. The
+ * arena had a nine-band sunset gradient before this, which looked well
+ * enough on a still frame but was the mode inventing a sky the engine
+ * already had, and it could never carry clouds.
+ *
+ * What DrawHorizon reads, it reads from globals. Most of them the renderer
+ * has already written by the time this runs -- game_render_set_camera and
+ * set_projection push viewx, the vk basis, xbase, ybase, scr_size and
+ * VIEWDIST through for exactly this kind of legacy path -- so what is left
+ * is the elevation, the tilt, and the colour.
  */
-static const uint8 s_abySkyBand[] = {
-  221, 224, 227, 230, 167, 170, 171, 204, 207
-};
-
-#define MECHA_SKY_BANDS \
-  ((int)(sizeof(s_abySkyBand) / sizeof(s_abySkyBand[0])))
 
 /* Below the horizon. The floor covers most of it, but not the gap past the
  * arena wall, and sky colour showing under the ground reads as a hole. */
 #define MECHA_SKY_GROUND 118
 
-/*
- * Which row the horizon falls on.
- *
- * Taken through the same projection the rasteriser uses rather than guessed
- * at, so the gradient stays welded to the world when the camera pitches: for
- * a ray that is horizontal in world space and infinitely far off, the
- * view-space slope works out as -tan(pitch), which puts the horizon at
- * 99 + viewdist * tan(pitch) in the 320x200 reference frame.
- */
-static int mecha_horizon_row(const tMechaCamera *pCamera, int iHeight)
-{
-  float fSin = mecha_sin(pCamera->iPitch);
-  float fCos = mecha_cos(pCamera->iPitch);
-  float fRefY;
-
-  /* Straight up or straight down: the horizon is off the frame either way,
-   * and the clamps below put it there. */
-  if (fCos > -1e-3f && fCos < 1e-3f)
-    return fSin >= 0.0f ? iHeight : 0;
-
-  fRefY = (199.0f - (float)MECHA_PROJ_CENTRE_Y)
-        + (float)MECHA_PROJ_VIEWDIST * (fSin / fCos);
-  fRefY = fRefY * (float)iHeight / 200.0f;
-
-  if (fRefY < 0.0f)
-    return 0;
-  if (fRefY > (float)iHeight)
-    return iHeight;
-  return (int)fRefY;
-}
 
 static void mecha_render_sky(uint8 *pScrBuf, int iWidth, int iHeight,
                              const tMechaCamera *pCamera)
 {
-  int iHorizon = mecha_horizon_row(pCamera, iHeight);
-  int y;
+  int iSavedElev = worldelev;
+  int iSavedTilt = worldtilt;
+  int iSavedSec = front_sec;
+  int iSavedColour;
+  uint32 uiSavedTex;
 
-  for (y = 0; y < iHeight; y++) {
-    uint8 byColour = MECHA_SKY_GROUND;
+  (void)iWidth;
+  (void)iHeight;
 
-    if (y < iHorizon) {
-      int iBand = y * MECHA_SKY_BANDS / iHorizon;
 
-      if (iBand >= MECHA_SKY_BANDS)
-        iBand = MECHA_SKY_BANDS - 1;
-      byColour = s_abySkyBand[iBand];
-    }
-    memset(pScrBuf + (size_t)y * (size_t)iWidth, byColour, (size_t)iWidth);
-  }
+  /*
+   * The horizon line comes out of ptan[worldelev], which is the camera's
+   * pitch and nothing else -- the arena never rolls, so the tilt is zero and
+   * DrawHorizon takes its horizontal-band path rather than the scanline one.
+   */
+  worldelev = pCamera->iPitch & (MECHA_ANGLE_FULL - 1);
+  worldtilt = 0;
+
+  /*
+   * The ground colour is track chunk data: HorizonColour indexed by the
+   * chunk the camera is in. The arena is not a track and reports no chunk,
+   * so it lends the engine one entry for the length of the call and puts it
+   * back afterwards -- borrowing a global rather than owning it, the same
+   * bargain the mode already makes with screen_pointer and winw.
+   */
+  iSavedColour = HorizonColour[0];
+  HorizonColour[0] = MECHA_SKY_GROUND;
+  front_sec = 0;
+
+  /*
+   * Clouds off, for now, and this is why. DrawHorizon finishes by drawing
+   * the cloud dome, and that dome is real geometry: forty quads placed ten
+   * million units out, in the coordinate system the track code works in --
+   * where the up axis is Z, not Y -- and submitted through the renderer's
+   * cloud subdivision path. Handing that path an arena camera makes it
+   * subdivide quads that size until the frame stops arriving; a run that
+   * takes a fifth of a second takes minutes. Getting them in wants the
+   * dome rebuilt against the arena's own scale and axes rather than the
+   * basis swapped underneath it, which is a piece of work in its own right.
+   */
+  uiSavedTex = textures_off;
+  textures_off |= TEX_OFF_CLOUDS;
+  DrawHorizon(pScrBuf);
+  textures_off = uiSavedTex;
+
+  HorizonColour[0] = iSavedColour;
+  front_sec = iSavedSec;
+  worldelev = iSavedElev;
+  worldtilt = iSavedTilt;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1584,8 +1592,6 @@ void mecha_render_frame(GameRenderer *pRenderer, const tMechaWorld *pWorld,
   game_render_set_target(pRenderer, pScrBuf, iWidth, iWidth, iHeight);
   game_render_set_viewport(pRenderer, 0, 0, iWidth, iHeight);
 
-  mecha_render_sky(pScrBuf, iWidth, iHeight, pCamera);
-
   mecha_camera_basis(pCamera, afRight, afUp, afForward);
 
   memset(&cam, 0, sizeof(cam));
@@ -1615,6 +1621,10 @@ void mecha_render_frame(GameRenderer *pRenderer, const tMechaWorld *pWorld,
    * fill, so nothing ever samples a texture bank. */
   proj.texHalfRes = 0;
   game_render_set_projection(pRenderer, &proj);
+
+  /* After the camera and the projection, not before: the sky is drawn by
+   * engine code that reads both out of the globals those two calls write. */
+  mecha_render_sky(pScrBuf, iWidth, iHeight, pCamera);
 
   mecha_render_scene(pRenderer, pWorld, pCamera, iViewMech, paScratch,
                      iScratchCapacity);
@@ -1648,6 +1658,7 @@ static const struct
   uint8 byB;
 } s_aArenaPalette[] = {
   {  11,  8, 10, 26 },   /* sky                                         */
+  { 145,  2, 19, 63 },   /* DrawHorizon's sky, the one index it hardcodes */
   {  18, 45, 39, 30 },   /* iron trim                                   */
   {  35, 44, 20, 60 },   /* violet tracer                               */
   {  67, 58, 52, 30 },   /* sand tracer                                 */

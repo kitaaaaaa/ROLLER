@@ -140,6 +140,14 @@ Both are read every frame, so either works at any time.
   thick-limbed with an oversized gun on each arm while an interceptor is a
   narrow torso on thin legs. Measured off the mesh as width over standing
   height they span 0.46 to 1.11.
+- **The sky is the game's own.** `DrawHorizon` paints it: flat blue above a
+  line through the projection, a haze colour below, exactly as it does for
+  the race. It reads the camera out of globals that `game_render_set_camera`
+  and `set_projection` have already written, so the mode supplies only the
+  elevation, the tilt and the ground colour -- and that colour is track chunk
+  data, so the arena lends the engine one `HorizonColour` entry for the
+  length of the call and puts it back. The nine-band sunset gradient this
+  replaced was the mode inventing a sky the engine already had.
 - **The camera chases you, not the enemy.** Beyond knife range it sits behind
   your machine and looks where your machine is looking, so the view is steady
   while you steer. Inside `MECHA_CLOSE_QUARTERS` it swings onto the lock and
@@ -150,8 +158,9 @@ Both are read every frame, so either works at any time.
   for half a second. A shot fired walking or standing does not: those are the
   states where the heading is yours, and reclaiming it on every trigger pull
   would be the old auto-turn under another name.
-- **Shots are plasma.** Beams keep their coloured streak and gain a boiling
-  head; homing pods and lobbed charges are the sprite outright. The frames
+- **Shots are plasma.** The frames are the retail sky's own cloud puffs --
+  `gentex.drh` has no bolt art, and at bolt size a soft blue puff reads as
+  plasma. Beams keep their coloured streak and gain a boiling head; homing pods and lobbed charges are the sprite outright. The frames
   cycle on a fixed cadence rather than over a lifetime, so a bolt that lives
   for a fifth of a second and one that arcs for two shimmer at the same rate.
   Muzzle flashes come off the same sequence, hits walk the blast frames, and
@@ -271,6 +280,13 @@ zig build test-mecha-render -Dmecha-frames=/tmp/frames
   Inside knife range the camera centres the lock and drops your mech into the
   foreground, and two mechs in melee are simply in the same place. This wants tuning against real play rather than against a
   still frame.
+- The sky has no clouds yet. `DrawHorizon` ends by drawing the cloud dome,
+  but that dome is forty quads placed ten million units out in a Z-up
+  coordinate system and submitted through the renderer's cloud subdivision
+  path; handing that an arena camera makes a frame take minutes instead of
+  milliseconds. The arena disables them at the `textures_off` bit while it
+  calls in. Bringing them in wants the dome rebuilt against the arena's own
+  scale and axes rather than the view basis swapped underneath it.
 - The palette indices are tuned by eye, not derived. They are named constants at
   the top of `mecha_arena.c`, `mecha_defs.c`, `mecha_mesh.c` and
   `mecha_render.c` precisely so a retune stays a small edit.

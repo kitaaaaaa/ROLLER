@@ -72,6 +72,14 @@ typedef struct
  */
 #define MECHA_SPRITE_FIRE_FIRST   4
 #define MECHA_SPRITE_FIRE_LAST    7
+/*
+ * 8..12 are the retail sky's cloud puffs -- horizon.c picks one of those
+ * five for every quad of its dome. Borrowed here because at bolt size a
+ * soft blue puff reads as plasma, and because the bank has no bolt art of
+ * its own: 0 and 21..23 are smoke, 1..3 the start lights, 4..7 flame and
+ * 13..20 the blast. Worth revisiting when the dome itself is drawn, since
+ * then the same five frames would be both the sky and the shots.
+ */
 #define MECHA_SPRITE_PLASMA_FIRST 8
 #define MECHA_SPRITE_PLASMA_LAST 12
 #define MECHA_SPRITE_BLAST_FIRST 13

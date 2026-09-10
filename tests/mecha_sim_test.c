@@ -2859,6 +2859,64 @@ static int wheeled_def(void)
 
 //-------------------------------------------------------------------------------------------------
 
+static int test_the_gun_car_wears_the_games_own_paint(void)
+{
+    static tMechaQuad aStorage[MECHA_QUAD_CAPACITY];
+    tMechaQuadList list;
+    tMechaWorld world;
+    int iCar = wheeled_def();
+    int iSkinned = 0;
+    int iFlat = 0;
+    int iGun = 0;
+    int i;
+
+    CHECK(iCar >= 0);
+    start_duel(&world, 0, iCar, iCar, 0x5C10u, 1);
+
+    /* Told the skin is there, the body is painted out of the plan's own
+     * texture words rather than out of the machine's palette. */
+    mecha_mesh_set_car_skin(true);
+    mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
+    mecha_mesh_mech(&list, &world, 0);
+    CHECK(list.iCount > 50);
+
+    for (i = 0; i < list.iCount; i++) {
+        if (i < MECHA_ZIZIN_BODY_QUADS) {
+            if (aStorage[i].byTexBank == MECHA_TEX_CAR)
+                iSkinned++;
+            else
+                iFlat++;
+        } else if (aStorage[i].byTexBank == MECHA_TEX_NONE) {
+            iGun++;
+        }
+    }
+
+    printf("   the car: %d panels off its own texture, %d flat; %d quads of"
+           " gun, none of them textured\n", iSkinned, iFlat, iGun);
+    /*
+     * Most of it textured, some of it not: nine of the fifty panels carry
+     * no texture flag at all and are a plain palette index -- that is how
+     * the tyres come out black -- and eight more reach their texture
+     * through the car's animation table, which is where the wheels and the
+     * livery live. All three cases are the race game's, walked here the
+     * same way its own draw path walks them.
+     */
+    CHECK(iSkinned > MECHA_ZIZIN_BODY_QUADS * 3 / 4);
+    CHECK(iFlat > 0);
+    /* And the gun is left alone. It is not part of the car. */
+    CHECK(iGun == list.iCount - MECHA_ZIZIN_BODY_QUADS);
+
+    /* Without the skin, nothing names a bank it cannot have. */
+    mecha_mesh_set_car_skin(false);
+    mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
+    mecha_mesh_mech(&list, &world, 0);
+    for (i = 0; i < list.iCount; i++)
+        CHECK(aStorage[i].byTexBank == MECHA_TEX_NONE);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static int test_the_gun_car_drives(void)
 {
     tMechaWorld world;
@@ -4587,6 +4645,8 @@ int main(void)
           test_the_forest_stands_outside_the_fight },
         { "the gun car is a car with a gun",
           test_the_gun_car_is_a_car_with_a_gun },
+        { "the gun car wears the game's own paint",
+          test_the_gun_car_wears_the_games_own_paint },
         { "the gun car drives", test_the_gun_car_drives },
         { "the gun car has one gun and a bumper",
           test_the_gun_car_has_one_gun_and_a_bumper },

@@ -99,6 +99,9 @@ bool mecha_render_font_is_retail(void);
 
 bool mecha_render_sprites_active(void);
 
+/* True once the gun car's own skin has been loaded and uploaded. */
+bool mecha_render_car_skin_active(void);
+
 /* How many recoloured copies of the effect bank came up. Three when the
  * game's data and palette are both there, zero without them -- in which
  * case every machine's fire is the same blue and the mode still runs. */

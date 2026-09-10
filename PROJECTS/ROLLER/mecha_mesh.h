@@ -83,7 +83,14 @@ typedef struct
 #define MECHA_TEX_EFFECT_WARM   4
 #define MECHA_TEX_EFFECT_VIOLET 5
 #define MECHA_TEX_EFFECT_GREEN  6
-#define MECHA_TEX_BANK_COUNT    7
+/* The gun car's own skin: xzizin.bm, the same file the race game paints the
+ * Zizin with, loaded into a car texture slot of its own. */
+#define MECHA_TEX_CAR           7
+#define MECHA_TEX_BANK_COUNT    8
+
+/* One quad per polygon of the race game's Zizin plan, and they come first in
+ * the machine's mesh: everything after them is the gun. */
+#define MECHA_ZIZIN_BODY_QUADS 50
 
 /*
  * Frames in the game's generic texture bank. Sequences run start..end
@@ -163,6 +170,10 @@ void mecha_mesh_mech(tMechaQuadList *pList, const tMechaWorld *pWorld,
  * still gets geometry that reads.
  */
 void mecha_mesh_set_sprites(bool bAvailable);
+
+/* And whether the gun car's own skin is. Without it the body falls back to
+ * the machine's two palette entries, which is a car and not the car. */
+void mecha_mesh_set_car_skin(bool bAvailable);
 
 /*
  * The sky's cloud dome, as arena geometry. Placed around the arena's centre

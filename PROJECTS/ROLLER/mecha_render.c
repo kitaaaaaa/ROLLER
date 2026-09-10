@@ -8,6 +8,7 @@
 #include "func2.h"
 #include "func3.h"
 #include "graphics.h"
+#include "carplans.h"
 #include "horizon.h"
 #include "drawtrk3.h"
 #include "transfrm.h"
@@ -729,14 +730,34 @@ static void mecha_render_scene(GameRenderer *pRenderer,
   if (iScratchCapacity > MECHA_QUAD_CAPACITY)
     iScratchCapacity = MECHA_QUAD_CAPACITY;
 
+  /*
+   * Which banks are there, before anything is built rather than after: the
+   * mech mesh is the first thing that asks, so answering it with last
+   * frame's result meant the car spent its first frame in flat paint.
+   *
+   * The effect bank loads itself, because the first shot fired names it and
+   * the draw path loads whatever a quad names. The car's skin has no such
+   * trigger -- the mesh will not name a bank it has been told is missing,
+   * and the bank stays missing because nothing named it -- so it is asked
+   * for here, and only when there is something in the fight to wear it.
+   */
+  mecha_mesh_set_sprites(mecha_render_sprites_active());
+  for (iMech = 0; iMech < MECHA_MAX_MECHS; iMech++) {
+    const tMechaMech *pMech = &pWorld->aMechs[iMech];
+
+    if (pMech->bActive
+        && mecha_def_get((int)pMech->byDefIdx)->bWheeled) {
+      (void)mecha_bank_ensure(pRenderer, MECHA_TEX_CAR);
+      break;
+    }
+  }
+  mecha_mesh_set_car_skin(mecha_render_car_skin_active());
+
   mecha_quads_reset(&list, paScratch, iScratchCapacity);
   mecha_mesh_arena(&list, &pWorld->arena);
   mecha_mesh_shadows(&list, pWorld);
   for (iMech = 0; iMech < MECHA_MAX_MECHS; iMech++)
     mecha_mesh_mech(&list, pWorld, iMech);
-  /* The bank is loaded on demand by the first quad that asks for a frame,
-   * so this is last frame's answer on the frame it first comes up. */
-  mecha_mesh_set_sprites(mecha_render_sprites_active());
   mecha_mesh_scenery(&list, &pWorld->arena, pWorld->uiSeed, pCamera->iYaw);
   mecha_mesh_clouds(&list, pWorld);
   mecha_mesh_projectiles(&list, pWorld, pCamera->iYaw);
@@ -855,7 +876,8 @@ static void mecha_render_scene(GameRenderer *pRenderer,
        * those would punch holes through the world wherever the artwork
        * happened to use it. */
       if (pQuad->byTexBank == MECHA_TEX_EFFECT
-          || pQuad->byTexBank >= MECHA_TEX_EFFECT_WARM)
+          || (pQuad->byTexBank >= MECHA_TEX_EFFECT_WARM
+              && pQuad->byTexBank <= MECHA_TEX_EFFECT_GREEN))
         iSprite |= SURFACE_FLAG_PARTIAL_TRANS;
 
       /* The legacy path works its own texture coordinates out inside
@@ -1526,6 +1548,10 @@ typedef struct
 
 static const char *const s_szWorldFile = "track1.drh";
 
+/* The car whose skin the gun car wears, and the texture slot it goes in. */
+#define MECHA_CARTEX_SLOT 1
+#define MECHA_CARTEX_CAR  CAR_ZIZIN
+
 /*
  * The recoloured effect banks.
  *
@@ -1571,6 +1597,14 @@ static tMechaTexBank s_aBanks[MECHA_TEX_BANK_COUNT] = {
   { MECHA_TINT_SLOT_FIRST + 0, MECHA_TINT_SLOT_FIRST + 0, 0, 0, false },
   { MECHA_TINT_SLOT_FIRST + 1, MECHA_TINT_SLOT_FIRST + 1, 0, 0, false },
   { MECHA_TINT_SLOT_FIRST + 2, MECHA_TINT_SLOT_FIRST + 2, 0, 0, false },
+  /*
+   * The gun car's skin. LoadCarTexture's slot argument is one-based and
+   * registers the pixels as engine bank `slot` while writing the tile count
+   * to num_textures[slot - 1], which is exactly the split this table exists
+   * to record. Slot one is free: the arena runs no race, so no car has
+   * claimed a texture bank.
+   */
+  { MECHA_CARTEX_SLOT, MECHA_CARTEX_SLOT - 1, 0, 0, false },
 };
 
 /*
@@ -1701,7 +1735,11 @@ static bool mecha_bank_ensure(GameRenderer *pRenderer, int iBank)
   if (pBank->hTexture != TEXTURE_HANDLE_INVALID)
     return true;
 
-  if (iBank >= MECHA_TEX_EFFECT_WARM) {
+  /* The recoloured copies, and only those: they are built out of another
+   * bank rather than read off disk, so they take a different path in. A
+   * range check that said "everything above the effect banks" quietly
+   * swallowed the car's skin the moment one was added after them. */
+  if (iBank >= MECHA_TEX_EFFECT_WARM && iBank <= MECHA_TEX_EFFECT_GREEN) {
     if (pBank->bTried)
       return false;
     pBank->bTried = true;
@@ -1738,6 +1776,19 @@ static bool mecha_bank_ensure(GameRenderer *pRenderer, int iBank)
     SDL_strlcpy(texture_file, s_szWorldFile, sizeof(texture_file));
     LoadTextures();
     pPixels = texture_vga;
+    break;
+  case MECHA_TEX_CAR:
+    /*
+     * The race game's own loader, pointed at the race game's own file. It
+     * takes the process down rather than returning a failure when the file
+     * is not there, which is why nothing here is called without asking
+     * first -- and on a checkout with no retail data the car simply comes
+     * out flat, the way everything else does.
+     */
+    if (!mecha_file_present(car_texture_names[MECHA_CARTEX_CAR]))
+      return false;
+    LoadCarTexture(MECHA_CARTEX_CAR, (uint8)MECHA_CARTEX_SLOT);
+    pPixels = cartex_vga[MECHA_CARTEX_SLOT - 1];
     break;
   default:
     if (!mecha_file_present(bldtex_file))
@@ -1811,6 +1862,14 @@ bool mecha_render_sprites_active(void)
 {
   return s_aBanks[MECHA_TEX_EFFECT].hTexture != TEXTURE_HANDLE_INVALID
       && s_aBanks[MECHA_TEX_EFFECT].iTiles > 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+bool mecha_render_car_skin_active(void)
+{
+  return s_aBanks[MECHA_TEX_CAR].hTexture != TEXTURE_HANDLE_INVALID
+      && s_aBanks[MECHA_TEX_CAR].iTiles > 0;
 }
 
 /* True when the loaded bank actually has this frame. */

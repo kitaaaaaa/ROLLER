@@ -5,9 +5,19 @@
 #include "mecha_sim.h"
 
 #include "carplans.h"
+#include "types.h"
 
 #include <math.h>
 #include <string.h>
+
+/*
+ * Which of the game's own texture banks are loaded, answered once a frame by
+ * the render layer before anything is built. Both start false, so a checkout
+ * with no retail data draws the whole mode flat rather than naming tiles no
+ * bank has.
+ */
+static bool s_bSprites = false;
+static bool s_bCarSkin = false;
 
 //-------------------------------------------------------------------------------------------------
 /* Palette indices used only by the geometry; see mecha_arena.c for the rest. */
@@ -1088,8 +1098,9 @@ static int mecha_mesh_lean_pitch(const tMechaMech *pMech)
  * entries instead, picked apart by which way each face looks. The shape is
  * the game's; the paint is the mode's.
  */
-#define MECHA_ZIZIN_POLYS 50
 #define MECHA_ZIZIN_VERTS 86
+/* The size of xzizin_anms in carplans.c, which the header only declares. */
+#define MECHA_ZIZIN_ANMS  8
 
 static void mecha_zizin_extent(float *pfLength, float *pfHeight)
 {
@@ -1111,6 +1122,33 @@ static void mecha_zizin_extent(float *pfLength, float *pfHeight)
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * What the plan says a panel is painted with.
+ *
+ * Three cases, and the race game's own draw path walks all three. Most
+ * panels carry a texture word: APPLY_TEXTURE set and the tile in the low
+ * byte. Eight of them -- the wheels and the livery -- carry ANMS_LOOKUP
+ * instead, which means the low byte is an index into the car's animation
+ * table and the real word is a frame out of it; frame zero is the one at
+ * rest. The rest carry no texture flag at all and the low byte is a plain
+ * palette index, which is how the tyres come out black.
+ */
+static uint32_t mecha_zizin_surface(int iPoly)
+{
+  uint32_t uiTex = xzizin_pols[iPoly].uiTex;
+
+  if ((uiTex & CAR_FLAG_ANMS_LOOKUP) != 0) {
+    uint32_t uiSlot = uiTex & 0xFFu;
+
+    if (uiSlot >= MECHA_ZIZIN_ANMS)
+      return 0u;
+    uiTex = xzizin_anms[uiSlot].framesAy[0];
+  }
+  return uiTex;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static void mecha_add_zizin_body(tMechaQuadList *pList,
                                  const tMechaPose *pPose, float fScale,
                                  float fSink, uint8_t byBody, uint8_t byTop)
@@ -1119,7 +1157,7 @@ static void mecha_add_zizin_body(tMechaQuadList *pList,
   int iPoly;
   int i;
 
-  for (iPoly = 0; iPoly < MECHA_ZIZIN_POLYS; iPoly++) {
+  for (iPoly = 0; iPoly < MECHA_ZIZIN_BODY_QUADS; iPoly++) {
     float afVert[4][3];
     int iCorner;
 
@@ -1139,18 +1177,34 @@ static void mecha_add_zizin_body(tMechaQuadList *pList,
                        pPlan->fZ * fScale - fSink, pPlan->fX * fScale,
                        afVert[iCorner]);
     }
-    mecha_quads_add(pList, afVert, byBody, MECHA_QUAD_TWO_SIDED);
+    if (s_bCarSkin) {
+      /*
+       * Painted the way the race game paints it: the same file, the same
+       * tiles, panel for panel. Nothing is chosen here at all.
+       */
+      uint32_t uiTex = mecha_zizin_surface(iPoly);
+
+      mecha_quads_add(pList, afVert, (uint8_t)(uiTex & 0xFFu),
+                      MECHA_QUAD_TWO_SIDED);
+      if ((uiTex & SURFACE_FLAG_APPLY_TEXTURE) != 0)
+        mecha_tag_texture(pList, MECHA_TEX_CAR, (int)(uiTex & 0xFFu));
+    } else {
+      mecha_quads_add(pList, afVert, byBody, MECHA_QUAD_TWO_SIDED);
+    }
   }
 
   /*
-   * Bonnet and roof in the lighter of the two, flanks in the darker, picked
-   * off each panel's own normal once it has been worked out rather than off
-   * where the panel sits: the plan is a real car body and its sills are as
-   * high off the ground as some of its bonnet.
+   * With no skin to wear it falls back to the machine's own two colours:
+   * bonnet and roof in the lighter, flanks in the darker, picked off each
+   * panel's own normal once it has been worked out rather than off where
+   * the panel sits -- the plan is a real car body and its sills are as high
+   * off the ground as some of its bonnet.
    */
-  for (i = iFirst; i < pList->iCount; i++) {
-    if (pList->paQuads[i].afNormal[1] > MECHA_ZIZIN_ROOF_FACING)
-      pList->paQuads[i].byPalette = byTop;
+  if (!s_bCarSkin) {
+    for (i = iFirst; i < pList->iCount; i++) {
+      if (pList->paQuads[i].afNormal[1] > MECHA_ZIZIN_ROOF_FACING)
+        pList->paQuads[i].byPalette = byTop;
+    }
   }
 }
 
@@ -1763,11 +1817,14 @@ static int mecha_sprite_frame(int iFirst, int iLast, float fAge)
  */
 #define MECHA_PLASMA_TICKS_PER_FRAME 2
 
-static bool s_bSprites = false;
-
 void mecha_mesh_set_sprites(bool bAvailable)
 {
   s_bSprites = bAvailable;
+}
+
+void mecha_mesh_set_car_skin(bool bAvailable)
+{
+  s_bCarSkin = bAvailable;
 }
 
 static int mecha_plasma_frame(int iAge)
@@ -1821,17 +1878,24 @@ static void mecha_add_upright_billboard(tMechaQuadList *pList, int iCameraYaw,
   float fHalf = fHeight * 0.5f;
   float afVert[4][3];
 
+  /*
+   * Top corners first. POLYTEX works its own coordinates out from the
+   * projected polygon and takes the first vertex as the origin of the tile,
+   * so the corner this starts at is the corner the artwork's top-left lands
+   * on -- start at the bottom and every tree in the wood is planted by its
+   * canopy.
+   */
   afVert[0][0] = fX - fRightX * fHalf;
-  afVert[0][1] = fBase;
+  afVert[0][1] = fBase + fHeight;
   afVert[0][2] = fZ - fRightZ * fHalf;
   afVert[1][0] = fX + fRightX * fHalf;
-  afVert[1][1] = fBase;
+  afVert[1][1] = fBase + fHeight;
   afVert[1][2] = fZ + fRightZ * fHalf;
   afVert[2][0] = fX + fRightX * fHalf;
-  afVert[2][1] = fBase + fHeight;
+  afVert[2][1] = fBase;
   afVert[2][2] = fZ + fRightZ * fHalf;
   afVert[3][0] = fX - fRightX * fHalf;
-  afVert[3][1] = fBase + fHeight;
+  afVert[3][1] = fBase;
   afVert[3][2] = fZ - fRightZ * fHalf;
   mecha_quads_add(pList, afVert, byPalette, MECHA_QUAD_TWO_SIDED);
 }

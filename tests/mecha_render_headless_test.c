@@ -744,8 +744,18 @@ int main(int argc, char **argv)
                            FRAME_W, FRAME_H, s_aQuads, MECHA_QUAD_CAPACITY);
         histogram(s_aFrame, aiCounts);
         dump_frame(szOutDir, "arena_guncar.png");
-        printf("   %s: %d colours\n", mecha_def_get(iCar)->szName,
-               distinct_colours(aiCounts));
+        printf("   %s: %d colours, wearing %s\n",
+               mecha_def_get(iCar)->szName, distinct_colours(aiCounts),
+               mecha_render_car_skin_active() ? "its own skin"
+                                              : "flat paint");
+        /*
+         * With the retail data beside the binary it has to be wearing the
+         * real thing. Nothing here can assert that in CI, where there is no
+         * data to load -- but the moment there is, a silent fallback to
+         * flat paint is the failure this catches.
+         */
+        if (mecha_test_file_present("xzizin.bm"))
+            CHECK(mecha_render_car_skin_active());
         CHECK(!single_colour(aiCounts));
     }
 

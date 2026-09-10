@@ -176,7 +176,10 @@ drives.
   sprites, billboarded, non-collidable and crowded in against the boundary
   by a squared draw so the edge of the fight reads as the edge of a
   clearing. None of them are inside: a tree with no collision standing where
-  the fight is would be a tree machines walk through.
+  the fight is would be a tree machines walk through. Each one is wound from
+  its top corners, because POLYTEX takes the first vertex as the origin of
+  the tile: start at the bottom and the whole wood is planted by its
+  canopy.
 - **The ground is drawn and shaped at different resolutions, and both are
   per-arena.** The meadow is twice the size of the others, so it takes both
   a finer terrain grid -- or its hills round off into bumps, and a bump is
@@ -303,14 +306,19 @@ drives.
   its own speed, so driving alongside is not a ram and a head-on is worse
   than catching them up, and there is a cooldown on it because a car resting
   against somebody is not running them over sixty times a second.
-- **Its body is the game's own car, polygon for polygon.** `xzizin_coords`
-  and `xzizin_pols` out of `carplans.c` -- the same fifty quads the Zizin is
+- **Its body is the game's own car, paint and all.** `xzizin_coords` and
+  `xzizin_pols` out of `carplans.c` -- the same fifty quads the Zizin is
   drawn with on the track -- with the axes swapped from the race game's (x
-  along, y across, z up) into the arena's. The polygons carry a texture word
-  indexing a per-car bank this mode does not load, so they are flat-shaded
-  in the machine's own two palette entries, split by which way each panel
-  looks. The shape is the game's; the paint is the mode's. The gun is built
-  here, out of the same boxes everything else is.
+  along, y across, z up) into the arena's, and `xzizin.bm` loaded into a car
+  texture slot to paint them. Each panel is resolved the way the race
+  game's own draw path resolves it: most carry a texture word with the tile
+  in the low byte; eight reach theirs through the car's animation table,
+  which is where the wheels and the livery live; nine carry no texture flag
+  at all and are a plain palette index, which is how the tyres come out
+  black. Without the retail data the whole body falls back to the machine's
+  own two colours, split by which way each panel looks. The gun is built
+  here out of the same boxes everything else is, and is left unpainted --
+  it is not part of the car.
 - **The chase camera scales with what it is behind.** It was written around
   a fourteen-metre machine, which is what the roster mostly is; a car a
   sixth of that would be a speck under a camera hung fourteen metres over

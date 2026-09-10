@@ -148,14 +148,20 @@ Both are read every frame, so either works at any time.
   data, so the arena lends the engine one `HorizonColour` entry for the
   length of the call and puts it back. The nine-band sunset gradient this
   replaced was the mode inventing a sky the engine already had.
-- **The machines are jointed.** Legs have knees: the thigh swings as a sine
+- **The machines are jointed.** Legs have knees that bend the way a person's
+  do -- the thigh's pose pitch is negated and the knee's is not, and getting
+  those two signs the same makes the machine bird-legged, which is a fine
+  thing for a mech to be but not what this roster is. The rest of the leg: the thigh swings as a sine
   of the step phase, the knee bends through the forward half of that swing
   and straightens for the half the foot is planted and pushing back, and the
   ankle keeps the sole flat to the floor whatever the leg above it is doing.
   The body is then dropped onto whichever foot reaches lowest, which is what
   makes a stride bob and a guard sink rather than either being animated as
   such -- guard bends the knees now instead of squashing the whole machine
-  down to two thirds of its height.
+  down to two thirds of its height, and on a knee that bends backwards it
+  has to squat deep to lower anything at all, because the knee travels
+  forward as far as the hip drops and the two cosines all but cancel until
+  the angles get large.
 - **The legs are not the machine.** They follow the line of travel while the
   torso holds the aim, so a mech strafing across your guns walks sideways
   with its shoulders square to you. A heading more than a quarter turn off
@@ -190,6 +196,12 @@ Both are read every frame, so either works at any time.
   not made of light -- and the streak keeps the weapon's own colour, because a
   textured quad draws the frame's colours and nothing else: skinning the
   streak would make every machine's fire the same blue.
+- **The HUD face is missing glyphs, so the mode fills them in.** The retail
+  restricted font has no full stop, and a name like SJ Mk.IV would come out
+  with a four pixel hole in it. Text is printed a character at a time and
+  anything the face lacks is drawn from the mode's own glyphs, at the pen
+  position the retail advance table says it occupies and in the retail
+  face's colour, so the two stay in step across a string.
 - **Blasts throw debris.** A kill spawns a short flash plus a burst of
   particles that fly out, fall under gravity, shrink, and cool down a warm
   palette ramp.

@@ -279,6 +279,30 @@ int mecha_render_text_large(uint8 *pScrBuf, int iWidth, int iHeight,
 
 //-------------------------------------------------------------------------------------------------
 
+/* One glyph from the mode's own font. Used for the fallback face, and for
+ * the handful of characters the retail HUD face simply does not have. */
+static void mecha_draw_glyph(uint8 *pScrBuf, int iWidth, int iHeight,
+                             int iX, int iY, int iScale, uint8 byColour,
+                             char cChar)
+{
+  const uint8 *pGlyph = s_aabyFont[mecha_glyph_index(cChar)];
+  int iRow;
+
+  for (iRow = 0; iRow < MECHA_GLYPH_H; iRow++) {
+    int iCol;
+
+    for (iCol = 0; iCol < MECHA_GLYPH_W; iCol++) {
+      if (!(pGlyph[iRow] & (1u << (MECHA_GLYPH_W - 1 - iCol))))
+        continue;
+      mecha_render_fill(pScrBuf, iWidth, iHeight,
+                        iX + iCol * iScale, iY + iRow * iScale,
+                        iScale, iScale, byColour);
+    }
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+
 int mecha_render_text(uint8 *pScrBuf, int iWidth, int iHeight,
                       int iX, int iY, int iScale, uint8 byColour,
                       const char *szText)
@@ -297,6 +321,7 @@ int mecha_render_text(uint8 *pScrBuf, int iWidth, int iHeight,
     int iSavedWinH = winh;
     int iSavedWinX = winx;
     int iSavedWinY = winy;
+    int iPen = iX;
 
     /*
      * prt_letter scales through scr_size and pre-multiplies the coordinates
@@ -321,7 +346,29 @@ int mecha_render_text(uint8 *pScrBuf, int iWidth, int iHeight,
     winy = 0;
     winw = iWidth;
     winh = iHeight;
-    mini_prt_string(s_pFont, szText, iX / iScale, iY / iScale);
+    /*
+     * A character at a time, because the retail HUD face is the restricted
+     * one: it has no full stop, and a name like SJ Mk.IV would come out with
+     * a four pixel hole in it. Anything the face is missing is drawn from
+     * the mode's own glyphs at the pen position the retail advance table
+     * says it occupies, so the two faces stay in step across the string.
+     */
+    for (pChar = szText; *pChar; pChar++) {
+      if ((uint8)ascii_conv3[(uint8)*pChar] != 255) {
+        char szOne[2];
+
+        szOne[0] = *pChar;
+        szOne[1] = '\0';
+        mini_prt_string(s_pFont, szOne, iPen / iScale, iY / iScale);
+      } else if (*pChar != ' ') {
+        /* In the retail face's own colour rather than the caller's: these
+         * glyphs carry their palette with them and the substitute has to
+         * match the letters on either side of it, not the bar it labels. */
+        mecha_draw_glyph(pScrBuf, iWidth, iHeight, iPen, iY, iScale,
+                         MECHA_HUD_TEXT, *pChar);
+      }
+      iPen += mecha_font_advance(*pChar) * iScale;
+    }
     winx = iSavedWinX;
     winy = iSavedWinY;
     winw = iSavedWinW;
@@ -332,20 +379,8 @@ int mecha_render_text(uint8 *pScrBuf, int iWidth, int iHeight,
   }
 
   for (pChar = szText; *pChar; pChar++) {
-    const uint8 *pGlyph = s_aabyFont[mecha_glyph_index(*pChar)];
-    int iRow;
-
-    for (iRow = 0; iRow < MECHA_GLYPH_H; iRow++) {
-      int iCol;
-
-      for (iCol = 0; iCol < MECHA_GLYPH_W; iCol++) {
-        if (!(pGlyph[iRow] & (1u << (MECHA_GLYPH_W - 1 - iCol))))
-          continue;
-        mecha_render_fill(pScrBuf, iWidth, iHeight,
-                          iX + iCol * iScale, iY + iRow * iScale,
-                          iScale, iScale, byColour);
-      }
-    }
+    mecha_draw_glyph(pScrBuf, iWidth, iHeight, iX, iY, iScale, byColour,
+                     *pChar);
     iX += MECHA_GLYPH_ADVANCE * iScale;
   }
   return iX;

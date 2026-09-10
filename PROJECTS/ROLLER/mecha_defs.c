@@ -142,7 +142,7 @@ static const tMechaMechDef s_aMechDefs[] = {
 
 //-------------------------------------------------------------------------------------------------
 {
-  .szName = "BULWARK", .szClass = "SIEGE PLATFORM",
+  .szName = "SJ Mk.IV", .szClass = "SIEGE PLATFORM",
   /* Carries its mass: slow to gather speed, slower to shed it, and it
    * slides a long way out of anything taken quickly. */
   .fGrip = MECHA_MPS(34.0f), .fDriveAccel = MECHA_MPS(30.0f),
@@ -248,7 +248,7 @@ static const tMechaMechDef s_aMechDefs[] = {
 
 //-------------------------------------------------------------------------------------------------
 {
-  .szName = "HALCYON", .szClass = "FAST INTERCEPT",
+  .szName = "Exos 2000", .szClass = "FAST INTERCEPT",
   /* Almost no weight to fight: changes direction nearly on the spot. */
   .fGrip = MECHA_MPS(190.0f), .fDriveAccel = MECHA_MPS(150.0f),
   .fBrake = MECHA_MPS(130.0f),
@@ -352,7 +352,7 @@ static const tMechaMechDef s_aMechDefs[] = {
 
 //-------------------------------------------------------------------------------------------------
 {
-  .szName = "SABRE", .szClass = "CLOSE QUARTERS",
+  .szName = "Kira Type R", .szClass = "CLOSE QUARTERS",
   .fGrip = MECHA_MPS(120.0f), .fDriveAccel = MECHA_MPS(100.0f),
   .fBrake = MECHA_MPS(85.0f),
   .fBuildShoulder = 0.90f, .fBuildTorso = 0.94f, .fBuildLimb = 0.84f,

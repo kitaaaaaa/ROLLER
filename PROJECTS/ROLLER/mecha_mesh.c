@@ -388,8 +388,12 @@ void mecha_mesh_arena(tMechaQuadList *pList, const tMechaArena *pArena)
 #define MECHA_LEG_KNEE    MECHA_DEG(48)
 #define MECHA_LEG_TUCK    MECHA_DEG(20)
 #define MECHA_LEG_AIRKNEE MECHA_DEG(58)
-#define MECHA_LEG_SQUAT   MECHA_DEG(26)
-#define MECHA_LEG_SQKNEE  MECHA_DEG(52)
+/* A guard is a squat, and a human squat has to be deep to lower anything:
+ * the knee travels forward as far as the hip drops, so the two cosines all
+ * but cancel until the angles get large. Bird-legged, half of this was
+ * enough; on a knee that bends the right way it is not. */
+#define MECHA_LEG_SQUAT   MECHA_DEG(45)
+#define MECHA_LEG_SQKNEE  MECHA_DEG(90)
 
 static void mecha_leg_angles(float fPhase, bool bAirborne, bool bGuard,
                              int *piThigh, int *piKnee)
@@ -414,15 +418,22 @@ static void mecha_leg_angles(float fPhase, bool bAirborne, bool bGuard,
 
 //-------------------------------------------------------------------------------------------------
 
-/* How far below the hip the ankle ends up, for a given pair of joint angles.
+/*
+ * How far below the hip the ankle ends up, for a given pair of joint angles.
  * This is what keeps the feet on the floor: the body is lowered by whatever
  * the straighter leg has lost, so bending the knees sinks the machine
- * instead of leaving it hanging with its feet in the air. */
+ * instead of leaving it hanging with its feet in the air.
+ *
+ * The thigh's pose pitch is -A and the knee's is +K, so the shin's own frame
+ * sits at K - A off the vertical and the ankle drops by the cosine of that.
+ * Getting this sum wrong is not a small error: it is the difference between
+ * a machine that walks and one that skates with its feet through the floor.
+ */
 static float mecha_leg_reach(int iThigh, int iKnee, float fThighLen,
                              float fShinLen)
 {
   return fThighLen * mecha_cos(iThigh)
-       + fShinLen * mecha_cos(mecha_angle_wrap(iThigh + iKnee));
+       + fShinLen * mecha_cos(mecha_angle_wrap(iThigh - iKnee));
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -648,8 +659,15 @@ void mecha_mesh_mech(tMechaQuadList *pList, const tMechaWorld *pWorld,
                   0.19f * fRadius * fLimb, 0.05f * fHeight,
                   0.19f * fRadius * fLimb, byJoint, byJoint, 0);
 
+    /*
+     * The knee bends backwards, the way a person's does: a positive pose
+     * pitch swings a limb aft, so the shin takes the knee angle unnegated
+     * while the thigh takes its swing negated. Both the same sign and the
+     * machine becomes a bird, which is a fine thing for a mech to be but not
+     * what this roster is.
+     */
     mecha_pose_child(&shin, &thigh, 0.0f, -fThighLen, 0.0f, 0,
-                     -aiKnee[iSide], 0);
+                     aiKnee[iSide], 0);
     mecha_add_box(pList, &shin, 0.0f, -0.5f * fShinLen, 0.0f,
                   0.19f * fRadius * fLimb, 0.5f * fShinLen,
                   0.20f * fRadius * fLimb, byBody, byBody, 0);
@@ -657,7 +675,7 @@ void mecha_mesh_mech(tMechaQuadList *pList, const tMechaWorld *pWorld,
     /* The foot stays flat to the floor whatever the leg above it is doing,
      * which is the whole reason it gets a joint of its own. */
     mecha_pose_child(&foot, &shin, 0.0f, -fShinLen, 0.0f, 0,
-                     aiThigh[iSide] + aiKnee[iSide], 0);
+                     aiThigh[iSide] - aiKnee[iSide], 0);
     mecha_add_box(pList, &foot, 0.0f, -0.5f * fAnkle, 0.10f * fRadius,
                   0.27f * fRadius * fLimb, 0.5f * fAnkle,
                   0.42f * fRadius * fLimb, byTrim, byTrim, 0);

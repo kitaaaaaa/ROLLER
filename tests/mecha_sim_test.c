@@ -1263,6 +1263,64 @@ static int test_legs_walk_on_jointed_knees(void)
 
     /* A stride that never opens is a pair of planks pivoting at the hip. */
     CHECK(fStride > 0.35f * pDef->fRadius);
+
+    /*
+     * And the knee bends the way a person's does. At phase zero the left
+     * leg has its thigh vertical and its knee at full flex, so the ankle
+     * has to be behind the knee -- if it is in front, the machine is
+     * bird-legged, which is a fine thing for a mech to be but not what this
+     * roster is meant to look like.
+     */
+    {
+        float fKneeZ = 0.0f;
+        float fFootZ = 0.0f;
+        int iKnee = 0;
+        int iFoot = 0;
+        float fCos;
+        float fSin;
+        int i;
+        int v;
+
+        world.aMechs[0].byMove = MECHA_MOVE_WALK;
+        world.aMechs[0].fStepPhase = 0.0f;
+        mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
+        mecha_mesh_mech(&list, &world, 0);
+        fCos = mecha_cos(world.aMechs[0].iFacing);
+        fSin = mecha_sin(world.aMechs[0].iFacing);
+
+        for (i = 0; i < list.iCount; i++) {
+            float fX = 0.0f;
+            float fY = 0.0f;
+            float fZ = 0.0f;
+
+            for (v = 0; v < 4; v++) {
+                float fDx = aStorage[i].afVert[v][0] - world.aMechs[0].fX;
+                float fDz = aStorage[i].afVert[v][2] - world.aMechs[0].fZ;
+
+                fX += 0.25f * (fDx * fCos - fDz * fSin);
+                fZ += 0.25f * (fDx * fSin + fDz * fCos);
+                fY += 0.25f * (aStorage[i].afVert[v][1] - world.aMechs[0].fY);
+            }
+            if (fX > 0.0f)
+                continue;                       /* the left leg only */
+            if (fY < 0.35f * pDef->fHeight
+                && aStorage[i].byPalette == pDef->abyPalette[2]) {
+                fKneeZ += fZ;                   /* the knee joint block */
+                iKnee++;
+            }
+            if (fY < 0.09f * pDef->fHeight) {
+                fFootZ += fZ;
+                iFoot++;
+            }
+        }
+        CHECK(iKnee > 0);
+        CHECK(iFoot > 0);
+        fKneeZ /= (float)iKnee;
+        fFootZ /= (float)iFoot;
+        printf("   flexed knee: ankle sits %.0f behind the knee\n",
+               fKneeZ - fFootZ);
+        CHECK(fFootZ < fKneeZ - 0.10f * pDef->fRadius);
+    }
     return 0;
 }
 
@@ -1389,7 +1447,7 @@ static int test_shots_carry_plasma_frames(void)
     int i;
 
     memset(aiFrames, 0, sizeof(aiFrames));
-    start_duel(&world, 0, 2, 2, 0x9105u, 1);   /* HALCYON: beams and pods */
+    start_duel(&world, 0, 2, 2, 0x9105u, 1);   /* Exos 2000: beams and pods */
     memset(aInputs, 0, sizeof(aInputs));
 
     /*
@@ -1633,7 +1691,8 @@ static int test_machines_carry_their_weight(void)
     int aiTicks[3];
     int i;
     static const int aiDefs[3] = { 1, 0, 2 };   /* heavy, middle, light */
-    static const char *const aszNames[3] = { "BULWARK", "LANCER", "HALCYON" };
+    static const char *const aszNames[3] = { "SJ Mk.IV", "LANCER",
+                                             "Exos 2000" };
 
     for (i = 0; i < 3; i++)
         measure_handling(aiDefs[i], &afSkid[i], &aiTicks[i]);
@@ -1952,7 +2011,7 @@ static int test_builds_read_as_silhouettes(void)
     float fBulwark = build_aspect(1, aStorage);
     float fHalcyon = build_aspect(2, aStorage);
 
-    printf("   width/height  LANCER %.2f  BULWARK %.2f  HALCYON %.2f\n",
+    printf("   width/height  LANCER %.2f  SJ Mk.IV %.2f  Exos 2000 %.2f\n",
            fLancer, fBulwark, fHalcyon);
 
     /*

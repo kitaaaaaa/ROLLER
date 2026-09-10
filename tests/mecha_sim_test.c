@@ -1368,6 +1368,69 @@ static int test_auto_turn_is_close_quarters_only(void)
 
 //-------------------------------------------------------------------------------------------------
 
+/* Turn suffered while firing from a given movement state, at long range. */
+static int firing_recentre_drift(bool bDash)
+{
+    tMechaWorld world;
+    tMechaInput aInputs[2];
+    int iBefore;
+    int iDrift;
+
+    start_duel(&world, 0, 0, 0, 0xFEEDu, 1);
+    memset(aInputs, 0, sizeof(aInputs));
+    world.aMechs[0].fX = 0.0f;
+    world.aMechs[0].fZ = 0.0f;
+    world.aMechs[1].fX = 0.0f;
+    world.aMechs[1].fZ = MECHA_M(85.0f);
+    face_mech(&world, 0, 0);
+    face_mech(&world, 1, MECHA_ANGLE_HALF);
+    run_ticks(&world, aInputs, 2, 4);
+
+    /* Off the bearing but inside the hold cone, so the lock is live and the
+     * only question is whether anything turns the machine back. */
+    face_mech(&world, 0, MECHA_DEG(22));
+    iBefore = world.aMechs[0].iFacing;
+
+    if (bDash) {
+        aInputs[0].bDash = true;
+        aInputs[0].iMoveZ = 100;
+        mecha_sim_tick(&world, aInputs, 2);
+    }
+    aInputs[0].bFireCenter = true;
+    mecha_sim_tick(&world, aInputs, 2);
+    aInputs[0].bFireCenter = false;
+    aInputs[0].bDash = false;
+    run_ticks(&world, aInputs, 2, MECHA_TICK_HZ / 2);
+
+    iDrift = mecha_angle_delta(iBefore, world.aMechs[0].iFacing);
+    return iDrift < 0 ? -iDrift : iDrift;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_firing_recentres_only_off_a_boost(void)
+{
+    int iStanding = firing_recentre_drift(false);
+    int iBoosting = firing_recentre_drift(true);
+
+    printf("   firing at range turns the machine: standing %d, boosting %d\n",
+           iStanding, iBoosting);
+
+    /*
+     * Firing off a boost or out of the air puts the enemy back in front of
+     * you; firing on your feet leaves the heading alone. The second half
+     * matters as much as the first -- taking the heading away every time a
+     * trigger came down would be the auto-turn back again under another
+     * name, and the whole point of confining that to knife range was to
+     * give the steering back.
+     */
+    CHECK(iBoosting > MECHA_DEG(8));
+    CHECK(iStanding < MECHA_DEG(2));
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static int test_lobbed_shots_reach_their_target(void)
 {
     tMechaWorld world;
@@ -1622,6 +1685,8 @@ int main(void)
         { "ai skill ladder", test_ai_skill_ladder },
         { "lock breaks and returns", test_lock_breaks_and_returns },
         { "lock survives a glance", test_lock_survives_a_glance },
+        { "firing recentres only off a boost",
+          test_firing_recentres_only_off_a_boost },
         { "auto turn is close quarters only",
           test_auto_turn_is_close_quarters_only },
         { "jump cancel", test_jump_cancel },

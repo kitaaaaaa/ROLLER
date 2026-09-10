@@ -149,6 +149,15 @@
  */
 #define MECHA_CLOSE_QUARTERS   MECHA_M(34.0f)
 
+/*
+ * How long a move that re-centres holds the machine on its lock.
+ *
+ * Long enough to complete the turn and let a shot go, short enough that it
+ * is a move rather than a mode -- the auto-turn coming back on permanently
+ * would undo the point of confining it to knife range.
+ */
+#define MECHA_RECENTRE_TICKS   MECHA_SEC(0.5f)
+
 /* Mechs push each other apart rather than overlapping. */
 #define MECHA_PUSH_PER_TICK    MECHA_M(0.9f)
 

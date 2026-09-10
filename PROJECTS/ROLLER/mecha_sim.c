@@ -750,10 +750,13 @@ static void mecha_update_facing(tMechaWorld *pWorld, int iMechIdx,
      * fast to aim by hand. Further out the machine points where it is
      * pointed -- which is what makes holding a lock at range a thing the
      * player does rather than a thing that happens. */
-    if (mecha_target_range(pWorld, iMechIdx) <= MECHA_CLOSE_QUARTERS) {
+    if (mecha_target_range(pWorld, iMechIdx) <= MECHA_CLOSE_QUARTERS
+        || pMech->iRecentreTicks > 0) {
       pMech->iFacing = mecha_angle_approach(pMech->iFacing, iBearing,
                                             iMaxStep);
     }
+    if (pMech->iRecentreTicks > 0)
+      pMech->iRecentreTicks--;
   } else {
     pMech->iAimPitch = 0;
   }
@@ -888,6 +891,9 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
        * drops the mech; the landing is what pays for it. */
       pMech->byMove = MECHA_MOVE_CANCEL;
       pMech->iStateTicks = 0;
+      /* The whole point of dropping out of the air is to come down facing
+       * them again, so the drop brings the machine round on its own. */
+      pMech->iRecentreTicks = MECHA_RECENTRE_TICKS;
     } else if (pMech->byMove != MECHA_MOVE_JUMP
                && pMech->byMove != MECHA_MOVE_CANCEL) {
       /* Walked off a ledge. */
@@ -1256,6 +1262,17 @@ static void mecha_fire_weapon(tMechaWorld *pWorld, int iMechIdx, int iSlot)
   mecha_sim_spawn_effect(pWorld, MECHA_FX_MUZZLE, fOriginX, fOriginY,
                          fOriginZ, pDef->fRadius * 0.5f, pWeapon->byPalette,
                          MECHA_SEC(0.12f));
+
+  /*
+   * Firing off a boost or out of the air brings the machine back onto its
+   * lock. Firing while walking or standing does not, deliberately: those
+   * are the states where the player is already free to point the thing,
+   * and taking the heading away every time a trigger came down would be
+   * the auto-turn back again wearing a different hat.
+   */
+  if (pMech->byMove == MECHA_MOVE_DASH || pMech->byMove == MECHA_MOVE_JUMP
+      || pMech->byMove == MECHA_MOVE_CANCEL)
+    pMech->iRecentreTicks = MECHA_RECENTRE_TICKS;
 
   /* Whatever the solution came out as, the pilot still has to hit with it.
    * Applied after the aim and before the spread so a wide burst is scattered
@@ -1794,6 +1811,7 @@ static void mecha_reset_mech_for_round(tMechaWorld *pWorld, int iMechIdx,
   pMech->byLock = MECHA_LOCK_NONE;
   pMech->iLockSlipTicks = 0;
   pMech->iFreeTurnTicks = 0;
+  pMech->iRecentreTicks = 0;
 
   for (i = 0; i < MECHA_WEAPON_SLOTS; i++) {
     /* Magazines are per slot, not per stance: the standing loadout is what a
@@ -2083,6 +2101,7 @@ int mecha_sim_add_mech(tMechaWorld *pWorld, int iDefIdx,
   pMech->byLock = MECHA_LOCK_NONE;
   pMech->iLockSlipTicks = 0;
   pMech->iFreeTurnTicks = 0;
+  pMech->iRecentreTicks = 0;
     pMech->iLastFiredSlot = -1;
     pMech->fArmour = mecha_def_get(pMech->byDefIdx)->fArmour;
     pWorld->iMechCount++;

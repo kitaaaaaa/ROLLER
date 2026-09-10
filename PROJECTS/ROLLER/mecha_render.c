@@ -369,19 +369,39 @@ void mecha_camera_update(tMechaCamera *pCamera, const tMechaWorld *pWorld,
     float fDz = pTarget->fZ - pMech->fZ;
     float fRange = mecha_length2(fDx, fDz);
 
-    iWantYaw = mecha_atan2_angle(fDx, fDz);
     /* Pull back as the fight opens up, so both mechs stay in frame. */
     fBack = MECHA_CAM_BACK_NEAR
             + (MECHA_CAM_BACK_FAR - MECHA_CAM_BACK_NEAR)
               * mecha_clampf(fRange / (90.0f * MECHA_METRE), 0.0f, 1.0f);
-    /* Centre the target, not the midpoint. The camera sits behind the player
-     * and looks along the lock, so anything it centres has the player's own
-     * mech in front of it; centring the enemy is what pushes your machine
-     * down into the foreground instead of parking it over the thing you are
-     * trying to shoot. */
-    fFocusX = pTarget->fX;
-    fFocusZ = pTarget->fZ;
-    fFocusY = mecha_mech_centre_height(pWorld, iTargetIdx);
+
+    if (fRange <= MECHA_CLOSE_QUARTERS) {
+      /*
+       * Knife range: look along the lock and centre the enemy. This is the
+       * one distance where the two machines are close enough that framing
+       * them both is framing the fight, and it is also where the machine
+       * squares itself up, so the camera and the mech agree about where
+       * forward is.
+       */
+      iWantYaw = mecha_atan2_angle(fDx, fDz);
+      fFocusX = pTarget->fX;
+      fFocusZ = pTarget->fZ;
+      fFocusY = mecha_mech_centre_height(pWorld, iTargetIdx);
+    } else {
+      /*
+       * Everywhere else the camera chases the player and nothing else.
+       *
+       * It used to swing onto the bearing to the enemy at every range,
+       * which meant the view turned when the enemy moved rather than when
+       * the player did -- and with the machine no longer squaring itself
+       * up out here, the camera was pointing somewhere the machine was
+       * not. Following the player's own heading puts the view back behind
+       * the thing the player is steering.
+       */
+      iWantYaw = pMech->iFacing;
+      fFocusX = pMech->fX + mecha_sin(iWantYaw) * pDef->fHeight * 2.0f;
+      fFocusZ = pMech->fZ + mecha_cos(iWantYaw) * pDef->fHeight * 2.0f;
+      fFocusY = mecha_mech_centre_height(pWorld, iViewMech);
+    }
   } else {
     iWantYaw = pMech->iFacing;
     fBack = MECHA_CAM_BACK_NEAR;

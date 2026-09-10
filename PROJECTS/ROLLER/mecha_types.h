@@ -358,6 +358,11 @@ typedef struct
    * that window is the entire reason to cancel. */
   int   iFreeTurnTicks;
 
+  /* While this runs the machine squares itself up on its lock whatever the
+   * range. Set by the moves that are supposed to put the enemy back in
+   * front of you -- a jump cancel, and firing while boosting or airborne. */
+  int   iRecentreTicks;
+
   /* Angular error added to the firing solution, in the shared 14-bit
    * circle. Weapons aim themselves at whatever is locked, so this is the
    * only thing separating a pilot who can shoot from one who cannot; the

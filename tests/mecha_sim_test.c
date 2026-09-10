@@ -2257,6 +2257,17 @@ static int test_nothing_is_built_coplanar(void)
         mecha_mesh_mech(&list, &world, 1);
         mecha_mesh_shadows(&list, &world);
         aiPairs[iArena] = coplanar_overlaps(&list);
+        /*
+         * And it all fits. The walls are cut into panels the size of the
+         * floor's tiles, which is a few hundred quads an arena more than
+         * one slab a side was, so the budget is worth an assertion rather
+         * than a hope: a frame that overflows does not crash, it silently
+         * stops adding geometry.
+         */
+        printf("   arena %d: %d quads, %d dropped\n", iArena, list.iCount,
+               list.iDropped);
+        CHECK(list.iDropped == 0);
+        CHECK(list.iCount < MECHA_QUAD_CAPACITY * 3 / 4);
     }
 
     printf("   coplanar overlapping pairs per arena: %d, %d, %d\n",

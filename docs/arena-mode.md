@@ -341,6 +341,16 @@ Both are read every frame, so either works at any time.
   -- the file check is what makes that true, because the stock loader exits
   the process on a missing bank rather than returning a failure.
 
+- **Walls are built in panels, not slabs.** The legacy texture path works
+  its coordinates out inside POLYTEX from the tile index and the projected
+  polygon, and it fits exactly one tile to whatever polygon it is handed. A
+  wall built as a single quad therefore wore one tile stretched two hundred
+  metres wide and twenty high -- not a wall with a texture on it, a smear.
+  Each side is now cut into panels the size of the floor's own tiles, so the
+  wall and the ground agree about scale. It costs a few hundred quads an
+  arena, which is why the tests now assert the budget rather than hoping:
+  around 1750 quads for a full scene against a capacity of 4096, and nothing
+  dropped.
 - **Surfaces use the game's own textures.** Ground, walls and cover are
   drawn from the retail texture banks when they are installed -- track1.drh
   for ground and walls, building.drh for the faces of cover -- through the

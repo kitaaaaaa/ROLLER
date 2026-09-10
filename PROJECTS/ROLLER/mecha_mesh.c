@@ -302,6 +302,60 @@ static void mecha_tag_box(tMechaQuadList *pList, int iFirst, int iBank,
                           int iSide, int iTop);
 static void mecha_tag_texture(tMechaQuadList *pList, int iBank, int iTile);
 
+/*
+ * A wall, in panels rather than as one slab.
+ *
+ * The legacy texture path works its coordinates out inside POLYTEX from the
+ * tile index and the projected polygon, and it fits exactly one tile to
+ * whatever polygon it is given. A wall built as a single quad therefore
+ * wears one tile stretched two hundred metres wide and twenty high, which
+ * is not a wall with a texture on it, it is a smear. Cut into panels the
+ * size of the floor's own tiles, each panel gets a tile at the scale the
+ * ground is using and the two agree.
+ *
+ * Panels are emitted from the start end, so the winding -- and with it
+ * which way the wall faces -- is the caller's to pick exactly as before.
+ */
+static void mecha_add_wall(tMechaQuadList *pList,
+                           float fX0, float fZ0, float fX1, float fZ1,
+                           float fHeight, float fTile,
+                           uint8_t byPalette, uint8_t byTile)
+{
+  float fRunX = fX1 - fX0;
+  float fRunZ = fZ1 - fZ0;
+  float fLength = mecha_length2(fRunX, fRunZ);
+  int iAcross;
+  int iUp;
+  int iCol;
+  int iRow;
+
+  if (fTile < 1.0f || fLength < 1.0f || fHeight < 1.0f)
+    return;
+  iAcross = (int)(fLength / fTile + 0.5f);
+  iUp = (int)(fHeight / fTile + 0.5f);
+  if (iAcross < 1)
+    iAcross = 1;
+  if (iUp < 1)
+    iUp = 1;
+
+  for (iRow = 0; iRow < iUp; iRow++) {
+    float fLowY = fHeight * (float)iRow / (float)iUp;
+    float fHighY = fHeight * (float)(iRow + 1) / (float)iUp;
+
+    for (iCol = 0; iCol < iAcross; iCol++) {
+      float fNear = (float)iCol / (float)iAcross;
+      float fFar = (float)(iCol + 1) / (float)iAcross;
+
+      mecha_add_panel(pList, fX0 + fRunX * fNear, fZ0 + fRunZ * fNear,
+                      fX0 + fRunX * fFar, fZ0 + fRunZ * fFar,
+                      fLowY, fHighY, byPalette, 0);
+      mecha_tag_texture(pList, MECHA_TEX_WORLD, byTile);
+    }
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+
 void mecha_mesh_arena(tMechaQuadList *pList, const tMechaArena *pArena)
 {
   float fExtent;
@@ -341,18 +395,18 @@ void mecha_mesh_arena(tMechaQuadList *pList, const tMechaArena *pArena)
   /* The four walls, each facing inward. A camera shoved outside the arena
    * sees straight through them rather than at a wall of solid colour,
    * because they are one-sided and get culled from behind. */
-  mecha_add_panel(pList,  fExtent, -fExtent,  fExtent,  fExtent,
-                  0.0f, pArena->fWallHeight, pArena->byWallPalette, 0);
-  mecha_tag_texture(pList, MECHA_TEX_WORLD, pArena->byWallTile);
-  mecha_add_panel(pList, -fExtent,  fExtent, -fExtent, -fExtent,
-                  0.0f, pArena->fWallHeight, pArena->byWallPalette, 0);
-  mecha_tag_texture(pList, MECHA_TEX_WORLD, pArena->byWallTile);
-  mecha_add_panel(pList,  fExtent,  fExtent, -fExtent,  fExtent,
-                  0.0f, pArena->fWallHeight, pArena->byWallPalette, 0);
-  mecha_tag_texture(pList, MECHA_TEX_WORLD, pArena->byWallTile);
-  mecha_add_panel(pList, -fExtent, -fExtent,  fExtent, -fExtent,
-                  0.0f, pArena->fWallHeight, pArena->byWallPalette, 0);
-  mecha_tag_texture(pList, MECHA_TEX_WORLD, pArena->byWallTile);
+  mecha_add_wall(pList,  fExtent, -fExtent,  fExtent,  fExtent,
+                 pArena->fWallHeight, fTile, pArena->byWallPalette,
+                 pArena->byWallTile);
+  mecha_add_wall(pList, -fExtent,  fExtent, -fExtent, -fExtent,
+                 pArena->fWallHeight, fTile, pArena->byWallPalette,
+                 pArena->byWallTile);
+  mecha_add_wall(pList,  fExtent,  fExtent, -fExtent,  fExtent,
+                 pArena->fWallHeight, fTile, pArena->byWallPalette,
+                 pArena->byWallTile);
+  mecha_add_wall(pList, -fExtent, -fExtent,  fExtent, -fExtent,
+                 pArena->fWallHeight, fTile, pArena->byWallPalette,
+                 pArena->byWallTile);
 
   for (i = 0; i < pArena->iObstacleCount; i++) {
     const tMechaObstacle *pBox = &pArena->aObstacles[i];

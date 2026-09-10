@@ -180,6 +180,32 @@ static void mecha_pose_apply(const tMechaPose *pPose, float fX, float fY,
 }
 
 //-------------------------------------------------------------------------------------------------
+
+/*
+ * A pose hung off another one. The pivot is a point in the parent's space --
+ * a hip, a knee, a shoulder -- and the rotation is the parent's with a
+ * further turn applied on top, so a forearm swings about an elbow that is
+ * itself swinging about a shoulder on a torso that is turning independently
+ * of the legs it stands on. Everything the mech is built from is a chain of
+ * these; nothing but the root knows where it is in the world.
+ */
+static void mecha_pose_child(tMechaPose *pOut, const tMechaPose *pParent,
+                             float fPivotX, float fPivotY, float fPivotZ,
+                             int iYaw, int iPitch, int iRoll)
+{
+  tMechaPose local;
+  float afOrigin[3];
+
+  mecha_pose_apply(pParent, fPivotX, fPivotY, fPivotZ, afOrigin);
+  mecha_pose_build(&local, iYaw, iPitch, iRoll, 0.0f, 0.0f, 0.0f, 1.0f);
+  mecha_matrix_multiply(pOut->afRot, pParent->afRot, local.afRot);
+  pOut->afOrigin[0] = afOrigin[0];
+  pOut->afOrigin[1] = afOrigin[1];
+  pOut->afOrigin[2] = afOrigin[2];
+  pOut->fVerticalScale = pParent->fVerticalScale;
+}
+
+//-------------------------------------------------------------------------------------------------
 /*
  * Corner numbering packs the three sign bits: bit 0 is +X, bit 1 is +Y,
  * bit 2 is +Z. The face table below is wound so that the normal
@@ -344,7 +370,109 @@ void mecha_mesh_arena(tMechaQuadList *pList, const tMechaArena *pArena)
 /* How far the body is tipped over. Falling and getting up are both driven
  * off the simulation's own timers, so the animation can never disagree with
  * when the mech is actually helpless. */
-static int mecha_mesh_body_pitch(const tMechaMech *pMech)
+/*
+ * The walk cycle.
+ *
+ * fStepPhase counts distance rather than time -- one cycle every two metres
+ * -- so a machine that stops mid-stride stops mid-stride, and a heavy one
+ * that covers ground slowly takes slow steps without anything having to say
+ * so. The thigh swings as a sine of the phase; the knee bends through the
+ * forward half of that swing and straightens for the half the foot is on the
+ * ground pushing back, which is the difference between walking and a pair of
+ * planks pivoting at the hip.
+ *
+ * Angles are positive forward, and the caller negates them for the pose,
+ * because a positive pitch in the pose matrix swings a limb backwards.
+ */
+#define MECHA_LEG_SWING   MECHA_DEG(27)
+#define MECHA_LEG_KNEE    MECHA_DEG(48)
+#define MECHA_LEG_TUCK    MECHA_DEG(20)
+#define MECHA_LEG_AIRKNEE MECHA_DEG(58)
+#define MECHA_LEG_SQUAT   MECHA_DEG(26)
+#define MECHA_LEG_SQKNEE  MECHA_DEG(52)
+
+static void mecha_leg_angles(float fPhase, bool bAirborne, bool bGuard,
+                             int *piThigh, int *piKnee)
+{
+  int iAngle = (int)(fPhase * (float)MECHA_ANGLE_FULL) & (MECHA_ANGLE_FULL - 1);
+  float fCos = mecha_cos(iAngle);
+
+  if (bAirborne) {
+    /* Tucked, and still swinging a little so a jump is not a statue. */
+    *piThigh = MECHA_LEG_TUCK + (int)(MECHA_DEG(7) * mecha_sin(iAngle));
+    *piKnee = MECHA_LEG_AIRKNEE;
+    return;
+  }
+  if (bGuard) {
+    *piThigh = MECHA_LEG_SQUAT;
+    *piKnee = MECHA_LEG_SQKNEE;
+    return;
+  }
+  *piThigh = (int)((float)MECHA_LEG_SWING * mecha_sin(iAngle));
+  *piKnee = fCos > 0.0f ? (int)((float)MECHA_LEG_KNEE * fCos) : 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/* How far below the hip the ankle ends up, for a given pair of joint angles.
+ * This is what keeps the feet on the floor: the body is lowered by whatever
+ * the straighter leg has lost, so bending the knees sinks the machine
+ * instead of leaving it hanging with its feet in the air. */
+static float mecha_leg_reach(int iThigh, int iKnee, float fThighLen,
+                             float fShinLen)
+{
+  return fThighLen * mecha_cos(iThigh)
+       + fShinLen * mecha_cos(mecha_angle_wrap(iThigh + iKnee));
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * Where this machine is pointing its weapons, as a heading and an elevation.
+ * Under a held lock that is the line to the target, which is what makes the
+ * arms track an enemy that is circling you; otherwise it is the machine's
+ * own heading and the elevation the sim is carrying, so the arms still point
+ * wherever the shot is going to go.
+ */
+static void mecha_mech_aim(const tMechaWorld *pWorld, int iMechIdx,
+                           int *piYaw, int *piPitch)
+{
+  const tMechaMech *pMech = &pWorld->aMechs[iMechIdx];
+  const tMechaMech *pTarget;
+  const tMechaMechDef *pTargetDef;
+  float fDx;
+  float fDy;
+  float fDz;
+  float fFlat;
+
+  *piYaw = pMech->iFacing;
+  *piPitch = pMech->iAimPitch >= MECHA_ANGLE_HALF
+             ? pMech->iAimPitch - MECHA_ANGLE_FULL : pMech->iAimPitch;
+
+  if (pMech->byLock != MECHA_LOCK_HELD
+      || pMech->iTargetIdx < 0 || pMech->iTargetIdx >= MECHA_MAX_MECHS)
+    return;
+  pTarget = &pWorld->aMechs[pMech->iTargetIdx];
+  if (!pTarget->bActive)
+    return;
+  pTargetDef = mecha_def_get((int)pTarget->byDefIdx);
+
+  fDx = pTarget->fX - pMech->fX;
+  fDz = pTarget->fZ - pMech->fZ;
+  fDy = (pTarget->fY + 0.62f * pTargetDef->fHeight)
+        - (pMech->fY + 0.70f * mecha_def_get((int)pMech->byDefIdx)->fHeight);
+  fFlat = mecha_length2(fDx, fDz);
+  if (fFlat < 1e-3f)
+    return;
+  *piYaw = mecha_atan2_angle(fDx, fDz);
+  *piPitch = mecha_atan2_angle(fDy, fFlat);
+  if (*piPitch >= MECHA_ANGLE_HALF)
+    *piPitch -= MECHA_ANGLE_FULL;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int mecha_mesh_fall_pitch(const tMechaMech *pMech)
 {
   const int iDownPitch = MECHA_DEG(78);
 
@@ -362,6 +490,17 @@ static int mecha_mesh_body_pitch(const tMechaMech *pMech)
     return (int)((float)iDownPitch * mecha_clampf(fProgress, 0.0f, 1.0f));
   }
   case MECHA_MOVE_DESTROYED: return iDownPitch;
+  default:                   return 0;
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/* The lean, which belongs to the torso alone: a machine leaning into a dash
+ * leans over its own legs, and a fall takes the legs with it. */
+static int mecha_mesh_lean_pitch(const tMechaMech *pMech)
+{
+  switch (pMech->byMove) {
   case MECHA_MOVE_DASH:      return MECHA_DEG(12);
   case MECHA_MOVE_JUMP:      return -MECHA_DEG(6);
   /* Nose down through the drop, which is what tells the other player the
@@ -396,8 +535,17 @@ void mecha_mesh_mech(tMechaQuadList *pList, const tMechaWorld *pWorld,
   float fGun;
   float fVertical;
   float fLateral;
+  float fAnkle;
+  float fLegSpan;
+  float fThighLen;
+  float fShinLen;
+  float fLift = 0.0f;
+  int aiThigh[2];
+  int aiKnee[2];
+  int iSide;
   int iRoll;
   bool bAirborne;
+  tMechaPose torso;
 
   if (!pList || !pWorld || iMechIdx < 0 || iMechIdx >= MECHA_MAX_MECHS)
     return;
@@ -438,81 +586,199 @@ void mecha_mesh_mech(tMechaQuadList *pList, const tMechaWorld *pWorld,
   fHead     = pDef->fBuildHead     > 0.0f ? pDef->fBuildHead     : 1.0f;
   fGun      = pDef->fBuildGun      > 0.0f ? pDef->fBuildGun      : 1.0f;
 
-  fVertical = pMech->byMove == MECHA_MOVE_GUARD ? 0.66f : 1.0f;
-  mecha_pose_build(&pose, pMech->iFacing, mecha_mesh_body_pitch(pMech), iRoll,
-                   pMech->fX, pMech->fY, pMech->fZ, fVertical);
+  /* Guard used to squash the whole machine down to two thirds. It bends its
+   * knees now instead, which is the same read and an honest one. */
+  fVertical = 1.0f;
+  fAnkle = 0.07f * fHeight;
 
-  /* Legs swing on distance travelled rather than on time, so a mech that
-   * stops mid-stride stops mid-stride. Airborne, they tuck instead. */
-  fSwing = mecha_sin((int)(pMech->fStepPhase * (float)MECHA_ANGLE_FULL));
-  fLegLength = bAirborne ? 0.34f : 0.44f;
-  if (bAirborne)
-    fSwing *= 0.3f;
+  /* --- the walk ---------------------------------------------------------
+   *
+   * Both legs run the same cycle half a stride apart, backwards when the
+   * machine is backing up. The angles come first, then the body is dropped
+   * onto whichever foot reaches lowest, so a crouch sinks and a stride bobs
+   * without either being animated as such.
+   */
+  {
+    float fPhase = pMech->fStepPhase - (float)(int)pMech->fStepPhase;
+    bool bGuard = pMech->byMove == MECHA_MOVE_GUARD;
 
-  /* Legs and feet. */
-  mecha_add_box(pList, &pose, -0.42f * fRadius * fLimb,
-                fLegLength * fHeight * 0.5f, fSwing * 0.35f * fRadius,
-                0.24f * fRadius * fLimb, fLegLength * fHeight * 0.5f,
-                0.26f * fRadius * fLimb, byBody, byBody, 0);
-  mecha_add_box(pList, &pose, 0.42f * fRadius * fLimb,
-                fLegLength * fHeight * 0.5f, -fSwing * 0.35f * fRadius,
-                0.24f * fRadius * fLimb, fLegLength * fHeight * 0.5f,
-                0.26f * fRadius * fLimb, byBody, byBody, 0);
-  mecha_add_box(pList, &pose, -0.42f * fRadius * fLimb, 0.035f * fHeight,
-                fSwing * 0.35f * fRadius + 0.10f * fRadius,
-                0.28f * fRadius * fLimb, 0.035f * fHeight,
-                0.42f * fRadius * fLimb, byTrim, byTrim, 0);
-  mecha_add_box(pList, &pose, 0.42f * fRadius * fLimb, 0.035f * fHeight,
-                -fSwing * 0.35f * fRadius + 0.10f * fRadius,
-                0.28f * fRadius * fLimb, 0.035f * fHeight,
-                0.42f * fRadius * fLimb, byTrim, byTrim, 0);
+    if (pMech->bLegsBackward)
+      fPhase = 1.0f - fPhase;
+    fLegSpan = 0.47f * fHeight - fAnkle;
+    fThighLen = 0.52f * fLegSpan;
+    fShinLen = fLegSpan - fThighLen;
 
-  /* Hips, torso, chest plate. */
-  mecha_add_box(pList, &pose, 0.0f, 0.47f * fHeight, 0.0f,
+    mecha_leg_angles(fPhase, bAirborne, bGuard, &aiThigh[0], &aiKnee[0]);
+    mecha_leg_angles(fPhase + 0.5f, bAirborne, bGuard, &aiThigh[1],
+                     &aiKnee[1]);
+    if (!bAirborne) {
+      float fLeft = mecha_leg_reach(aiThigh[0], aiKnee[0], fThighLen,
+                                    fShinLen);
+      float fRight = mecha_leg_reach(aiThigh[1], aiKnee[1], fThighLen,
+                                     fShinLen);
+
+      fLift = (fLeft > fRight ? fLeft : fRight) - fLegSpan;
+    }
+  }
+
+  /*
+   * The root pose is the legs, and the legs are not the machine: they point
+   * along the line of travel while the shoulders hold the aim. Only a fall
+   * pitches the whole thing over -- a dash lean belongs to the torso, which
+   * is why the pitch is split in two.
+   */
+  mecha_pose_build(&pose, pMech->iLegYaw, mecha_mesh_fall_pitch(pMech), iRoll,
+                   pMech->fX, pMech->fY + fLift, pMech->fZ, fVertical);
+
+  /* --- legs -------------------------------------------------------------- */
+  for (iSide = 0; iSide < 2; iSide++) {
+    float fSide = iSide == 0 ? -1.0f : 1.0f;
+    tMechaPose thigh;
+    tMechaPose shin;
+    tMechaPose foot;
+
+    mecha_pose_child(&thigh, &pose, fSide * 0.42f * fRadius * fLimb,
+                     0.47f * fHeight, 0.0f, 0, -aiThigh[iSide], 0);
+    mecha_add_box(pList, &thigh, 0.0f, -0.5f * fThighLen, 0.0f,
+                  0.23f * fRadius * fLimb, 0.5f * fThighLen,
+                  0.24f * fRadius * fLimb, byBody, byBody, 0);
+    /* The knee itself, so the joint reads as a joint from any angle rather
+     * than as two boxes that happen to meet. */
+    mecha_add_box(pList, &thigh, 0.0f, -fThighLen, 0.0f,
+                  0.19f * fRadius * fLimb, 0.05f * fHeight,
+                  0.19f * fRadius * fLimb, byJoint, byJoint, 0);
+
+    mecha_pose_child(&shin, &thigh, 0.0f, -fThighLen, 0.0f, 0,
+                     -aiKnee[iSide], 0);
+    mecha_add_box(pList, &shin, 0.0f, -0.5f * fShinLen, 0.0f,
+                  0.19f * fRadius * fLimb, 0.5f * fShinLen,
+                  0.20f * fRadius * fLimb, byBody, byBody, 0);
+
+    /* The foot stays flat to the floor whatever the leg above it is doing,
+     * which is the whole reason it gets a joint of its own. */
+    mecha_pose_child(&foot, &shin, 0.0f, -fShinLen, 0.0f, 0,
+                     aiThigh[iSide] + aiKnee[iSide], 0);
+    mecha_add_box(pList, &foot, 0.0f, -0.5f * fAnkle, 0.10f * fRadius,
+                  0.27f * fRadius * fLimb, 0.5f * fAnkle,
+                  0.42f * fRadius * fLimb, byTrim, byTrim, 0);
+  }
+
+  /* --- torso ------------------------------------------------------------
+   *
+   * Turned off the legs by whatever the heading differs from the stance,
+   * and carrying the lean, so a machine strafing across your guns is walking
+   * sideways with its shoulders still square to you.
+   */
+  mecha_pose_child(&torso, &pose, 0.0f, 0.47f * fHeight, 0.0f,
+                   mecha_angle_delta(pMech->iLegYaw, pMech->iFacing),
+                   mecha_mesh_lean_pitch(pMech), 0);
+
+  /* Hips, chest, chest plate. */
+  mecha_add_box(pList, &torso, 0.0f, 0.0f, 0.0f,
                 0.62f * fRadius * fTorso, 0.07f * fHeight,
                 0.42f * fRadius * fTorso, byJoint, byJoint, 0);
-  mecha_add_box(pList, &pose, 0.0f, 0.64f * fHeight, 0.02f * fRadius,
+  mecha_add_box(pList, &torso, 0.0f, 0.17f * fHeight, 0.02f * fRadius,
                 0.72f * fRadius * fTorso, 0.13f * fHeight,
                 0.50f * fRadius * fTorso, byBody, byTrim, 0);
-  mecha_add_box(pList, &pose, 0.0f, 0.66f * fHeight,
+  mecha_add_box(pList, &torso, 0.0f, 0.19f * fHeight,
                 0.52f * fRadius * fTorso,
                 0.50f * fRadius * fTorso, 0.09f * fHeight, 0.06f * fRadius,
                 byTrim, byTrim, 0);
 
   /* Thruster pack. */
-  mecha_add_box(pList, &pose, 0.0f, 0.66f * fHeight,
+  mecha_add_box(pList, &torso, 0.0f, 0.19f * fHeight,
                 -0.56f * fRadius * fTorso,
                 0.50f * fRadius * fTorso, 0.11f * fHeight, 0.16f * fRadius,
                 byJoint, byJoint, 0);
 
-  /* Shoulders and the weapon each arm carries. The gun rides on the
-   * shoulder span, so a wide machine carries its weapons further out as
-   * well as carrying bigger ones. */
-  mecha_add_box(pList, &pose, -1.00f * fRadius * fShoulder, 0.76f * fHeight,
-                0.0f,
-                0.30f * fRadius * fShoulder, 0.09f * fHeight * fShoulder,
-                0.36f * fRadius * fShoulder, byTrim, byTrim, 0);
-  mecha_add_box(pList, &pose, 1.00f * fRadius * fShoulder, 0.76f * fHeight,
-                0.0f,
-                0.30f * fRadius * fShoulder, 0.09f * fHeight * fShoulder,
-                0.36f * fRadius * fShoulder, byTrim, byTrim, 0);
-  mecha_add_box(pList, &pose, -1.05f * fRadius * fShoulder, 0.58f * fHeight,
-                0.10f * fRadius,
-                0.22f * fRadius * fGun, 0.13f * fHeight * fGun,
-                0.26f * fRadius * fGun, byBody, byBody, 0);
-  mecha_add_box(pList, &pose, 1.05f * fRadius * fShoulder, 0.58f * fHeight,
-                0.10f * fRadius,
-                0.22f * fRadius * fGun, 0.13f * fHeight * fGun,
-                0.26f * fRadius * fGun, byBody, byBody, 0);
+  /* --- arms -------------------------------------------------------------
+   *
+   * Each arm is a shoulder, an elbow and the gun the forearm carries, and
+   * the whole chain is aimed: the shoulder turns and elevates onto the line
+   * the weapons are pointing down, which under a held lock is the line to
+   * the target. Firing kicks the arm that fired.
+   */
+  {
+    int iAimYaw;
+    int iAimPitch;
+    int iArmYaw;
+    float fUpper = 0.20f * fHeight;
+    float fFore = 0.17f * fHeight;
 
-  /* Head and visor. */
-  mecha_add_box(pList, &pose, 0.0f, 0.86f * fHeight, 0.05f * fRadius,
-                0.26f * fRadius * fHead, 0.05f * fHeight * fHead,
-                0.26f * fRadius * fHead, byTrim, byTrim, 0);
-  mecha_add_box(pList, &pose, 0.0f, 0.87f * fHeight,
-                0.30f * fRadius * fHead,
-                0.20f * fRadius * fHead, 0.02f * fHeight, 0.03f * fRadius,
-                byGlow, byGlow, MECHA_QUAD_GLOW);
+    mecha_mech_aim(pWorld, iMechIdx, &iAimYaw, &iAimPitch);
+    iArmYaw = mecha_clampi(mecha_angle_delta(pMech->iFacing, iAimYaw),
+                           -MECHA_ARM_YAW_LIMIT, MECHA_ARM_YAW_LIMIT);
+    iAimPitch = mecha_clampi(iAimPitch, -MECHA_ARM_PITCH_LIMIT,
+                             MECHA_ARM_PITCH_LIMIT);
+
+    for (iSide = 0; iSide < 2; iSide++) {
+      float fSide = iSide == 0 ? -1.0f : 1.0f;
+      int iSlot = iSide == 0 ? MECHA_SLOT_LEFT : MECHA_SLOT_RIGHT;
+      int iKick = 0;
+      tMechaPose shoulder;
+      tMechaPose upper;
+      tMechaPose fore;
+
+      if (pMech->iRecovery > 0 && pMech->iLastFiredSlot == iSlot)
+        iKick = MECHA_ARM_RECOIL
+                * mecha_clampi(pMech->iRecovery, 0, 6) / 6;
+
+      /* Shoulder pauldron, on the torso rather than on the arm: it is armour
+       * bolted to the machine, not something the elbow swings. */
+      mecha_add_box(pList, &torso, fSide * 1.00f * fRadius * fShoulder,
+                    0.29f * fHeight, 0.0f,
+                    0.30f * fRadius * fShoulder, 0.09f * fHeight * fShoulder,
+                    0.36f * fRadius * fShoulder, byTrim, byTrim, 0);
+
+      mecha_pose_child(&shoulder, &torso,
+                       fSide * 0.98f * fRadius * fShoulder, 0.27f * fHeight,
+                       0.0f, iArmYaw, -iAimPitch + iKick, 0);
+      mecha_pose_child(&upper, &shoulder, 0.0f, 0.0f, 0.0f, 0,
+                       -MECHA_ARM_DROOP, 0);
+      mecha_add_box(pList, &upper, 0.0f, -0.5f * fUpper, 0.0f,
+                    0.16f * fRadius * fLimb, 0.5f * fUpper,
+                    0.16f * fRadius * fLimb, byBody, byBody, 0);
+      mecha_add_box(pList, &upper, 0.0f, -fUpper, 0.0f,
+                    0.14f * fRadius * fLimb, 0.04f * fHeight,
+                    0.14f * fRadius * fLimb, byJoint, byJoint, 0);
+
+      /* The elbow makes up the rest of the right angle, so the forearm and
+       * the gun on the end of it come out level along the line of aim. */
+      mecha_pose_child(&fore, &upper, 0.0f, -fUpper, 0.0f, 0,
+                       -(MECHA_ANGLE_QUARTER - MECHA_ARM_DROOP), 0);
+      mecha_add_box(pList, &fore, 0.0f, -0.5f * fFore, 0.0f,
+                    0.14f * fRadius * fLimb, 0.5f * fFore,
+                    0.14f * fRadius * fLimb, byTrim, byTrim, 0);
+      mecha_add_box(pList, &fore, 0.0f,
+                    -fFore - 0.13f * fHeight * fGun, 0.0f,
+                    0.22f * fRadius * fGun, 0.13f * fHeight * fGun,
+                    0.26f * fRadius * fGun, byBody, byBody, 0);
+    }
+
+    /* --- head ---------------------------------------------------------
+     *
+     * Looks at whoever is being tracked, within the limits of a neck, and
+     * independently of both the legs it stands on and the shoulders it sits
+     * between: the machine watches you even while it walks somewhere else.
+     */
+    {
+      tMechaPose head;
+      int iHeadYaw = mecha_clampi(iArmYaw, -MECHA_HEAD_YAW_LIMIT,
+                                  MECHA_HEAD_YAW_LIMIT);
+      int iHeadPitch = mecha_clampi(iAimPitch, -MECHA_HEAD_PITCH_LIMIT,
+                                    MECHA_HEAD_PITCH_LIMIT);
+
+      mecha_pose_child(&head, &torso, 0.0f, 0.37f * fHeight, 0.0f,
+                       iHeadYaw, -iHeadPitch, 0);
+      mecha_add_box(pList, &head, 0.0f, 0.02f * fHeight, 0.05f * fRadius,
+                    0.26f * fRadius * fHead, 0.05f * fHeight * fHead,
+                    0.26f * fRadius * fHead, byTrim, byTrim, 0);
+      mecha_add_box(pList, &head, 0.0f, 0.03f * fHeight,
+                    0.30f * fRadius * fHead,
+                    0.20f * fRadius * fHead, 0.02f * fHeight, 0.03f * fRadius,
+                    byGlow, byGlow, MECHA_QUAD_GLOW);
+    }
+  }
 
   /* Thruster plume, whenever the mech is actually spending gauge. */
   if (pMech->byMove == MECHA_MOVE_DASH
@@ -520,7 +786,7 @@ void mecha_mesh_mech(tMechaQuadList *pList, const tMechaWorld *pWorld,
     float fFlare = (0.35f + 0.12f * mecha_sin(pWorld->iTick * 2100))
                    * fRadius;
 
-    mecha_add_box(pList, &pose, 0.0f, 0.62f * fHeight,
+    mecha_add_box(pList, &torso, 0.0f, 0.15f * fHeight,
                   -0.74f * fRadius - fFlare,
                   0.30f * fRadius, 0.09f * fHeight, fFlare,
                   byGlow, byGlow, MECHA_QUAD_GLOW);

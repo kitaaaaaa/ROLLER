@@ -148,6 +148,28 @@ Both are read every frame, so either works at any time.
   data, so the arena lends the engine one `HorizonColour` entry for the
   length of the call and puts it back. The nine-band sunset gradient this
   replaced was the mode inventing a sky the engine already had.
+- **The machines are jointed.** Legs have knees: the thigh swings as a sine
+  of the step phase, the knee bends through the forward half of that swing
+  and straightens for the half the foot is planted and pushing back, and the
+  ankle keeps the sole flat to the floor whatever the leg above it is doing.
+  The body is then dropped onto whichever foot reaches lowest, which is what
+  makes a stride bob and a guard sink rather than either being animated as
+  such -- guard bends the knees now instead of squashing the whole machine
+  down to two thirds of its height.
+- **The legs are not the machine.** They follow the line of travel while the
+  torso holds the aim, so a mech strafing across your guns walks sideways
+  with its shoulders square to you. A heading more than a quarter turn off
+  the shoulders means it is walking backwards, so the cycle runs in reverse
+  rather than the machine spinning round; what is left is clamped, because
+  feet pointed further off the shoulders than that are not strafing, they
+  are tangled. `iLegYaw` is the one piece of animation state the simulation
+  owns, because it is smoothed over time and the mesh is rebuilt every frame.
+- **Arms have elbows and they aim.** Each arm is a shoulder, an elbow and
+  the gun on the end of the forearm, and the whole chain turns and elevates
+  onto the line the weapons are pointing down -- which under a held lock is
+  the line to the target, so the guns track an enemy circling you. Firing
+  kicks the arm that fired. The head looks the same way on a shorter leash:
+  an arm is a gun mount, a neck is a neck.
 - **The camera chases you, not the enemy.** Beyond knife range it sits behind
   your machine and looks where your machine is looking, so the view is steady
   while you steer. Inside `MECHA_CLOSE_QUARTERS` it swings onto the lock and

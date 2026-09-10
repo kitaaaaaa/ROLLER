@@ -1076,6 +1076,36 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
     pMech->fStepPhase += fSpeed * MECHA_DT / (2.0f * MECHA_METRE);
     if (pMech->fStepPhase > 1000.0f)
       pMech->fStepPhase -= 1000.0f;
+
+    /*
+     * The feet follow the line of travel, not the direction of it: a machine
+     * backing away from you is walking backwards, not turning round, so a
+     * heading more than a quarter turn off the shoulders is folded back and
+     * the step cycle runs in reverse instead. What is left is clamped, since
+     * a mech whose feet point further off its shoulders than that is not
+     * strafing, it is tangled.
+     */
+    if (fSpeed > MECHA_LEG_WALK_SPEED) {
+      int iTravel = mecha_atan2_angle(pMech->fVelX, pMech->fVelZ);
+      int iOffset = mecha_angle_delta(pMech->iFacing, iTravel);
+
+      pMech->bLegsBackward = iOffset > MECHA_ANGLE_QUARTER
+                          || iOffset < -MECHA_ANGLE_QUARTER;
+      if (pMech->bLegsBackward)
+        iOffset = iOffset > 0 ? iOffset - MECHA_ANGLE_HALF
+                              : iOffset + MECHA_ANGLE_HALF;
+      iOffset = mecha_clampi(iOffset, -MECHA_LEG_YAW_LIMIT,
+                             MECHA_LEG_YAW_LIMIT);
+      iTravel = mecha_angle_wrap(pMech->iFacing + iOffset);
+      pMech->iLegYaw = mecha_angle_approach(pMech->iLegYaw, iTravel,
+                                            (int)(MECHA_LEG_YAW_RATE
+                                                  * MECHA_DT));
+    } else {
+      pMech->bLegsBackward = false;
+      pMech->iLegYaw = mecha_angle_approach(pMech->iLegYaw, pMech->iFacing,
+                                            (int)(MECHA_LEG_YAW_RATE
+                                                  * MECHA_DT));
+    }
   }
 
   /* --- timers ----------------------------------------------------------- */
@@ -1828,6 +1858,8 @@ static void mecha_reset_mech_for_round(tMechaWorld *pWorld, int iMechIdx,
 
   pMech->fLeanRoll = 0.0f;
   pMech->fStepPhase = 0.0f;
+  pMech->iLegYaw = pMech->iFacing;
+  pMech->bLegsBackward = false;
 }
 
 //-------------------------------------------------------------------------------------------------

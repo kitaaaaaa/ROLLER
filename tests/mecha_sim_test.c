@@ -1096,6 +1096,285 @@ static int test_guard_turns_melee_aside(void)
 
 //-------------------------------------------------------------------------------------------------
 
+/* How far apart the feet are, front to back, in the mech's own frame. */
+static void mesh_foot_span(const tMechaQuadList *pList,
+                           const tMechaMech *pMech, float fAnkle,
+                           float *pfLowZ, float *pfHighZ)
+{
+    float fCos = mecha_cos(pMech->iFacing);
+    float fSin = mecha_sin(pMech->iFacing);
+    float fLow = 1e30f;
+    float fHigh = -1e30f;
+    int i;
+    int v;
+
+    for (i = 0; i < pList->iCount; i++) {
+        for (v = 0; v < 4; v++) {
+            float fY = pList->paQuads[i].afVert[v][1] - pMech->fY;
+            float fDx = pList->paQuads[i].afVert[v][0] - pMech->fX;
+            float fDz = pList->paQuads[i].afVert[v][2] - pMech->fZ;
+            float fLocalZ = fDx * fSin + fDz * fCos;
+
+            if (fY > fAnkle)
+                continue;
+            if (fLocalZ < fLow)
+                fLow = fLocalZ;
+            if (fLocalZ > fHigh)
+                fHigh = fLocalZ;
+        }
+    }
+    *pfLowZ = fLow;
+    *pfHighZ = fHigh;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/* The top of the machine, in world space. */
+static float mesh_highest(const tMechaQuadList *pList)
+{
+    float fTop = -1e30f;
+    int i;
+    int v;
+
+    for (i = 0; i < pList->iCount; i++)
+        for (v = 0; v < 4; v++)
+            if (pList->paQuads[i].afVert[v][1] > fTop)
+                fTop = pList->paQuads[i].afVert[v][1];
+    return fTop;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/* Centroid of every vertex inside a height band, written in the mech's own
+ * frame: X across, Z forward, so a limb that has swung left reads as a
+ * negative X whatever heading the machine is on. */
+static void mesh_band_centroid(const tMechaQuadList *pList,
+                               const tMechaMech *pMech, float fLow,
+                               float fHigh, float *pfX, float *pfZ,
+                               float *pfMinY)
+{
+    float fCos = mecha_cos(pMech->iFacing);
+    float fSin = mecha_sin(pMech->iFacing);
+    float fSumX = 0.0f;
+    float fSumZ = 0.0f;
+    float fMinY = 1e30f;
+    int iCount = 0;
+    int i;
+    int v;
+
+    for (i = 0; i < pList->iCount; i++) {
+        for (v = 0; v < 4; v++) {
+            float fY = pList->paQuads[i].afVert[v][1] - pMech->fY;
+            float fDx = pList->paQuads[i].afVert[v][0] - pMech->fX;
+            float fDz = pList->paQuads[i].afVert[v][2] - pMech->fZ;
+
+            if (fY < fMinY)
+                fMinY = fY;
+            if (fY < fLow || fY > fHigh)
+                continue;
+            fSumX += fDx * fCos - fDz * fSin;
+            fSumZ += fDx * fSin + fDz * fCos;
+            iCount++;
+        }
+    }
+    *pfX = iCount > 0 ? fSumX / (float)iCount : 0.0f;
+    *pfZ = iCount > 0 ? fSumZ / (float)iCount : 0.0f;
+    if (pfMinY)
+        *pfMinY = fMinY;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_legs_walk_on_jointed_knees(void)
+{
+    static tMechaQuad aStorage[MECHA_QUAD_CAPACITY];
+    tMechaQuadList list;
+    tMechaWorld world;
+    const tMechaMechDef *pDef;
+    float fStride = 0.0f;
+    float fWorstFoot = 0.0f;
+    float fBendDrop = 0.0f;
+    int iStep;
+
+    start_duel(&world, 0, 0, 0, 0x1E65u, 1);
+    pDef = mecha_def_get((int)world.aMechs[0].byDefIdx);
+    world.aMechs[0].byMove = MECHA_MOVE_WALK;
+
+    for (iStep = 0; iStep < 12; iStep++) {
+        float fX;
+        float fZ;
+        float fMinY;
+        float fLowZ;
+        float fHighZ;
+
+        world.aMechs[0].fStepPhase = (float)iStep / 12.0f;
+        mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
+        mecha_mesh_mech(&list, &world, 0);
+        CHECK(list.iCount > 0);
+
+        /* Ankle height and below: the feet. Their fore and aft spread is the
+         * stride, and the lowest vertex on the machine is the sole. */
+        mesh_band_centroid(&list, &world.aMechs[0], 0.0f,
+                           0.09f * pDef->fHeight, &fX, &fZ, &fMinY);
+        mesh_foot_span(&list, &world.aMechs[0], 0.09f * pDef->fHeight,
+                       &fLowZ, &fHighZ);
+        if (fHighZ - fLowZ > fStride)
+            fStride = fHighZ - fLowZ;
+
+        /*
+         * The soles stay on the floor through the whole cycle. This is the
+         * assertion the body-drop calculation exists for: bend a knee
+         * without lowering the hips and the machine walks on tiptoe, lower
+         * them by the wrong amount and it sinks through the ground.
+         */
+        if (fMinY < fWorstFoot)
+            fWorstFoot = fMinY;
+        CHECK(fMinY > -0.01f * pDef->fHeight);
+        CHECK(fMinY < 0.02f * pDef->fHeight);
+    }
+
+    /* Guard bends the knees rather than squashing the machine, so the head
+     * comes down and the feet stay put. */
+    {
+        float fX;
+        float fZ;
+        float fStandHead;
+        float fGuardHead;
+
+        world.aMechs[0].fStepPhase = 0.0f;
+        world.aMechs[0].byMove = MECHA_MOVE_STAND;
+        mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
+        mecha_mesh_mech(&list, &world, 0);
+        fStandHead = mesh_highest(&list) - world.aMechs[0].fY;
+
+        world.aMechs[0].byMove = MECHA_MOVE_GUARD;
+        mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
+        mecha_mesh_mech(&list, &world, 0);
+        fGuardHead = mesh_highest(&list) - world.aMechs[0].fY;
+        mesh_band_centroid(&list, &world.aMechs[0], 0.0f,
+                           0.09f * pDef->fHeight, &fX, &fZ, &fBendDrop);
+
+        printf("   stride %.0f, sole error %.0f, head %.0f standing"
+               " and %.0f guarding\n", fStride, fWorstFoot, fStandHead,
+               fGuardHead);
+        CHECK(fGuardHead < fStandHead * 0.92f);
+        CHECK(fBendDrop > -0.01f * pDef->fHeight);
+    }
+
+    /* A stride that never opens is a pair of planks pivoting at the hip. */
+    CHECK(fStride > 0.35f * pDef->fRadius);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_torso_turns_off_the_legs(void)
+{
+    static tMechaQuad aStorage[MECHA_QUAD_CAPACITY];
+    static tMechaQuad aTurned[MECHA_QUAD_CAPACITY];
+    tMechaQuadList list;
+    tMechaQuadList turned;
+    tMechaWorld world;
+    const tMechaMechDef *pDef;
+    float fUpperMoved = 0.0f;
+    float fLowerMoved = 0.0f;
+    int i;
+    int v;
+
+    start_duel(&world, 0, 0, 0, 0x707Cu, 1);
+    pDef = mecha_def_get((int)world.aMechs[0].byDefIdx);
+    world.aMechs[0].iFacing = 0;
+    world.aMechs[0].iLegYaw = 0;
+    world.aMechs[0].fStepPhase = 0.0f;
+    mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
+    mecha_mesh_mech(&list, &world, 0);
+
+    world.aMechs[0].iLegYaw = MECHA_DEG(40);
+    mecha_quads_reset(&turned, aTurned, MECHA_QUAD_CAPACITY);
+    mecha_mesh_mech(&turned, &world, 0);
+    CHECK(turned.iCount == list.iCount);
+
+    for (i = 0; i < list.iCount; i++) {
+        for (v = 0; v < 4; v++) {
+            float fY = aStorage[i].afVert[v][1] - world.aMechs[0].fY;
+            float fDx = aTurned[i].afVert[v][0] - aStorage[i].afVert[v][0];
+            float fDz = aTurned[i].afVert[v][2] - aStorage[i].afVert[v][2];
+            float fMoved = mecha_length2(fDx, fDz);
+
+            if (fY > 0.60f * pDef->fHeight) {
+                if (fMoved > fUpperMoved)
+                    fUpperMoved = fMoved;
+            } else if (fY < 0.30f * pDef->fHeight) {
+                if (fMoved > fLowerMoved)
+                    fLowerMoved = fMoved;
+            }
+        }
+    }
+
+    printf("   legs turned 40 degrees: chest moved %.0f, legs moved %.0f\n",
+           fUpperMoved, fLowerMoved);
+    /* Turning the stance must move the legs and leave the shoulders where
+     * they were: that is the whole point of the machine having a waist. */
+    CHECK(fLowerMoved > 0.25f * pDef->fRadius);
+    CHECK(fUpperMoved < 0.02f * pDef->fRadius);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_arms_and_head_follow_the_lock(void)
+{
+    static tMechaQuad aStorage[MECHA_QUAD_CAPACITY];
+    tMechaQuadList list;
+    tMechaWorld world;
+    const tMechaMechDef *pDef;
+    float fLeftX;
+    float fRightX;
+    float fHeadLeftX;
+    float fHeadRightX;
+    float fZ;
+
+    start_duel(&world, 0, 0, 0, 0xA124u, 1);
+    pDef = mecha_def_get((int)world.aMechs[0].byDefIdx);
+    world.aMechs[0].fX = 0.0f;
+    world.aMechs[0].fZ = 0.0f;
+    world.aMechs[0].iFacing = 0;
+    world.aMechs[0].iLegYaw = 0;
+    world.aMechs[0].byLock = MECHA_LOCK_HELD;
+    world.aMechs[0].iTargetIdx = 1;
+    world.aMechs[1].fY = world.aMechs[0].fY;
+
+    /* Target off to the left, then off to the right, both well inside the
+     * reach of a shoulder. */
+    world.aMechs[1].fX = -MECHA_M(40.0f);
+    world.aMechs[1].fZ = MECHA_M(40.0f);
+    mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
+    mecha_mesh_mech(&list, &world, 0);
+    mesh_band_centroid(&list, &world.aMechs[0], 0.40f * pDef->fHeight,
+                       0.62f * pDef->fHeight, &fLeftX, &fZ, NULL);
+    mesh_band_centroid(&list, &world.aMechs[0], 0.80f * pDef->fHeight,
+                       1.10f * pDef->fHeight, &fHeadLeftX, &fZ, NULL);
+
+    world.aMechs[1].fX = MECHA_M(40.0f);
+    mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
+    mecha_mesh_mech(&list, &world, 0);
+    mesh_band_centroid(&list, &world.aMechs[0], 0.40f * pDef->fHeight,
+                       0.62f * pDef->fHeight, &fRightX, &fZ, NULL);
+    mesh_band_centroid(&list, &world.aMechs[0], 0.80f * pDef->fHeight,
+                       1.10f * pDef->fHeight, &fHeadRightX, &fZ, NULL);
+
+    printf("   across the lock: arms swing %.0f, head turns %.0f\n",
+           fRightX - fLeftX, fHeadRightX - fHeadLeftX);
+    /* Both arms swing towards whatever is locked, so the mass hanging off
+     * the shoulders moves with the target rather than staying square, and
+     * the head looks the same way on a shorter leash. */
+    CHECK(fRightX - fLeftX > 0.20f * pDef->fRadius);
+    CHECK(fHeadRightX - fHeadLeftX > 0.02f * pDef->fRadius);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static int test_shots_carry_plasma_frames(void)
 {
     static tMechaQuad aStorage[MECHA_QUAD_CAPACITY];
@@ -1769,6 +2048,10 @@ int main(void)
           test_auto_turn_is_close_quarters_only },
         { "jump cancel", test_jump_cancel },
         { "guard turns melee aside", test_guard_turns_melee_aside },
+        { "legs walk on jointed knees", test_legs_walk_on_jointed_knees },
+        { "torso turns off the legs", test_torso_turns_off_the_legs },
+        { "arms and head follow the lock",
+          test_arms_and_head_follow_the_lock },
         { "shots carry plasma frames", test_shots_carry_plasma_frames },
         { "death throws debris", test_death_throws_debris },
         { "machines carry their weight", test_machines_carry_their_weight },

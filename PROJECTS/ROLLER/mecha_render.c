@@ -248,12 +248,27 @@ int mecha_render_text_large(uint8 *pScrBuf, int iWidth, int iHeight,
   if (s_pFontBig) {
     int iSavedScrSize = scr_size;
     uint8 *pSavedScreen = screen_pointer;
+    int iSavedWinW = winw;
+    int iSavedWinH = winh;
+    int iSavedWinX = winx;
+    int iSavedWinY = winy;
 
     /* prt_stringcol takes a colour, unlike the small font's printer, so the
      * banner can still go green for a win and red for a loss. */
     screen_pointer = pScrBuf;
     scr_size = 64 * iScale;
+    /* The glyph blitter strides and clips through the window globals, so
+     * they have to describe the buffer in hand. A briefing drawn into a
+     * 320x200 page after a 640x400 frame walked off the end of it. */
+    winx = 0;
+    winy = 0;
+    winw = iWidth;
+    winh = iHeight;
     prt_stringcol(s_pFontBig, szText, iX / iScale, iY / iScale, byColour);
+    winx = iSavedWinX;
+    winy = iSavedWinY;
+    winw = iSavedWinW;
+    winh = iSavedWinH;
     scr_size = iSavedScrSize;
     screen_pointer = pSavedScreen;
     return iX + mecha_render_text_large_width(iScale, szText);
@@ -278,6 +293,10 @@ int mecha_render_text(uint8 *pScrBuf, int iWidth, int iHeight,
   if (s_pFont) {
     int iSavedScrSize = scr_size;
     uint8 *pSavedScreen = screen_pointer;
+    int iSavedWinW = winw;
+    int iSavedWinH = winh;
+    int iSavedWinX = winx;
+    int iSavedWinY = winy;
 
     /*
      * prt_letter scales through scr_size and pre-multiplies the coordinates
@@ -295,7 +314,18 @@ int mecha_render_text(uint8 *pScrBuf, int iWidth, int iHeight,
     (void)byColour;
     screen_pointer = pScrBuf;
     scr_size = 64 * iScale;
+    /* The glyph blitter strides and clips through the window globals, so
+     * they have to describe the buffer in hand. A briefing drawn into a
+     * 320x200 page after a 640x400 frame walked off the end of it. */
+    winx = 0;
+    winy = 0;
+    winw = iWidth;
+    winh = iHeight;
     mini_prt_string(s_pFont, szText, iX / iScale, iY / iScale);
+    winx = iSavedWinX;
+    winy = iSavedWinY;
+    winw = iSavedWinW;
+    winh = iSavedWinH;
     scr_size = iSavedScrSize;
     screen_pointer = pSavedScreen;
     return iX + mecha_render_text_width(iScale, szText);

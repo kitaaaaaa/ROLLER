@@ -214,6 +214,7 @@ int main(int argc, char **argv)
     GameRenderer *pRenderer;
     int aiCounts[256];
     int iPlayer;
+    int iEnemy;
     int iSkyOnly;
 
     SDL_SetMainReady();
@@ -254,7 +255,8 @@ int main(int argc, char **argv)
     mecha_sim_init(&s_World, 0, 0x5EED1234u, 2);
     iPlayer = mecha_sim_add_mech(&s_World, 0, MECHA_CONTROL_HUMAN, 0);
     CHECK(iPlayer >= 0);
-    CHECK(mecha_sim_add_mech(&s_World, 1, MECHA_CONTROL_AI, 1) >= 0);
+    iEnemy = mecha_sim_add_mech(&s_World, 1, MECHA_CONTROL_AI, 1);
+    CHECK(iEnemy >= 0);
     mecha_sim_begin_match(&s_World);
     mecha_camera_reset(&s_Camera);
 
@@ -263,6 +265,80 @@ int main(int argc, char **argv)
     render_now(pRenderer, iPlayer);
     histogram(s_aFrame, aiCounts);
     dump_frame(szOutDir, "arena_ready.png");
+
+    /* --- a rig sheet, for looking at the animation ----------------------
+     *
+     * The mech is posed by hand at four points of the step cycle with the
+     * legs turned off the shoulders, and a frame dumped for each. Nothing
+     * here is asserted -- the numbers that pin the rig live in the sim
+     * tests, which can measure the geometry instead of guessing at pixels
+     * -- but a jointed machine is the kind of thing that has to be looked
+     * at, and this is how you look at it.
+     */
+    if (szOutDir) {
+        static tMechaWorld worldSaved;
+        tMechaInput aIdle[MECHA_MAX_MECHS];
+        tMechaMech *pRig = &s_World.aMechs[iPlayer];
+        tMechaMech *pEye = &s_World.aMechs[iEnemy];
+        tMechaCamera savedCamera = s_Camera;
+        int iStep;
+
+        /* The whole world goes back afterwards, because posing a machine by
+         * hand and running the clock on to clear the round announcement are
+         * both things the assertions further down must not inherit. */
+        worldSaved = s_World;
+        memset(aIdle, 0, sizeof(aIdle));
+        for (iStep = 0; iStep < MECHA_TICK_HZ * 5; iStep++)
+            mecha_sim_tick(&s_World, aIdle, MECHA_MAX_MECHS);
+
+        /* The chase camera is no use here -- it is parked behind a shoulder
+         * and sees a back and two heels -- so the camera is placed by hand,
+         * out in front of the machine and looking back at it, and the other
+         * mech is sent to the far corner so it is not standing in the way. */
+        pEye->fX = MECHA_M(80.0f);
+        pEye->fZ = MECHA_M(80.0f);
+        pEye->iFacing = 0;
+        pEye->iLegYaw = 0;
+        /* Whatever the five seconds of clock did to it, this is a machine
+         * standing on the floor walking on the spot. */
+        pRig->fX = 0.0f;
+        pRig->fY = 0.0f;
+        pRig->fZ = 0.0f;
+        pRig->fVelX = 0.0f;
+        pRig->fVelY = 0.0f;
+        pRig->fVelZ = 0.0f;
+        pRig->byMove = MECHA_MOVE_WALK;
+        pRig->iStateTicks = 0;
+        pRig->iStunTicks = 0;
+        pRig->iInvulnTicks = 0;
+        pRig->fLeanRoll = 0.0f;
+        pRig->iFacing = MECHA_ANGLE_HALF;          /* facing the camera */
+        pRig->iLegYaw = mecha_angle_wrap(pRig->iFacing + MECHA_DEG(40));
+        pRig->byLock = MECHA_LOCK_HELD;
+        pRig->iTargetIdx = iEnemy;
+
+        /* Three quarters on, which shows the stride and the twist at once. */
+        s_Camera.fX = -MECHA_M(19.0f);
+        s_Camera.fY = MECHA_M(9.0f);
+        s_Camera.fZ = -MECHA_M(19.0f);
+        s_Camera.iYaw = MECHA_DEG(45);
+        s_Camera.iPitch = -MECHA_DEG(6);
+        s_Camera.bSettled = true;
+
+        for (iStep = 0; iStep < 6; iStep++) {
+            char szName[32];
+
+            pRig->fStepPhase = (float)iStep / 6.0f;
+            mecha_render_frame(pRenderer, &s_World, &s_Camera, iPlayer,
+                               s_aFrame, FRAME_W, FRAME_H,
+                               s_aQuads, MECHA_QUAD_CAPACITY);
+            snprintf(szName, sizeof(szName), "arena_rig%d.png", iStep);
+            dump_frame(szOutDir, szName);
+        }
+        s_World = worldSaved;
+        s_Camera = savedCamera;
+        render_now(pRenderer, iPlayer);
+    }
 
     /* If one colour covered the frame, nothing rasterised. */
     iSkyOnly = single_colour(aiCounts);

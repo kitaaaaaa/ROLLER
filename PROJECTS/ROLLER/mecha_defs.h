@@ -156,6 +156,28 @@
  * is a move rather than a mode -- the auto-turn coming back on permanently
  * would undo the point of confining it to knife range.
  */
+/*
+ * How far the feet are allowed to point away from the shoulders, and how
+ * fast they get there. Past the clamp the machine walks with its legs
+ * crossed, which reads as a mistake rather than as a strafe.
+ */
+/*
+ * How far the arms and the head are allowed off the shoulders, and how hard
+ * a shot kicks the arm that fired it. The arms reach further round than the
+ * head does: an arm is a gun mount, a neck is a neck.
+ */
+#define MECHA_ARM_YAW_LIMIT    MECHA_DEG(46)
+#define MECHA_ARM_PITCH_LIMIT  MECHA_DEG(38)
+#define MECHA_ARM_DROOP        MECHA_DEG(22)
+#define MECHA_ARM_RECOIL       MECHA_DEG(14)
+#define MECHA_HEAD_YAW_LIMIT   MECHA_DEG(38)
+#define MECHA_HEAD_PITCH_LIMIT MECHA_DEG(20)
+
+#define MECHA_LEG_YAW_LIMIT   MECHA_DEG(52)
+#define MECHA_LEG_YAW_RATE    MECHA_DEG(320)   /* per second */
+/* Below this the legs have no line of travel to follow and square up. */
+#define MECHA_LEG_WALK_SPEED  MECHA_MPS(1.2f)
+
 #define MECHA_RECENTRE_TICKS   MECHA_SEC(0.5f)
 
 /* Mechs push each other apart rather than overlapping. */

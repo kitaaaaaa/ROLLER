@@ -375,6 +375,16 @@ typedef struct
   /* Rendering-only smoothing; the simulation never reads these back. */
   float fLeanRoll;
   float fStepPhase;
+  /*
+   * Where the feet are pointed, which is not where the machine is pointed.
+   * The torso holds the aim while the legs follow the line of travel, so a
+   * mech strafing across your guns is walking sideways rather than sliding
+   * with its shoulders square -- the one piece of animation state the sim
+   * has to own, because it is smoothed over time and the mesh is built
+   * fresh every frame.
+   */
+  int   iLegYaw;
+  bool  bLegsBackward;      /* stepping backwards: the cycle runs in reverse */
 } tMechaMech;
 
 //-------------------------------------------------------------------------------------------------

@@ -391,8 +391,19 @@ void mecha_mesh_arena(tMechaQuadList *pList, const tMechaArena *pArena)
  */
 #define MECHA_LEG_SWING   MECHA_DEG(27)
 #define MECHA_LEG_KNEE    MECHA_DEG(48)
-#define MECHA_LEG_TUCK    MECHA_DEG(20)
-#define MECHA_LEG_AIRKNEE MECHA_DEG(58)
+/* A sprint is the walk with everything turned up: the thigh reaches
+ * further, the knee folds harder, and even the pushing leg bends. */
+#define MECHA_LEG_RUN     MECHA_DEG(46)
+#define MECHA_LEG_RUNKNEE MECHA_DEG(78)
+/*
+ * Hanging. Not a tuck -- a tuck is what you do to clear something -- but a
+ * machine with its weight off its feet: one leg reaching a little, the
+ * other trailing, both knees soft, and a slow sway so it is not a statue.
+ */
+#define MECHA_LEG_HANG      MECHA_DEG(14)
+#define MECHA_LEG_HANGKNEE  MECHA_DEG(30)
+#define MECHA_LEG_TRAIL     MECHA_DEG(22)
+#define MECHA_LEG_TRAILKNEE MECHA_DEG(46)
 /* A guard is a squat, and a human squat has to be deep to lower anything:
  * the knee travels forward as far as the hip drops, so the two cosines all
  * but cancel until the angles get large. Bird-legged, half of this was
@@ -400,25 +411,85 @@ void mecha_mesh_arena(tMechaQuadList *pList, const tMechaArena *pArena)
 #define MECHA_LEG_SQUAT   MECHA_DEG(45)
 #define MECHA_LEG_SQKNEE  MECHA_DEG(90)
 
-static void mecha_leg_angles(float fPhase, bool bAirborne, bool bGuard,
+/*
+ * What the legs are doing, which is not the same question as what the
+ * machine is doing. Walking and sprinting are cycles; the two airborne
+ * shapes and the squat are poses with a little movement in them.
+ */
+#define MECHA_GAIT_WALK    0
+#define MECHA_GAIT_SPRINT  1
+#define MECHA_GAIT_AIR     2
+#define MECHA_GAIT_AIRDASH 3
+#define MECHA_GAIT_GUARD   4
+
+/*
+ * A sprint runs on its own clock rather than on ground covered.
+ *
+ * Every other cycle here is paced by distance, which is what makes a heavy
+ * machine take slow steps without anything having to say so. A boost breaks
+ * that: at fifty metres a second, a stride every 3.6 metres is fifteen
+ * cycles a second, and legs moving that fast are a grey blur. So the sprint
+ * is timed instead -- a shade over three strides a second, which reads as
+ * running flat out at whatever speed the thrusters happen to be giving.
+ */
+#define MECHA_SPRINT_TICKS 18
+
+static void mecha_leg_angles(int iGait, float fPhase, int iSide, int iTick,
                              int *piThigh, int *piKnee)
 {
   int iAngle = (int)(fPhase * (float)MECHA_ANGLE_FULL) & (MECHA_ANGLE_FULL - 1);
   float fCos = mecha_cos(iAngle);
+  /* A slow breath for the poses that are not cycles, the two legs half a
+   * turn apart so they do not move as one. */
+  int iSway = (int)((float)MECHA_DEG(5)
+                    * mecha_sin(mecha_angle_wrap(iTick * 90
+                                                 + iSide * MECHA_ANGLE_HALF)));
 
-  if (bAirborne) {
-    /* Tucked, and still swinging a little so a jump is not a statue. */
-    *piThigh = MECHA_LEG_TUCK + (int)(MECHA_DEG(7) * mecha_sin(iAngle));
-    *piKnee = MECHA_LEG_AIRKNEE;
-    return;
-  }
-  if (bGuard) {
+  switch (iGait) {
+  case MECHA_GAIT_GUARD:
     *piThigh = MECHA_LEG_SQUAT;
     *piKnee = MECHA_LEG_SQKNEE;
     return;
+
+  case MECHA_GAIT_AIR:
+    if (iSide == 0) {
+      *piThigh = MECHA_LEG_HANG + iSway;
+      *piKnee = MECHA_LEG_HANGKNEE;
+    } else {
+      *piThigh = -MECHA_LEG_TRAIL + iSway;
+      *piKnee = MECHA_LEG_TRAILKNEE;
+    }
+    return;
+
+  case MECHA_GAIT_AIRDASH:
+    /*
+     * Half of each. The lead leg reaches the way a sprint's does, because
+     * the machine is being driven somewhere; the other hangs, because there
+     * is nothing under it to push against.
+     */
+    if (iSide == 0) {
+      *piThigh = MECHA_LEG_RUN * 3 / 4 + iSway;
+      *piKnee = MECHA_LEG_RUNKNEE / 2;
+    } else {
+      *piThigh = -MECHA_LEG_TRAIL - MECHA_DEG(6) + iSway;
+      *piKnee = MECHA_LEG_TRAILKNEE + MECHA_DEG(10);
+    }
+    return;
+
+  case MECHA_GAIT_SPRINT:
+    *piThigh = (int)((float)MECHA_LEG_RUN * mecha_sin(iAngle));
+    /* Even the pushing leg folds a little at a run, where a walk leaves it
+     * straight through the whole of its stance. */
+    *piKnee = fCos > 0.0f
+              ? (int)((float)MECHA_LEG_RUNKNEE * fCos)
+              : (int)((float)MECHA_LEG_RUNKNEE * -0.18f * fCos);
+    return;
+
+  default:
+    *piThigh = (int)((float)MECHA_LEG_SWING * mecha_sin(iAngle));
+    *piKnee = fCos > 0.0f ? (int)((float)MECHA_LEG_KNEE * fCos) : 0;
+    return;
   }
-  *piThigh = (int)((float)MECHA_LEG_SWING * mecha_sin(iAngle));
-  *piKnee = fCos > 0.0f ? (int)((float)MECHA_LEG_KNEE * fCos) : 0;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -616,16 +687,34 @@ void mecha_mesh_mech(tMechaQuadList *pList, const tMechaWorld *pWorld,
    */
   {
     float fPhase = pMech->fStepPhase - (float)(int)pMech->fStepPhase;
-    bool bGuard = pMech->byMove == MECHA_MOVE_GUARD;
+    bool bDash = pMech->byMove == MECHA_MOVE_DASH;
+    int iGait;
+
+    if (pMech->byMove == MECHA_MOVE_GUARD)
+      iGait = MECHA_GAIT_GUARD;
+    else if (bDash && bAirborne)
+      iGait = MECHA_GAIT_AIRDASH;
+    else if (bDash)
+      iGait = MECHA_GAIT_SPRINT;
+    else if (bAirborne)
+      iGait = MECHA_GAIT_AIR;
+    else
+      iGait = MECHA_GAIT_WALK;
 
     if (pMech->bLegsBackward)
       fPhase = 1.0f - fPhase;
+    /* The sprint is timed rather than paced by the ground it covers; see
+     * MECHA_SPRINT_TICKS. */
+    if (iGait == MECHA_GAIT_SPRINT)
+      fPhase = (float)(pWorld->iTick % MECHA_SPRINT_TICKS)
+               / (float)MECHA_SPRINT_TICKS;
     fLegSpan = 0.47f * fHeight - fAnkle;
     fThighLen = 0.52f * fLegSpan;
     fShinLen = fLegSpan - fThighLen;
 
-    mecha_leg_angles(fPhase, bAirborne, bGuard, &aiThigh[0], &aiKnee[0]);
-    mecha_leg_angles(fPhase + 0.5f, bAirborne, bGuard, &aiThigh[1],
+    mecha_leg_angles(iGait, fPhase, 0, pWorld->iTick, &aiThigh[0],
+                     &aiKnee[0]);
+    mecha_leg_angles(iGait, fPhase + 0.5f, 1, pWorld->iTick, &aiThigh[1],
                      &aiKnee[1]);
     if (!bAirborne) {
       float fLeft = mecha_leg_reach(aiThigh[0], aiKnee[0], fThighLen,

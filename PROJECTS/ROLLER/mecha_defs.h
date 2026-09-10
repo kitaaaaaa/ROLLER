@@ -96,7 +96,13 @@
  * the other way. That pair is the whole move: up to find them, down to face
  * them.
  */
-#define MECHA_CANCEL_FALL_SPEED  MECHA_MPS(46.0f)
+/*
+ * A cancelled jump does not fall, it is dropped. Forty-six metres a second
+ * was a brisk fall; at a hundred and twenty the machine is simply on the
+ * ground, which is what makes the cancel a way of getting out of an arc
+ * rather than a slightly faster way of finishing it.
+ */
+#define MECHA_CANCEL_FALL_SPEED  MECHA_MPS(120.0f)
 #define MECHA_CANCEL_LAND_TICKS  MECHA_SEC(0.12f)
 #define MECHA_CANCEL_TURN_TICKS  MECHA_SEC(0.45f)
 #define MECHA_CANCEL_TURN_SCALE  7
@@ -224,6 +230,9 @@
 
 #define MECHA_LEG_YAW_LIMIT   MECHA_DEG(52)
 #define MECHA_LEG_YAW_RATE    MECHA_DEG(320)   /* per second */
+/* Squaring up to a boost is quicker than that: the burst is over in less
+ * than a second and legs still catching up look broken. */
+#define MECHA_LEG_DASH_RATE   MECHA_DEG(900)
 /* Below this the legs have no line of travel to follow and square up. */
 #define MECHA_LEG_WALK_SPEED  MECHA_MPS(1.2f)
 

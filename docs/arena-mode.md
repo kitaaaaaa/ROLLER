@@ -108,6 +108,10 @@ Both are read every frame, so either works at any time.
   of weapons. On top of that a guarding mech takes 15% of a melee hit and half
   the stagger that comes with it. Only melee -- standing in guard against
   gunfire loses, which is what stops it being the only thing anyone does.
+- **A cancel drops like a stone.** 120 metres a second, not the 46 it was:
+  the machine is simply on the ground, inside a fifth of a second from any
+  height it can reach. That is what makes the cancel a way out of an arc
+  rather than a slightly faster way of finishing one.
 - **Jump, then cancel.** Leaving the ground snaps the lock on whatever you
   were pointed at, so going up is the reliable way to find someone who has got
   behind you. Guard in the air then throws the rest of the arc away and drops
@@ -223,6 +227,29 @@ Both are read every frame, so either works at any time.
   has to squat deep to lower anything at all, because the knee travels
   forward as far as the hip drops and the two cosines all but cancel until
   the angles get large.
+- **Four gaits, not one.** Walking and sprinting are cycles; hanging in the
+  air and driving through it are poses with a slow sway in them. A sprint
+  reaches half again as far as a walk and folds the knee twice as hard,
+  including the leg that is pushing. Hanging is not a tuck -- a tuck is what
+  you do to clear something -- but a machine with its weight off its feet:
+  one leg reaching a little, one trailing, both knees soft. An air dash is
+  half of each, the lead leg reaching the way a sprint's does because the
+  machine is being driven somewhere, the other hanging because there is
+  nothing under it to push against. Measured pose against pose, the six
+  pairings are between one and four metres apart at their furthest point.
+- **A sprint is timed, not paced.** Every other cycle here runs on ground
+  covered, which is what makes a heavy machine take slow steps without
+  anything having to say so. A boost breaks that: at fifty metres a second a
+  stride every 3.6 metres is fifteen cycles a second, and legs moving that
+  fast are a grey blur. So the sprint runs on its own clock at a shade over
+  three strides a second, and reads as running flat out whatever the
+  thrusters are giving.
+- **A boost squares the legs to itself.** Strafing is held to 52 degrees off
+  the shoulders, because feet pointed further round than that are not
+  strafing. A dash is not a strafe -- the machine is being driven bodily one
+  way -- so the legs come all the way round to the burst, however far that
+  is, while the shoulders and the arms go on holding the lock. Running one
+  way and shooting another is the shape of the whole thing.
 - **The legs are not the machine.** They follow the line of travel while the
   torso holds the aim, so a mech strafing across your guns walks sideways
   with its shoulders square to you. A heading more than a quarter turn off

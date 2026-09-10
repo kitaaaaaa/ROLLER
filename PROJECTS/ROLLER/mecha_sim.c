@@ -1242,7 +1242,20 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
      * a mech whose feet point further off its shoulders than that is not
      * strafing, it is tangled.
      */
-    if (fSpeed > MECHA_LEG_WALK_SPEED) {
+    if (pMech->byMove == MECHA_MOVE_DASH) {
+      /*
+       * A boost is not a strafe. The machine is being driven bodily in one
+       * direction, so the legs square up to it however far round that is --
+       * no fold, no clamp -- and the shoulders go on holding the aim, which
+       * is the whole shape of the thing: running one way, shooting another.
+       */
+      int iTravel = mecha_atan2_angle(pMech->fDashDirX, pMech->fDashDirZ);
+
+      pMech->bLegsBackward = false;
+      pMech->iLegYaw = mecha_angle_approach(pMech->iLegYaw, iTravel,
+                                            (int)(MECHA_LEG_DASH_RATE
+                                                  * MECHA_DT));
+    } else if (fSpeed > MECHA_LEG_WALK_SPEED) {
       int iTravel = mecha_atan2_angle(pMech->fVelX, pMech->fVelZ);
       int iOffset = mecha_angle_delta(pMech->iFacing, iTravel);
 

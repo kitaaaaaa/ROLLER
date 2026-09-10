@@ -1333,6 +1333,245 @@ static int test_legs_walk_on_jointed_knees(void)
 
 //-------------------------------------------------------------------------------------------------
 
+static bool clear_runway(tMechaWorld *pWorld, int iFacing);
+
+/* Widest fore-and-aft spread the feet reach anywhere in a cycle. */
+static float gait_reach(tMechaWorld *pWorld, int iMechIdx,
+                        tMechaQuad *paStorage)
+{
+    const tMechaMechDef *pDef =
+        mecha_def_get((int)pWorld->aMechs[iMechIdx].byDefIdx);
+    tMechaQuadList list;
+    float fWidest = 0.0f;
+    int iStep;
+
+    for (iStep = 0; iStep < 16; iStep++) {
+        float fLowZ;
+        float fHighZ;
+
+        pWorld->aMechs[iMechIdx].fStepPhase = (float)iStep / 16.0f;
+        pWorld->iTick = iStep * 3;
+        mecha_quads_reset(&list, paStorage, MECHA_QUAD_CAPACITY);
+        mecha_mesh_mech(&list, pWorld, iMechIdx);
+        mesh_foot_span(&list, &pWorld->aMechs[iMechIdx],
+                       pWorld->aMechs[iMechIdx].fY + 0.16f * pDef->fHeight,
+                       &fLowZ, &fHighZ);
+        if (fHighZ - fLowZ > fWidest)
+            fWidest = fHighZ - fLowZ;
+    }
+    return fWidest;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/* Every leg vertex of a posed machine, in its own frame, so two poses can
+ * be held up against each other. */
+static int gait_capture(tMechaWorld *pWorld, int iMechIdx,
+                        tMechaQuad *paStorage, float *pafOut, int iMax)
+{
+    const tMechaMech *pMech = &pWorld->aMechs[iMechIdx];
+    const tMechaMechDef *pDef = mecha_def_get((int)pMech->byDefIdx);
+    tMechaQuadList list;
+    float fCos = mecha_cos(pMech->iLegYaw);
+    float fSin = mecha_sin(pMech->iLegYaw);
+    int iCount = 0;
+    int i;
+    int v;
+
+    /*
+     * The legs are the first thing the builder emits -- two of them, four
+     * boxes apiece, six faces a box -- and taking them by position rather
+     * than by height is what keeps the count identical across poses. A
+     * height cutoff sounds tidier and is not: a thigh swinging about the
+     * hip moves its own top vertices across any line drawn near it, so the
+     * two poses being compared come back with different numbers of points
+     * in them.
+     */
+    mecha_quads_reset(&list, paStorage, MECHA_QUAD_CAPACITY);
+    mecha_mesh_mech(&list, pWorld, iMechIdx);
+    if (list.iCount < 2 * 4 * 6)
+        return 0;
+    for (i = 0; i < 2 * 4 * 6; i++) {
+        for (v = 0; v < 4; v++) {
+            float fY = paStorage[i].afVert[v][1] - pMech->fY;
+            float fDx = paStorage[i].afVert[v][0] - pMech->fX;
+            float fDz = paStorage[i].afVert[v][2] - pMech->fZ;
+
+            if (iCount + 3 > iMax)
+                return iCount;
+            pafOut[iCount++] = fDx * fCos - fDz * fSin;
+            pafOut[iCount++] = fY;
+            pafOut[iCount++] = fDx * fSin + fDz * fCos;
+        }
+    }
+    (void)pDef;
+    return iCount;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/* How far the two poses are from each other, at their furthest. */
+static float gait_apart(const float *pafA, const float *pafB, int iCount)
+{
+    float fWorst = 0.0f;
+    int i;
+
+    for (i = 0; i + 2 < iCount; i += 3) {
+        float fGap = mecha_length3(pafA[i] - pafB[i], pafA[i + 1] - pafB[i + 1],
+                                   pafA[i + 2] - pafB[i + 2]);
+
+        if (fGap > fWorst)
+            fWorst = fGap;
+    }
+    return fWorst;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_the_legs_have_four_gaits(void)
+{
+    static tMechaQuad aStorage[MECHA_QUAD_CAPACITY];
+    static float aafPose[4][4096];
+    static const char *const kaszGait[4] = { "walk", "sprint", "air",
+                                             "air dash" };
+    tMechaWorld world;
+    const tMechaMechDef *pDef;
+    int aiCount[4];
+    float fWalkReach;
+    float fSprintReach;
+    int iGait;
+    int iOther;
+
+    start_duel(&world, 0, 0, 0, 0x6A17u, 1);
+    CHECK(clear_runway(&world, 0));
+    pDef = mecha_def_get((int)world.aMechs[0].byDefIdx);
+    world.aMechs[0].fStepPhase = 0.12f;
+    world.iTick = 7;
+
+    for (iGait = 0; iGait < 4; iGait++) {
+        /* Walk, sprint, hang, air dash -- the last two off the ground. */
+        world.aMechs[0].fY = iGait >= 2 ? MECHA_M(12.0f) : 0.0f;
+        world.aMechs[0].byMove = (iGait == 1 || iGait == 3)
+                                 ? MECHA_MOVE_DASH
+                                 : (iGait == 2 ? MECHA_MOVE_JUMP
+                                               : MECHA_MOVE_WALK);
+        aiCount[iGait] = gait_capture(&world, 0, aStorage, aafPose[iGait],
+                                      4096);
+        CHECK(aiCount[iGait] > 0);
+        CHECK(aiCount[iGait] == aiCount[0]);
+    }
+
+    /*
+     * Every one of them has to be its own shape. Comparing the poses vertex
+     * by vertex rather than measuring how far apart the feet end up: two
+     * quite different poses can have the same stride, and it is the shape
+     * the player reads, not the number.
+     */
+    for (iGait = 0; iGait < 4; iGait++) {
+        for (iOther = iGait + 1; iOther < 4; iOther++) {
+            float fApart = gait_apart(aafPose[iGait], aafPose[iOther],
+                                      aiCount[0]);
+
+            printf("   %s against %s: %.1f m apart\n", kaszGait[iGait],
+                   kaszGait[iOther], fApart / MECHA_METRE);
+            CHECK(fApart > 0.35f * pDef->fRadius);
+        }
+    }
+
+    /* And a sprint reaches further than a walk does. */
+    world.aMechs[0].fY = 0.0f;
+    world.aMechs[0].byMove = MECHA_MOVE_WALK;
+    fWalkReach = gait_reach(&world, 0, aStorage);
+    world.aMechs[0].byMove = MECHA_MOVE_DASH;
+    fSprintReach = gait_reach(&world, 0, aStorage);
+    printf("   foot spread: walk %.1f m, sprint %.1f m\n",
+           fWalkReach / MECHA_METRE, fSprintReach / MECHA_METRE);
+    CHECK(fSprintReach > fWalkReach * 1.25f);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_dashing_squares_the_legs_to_the_burst(void)
+{
+    tMechaWorld world;
+    tMechaInput aInputs[2];
+    int iOffset;
+    int iAim;
+    int i;
+
+    start_duel(&world, 0, 0, 0, 0x5C0Au, 1);
+    memset(aInputs, 0, sizeof(aInputs));
+    CHECK(clear_runway(&world, 0));
+    world.aMechs[0].byLock = MECHA_LOCK_HELD;
+    world.aMechs[0].iTargetIdx = 1;
+    iAim = world.aMechs[0].iFacing;
+
+    /* Dashing hard to the right of where the machine is pointed. */
+    aInputs[0].iMoveX = 100;
+    aInputs[0].bDash = true;
+    mecha_sim_tick(&world, aInputs, 2);
+    aInputs[0].bDash = false;
+    for (i = 0; i < 12; i++)
+        mecha_sim_tick(&world, aInputs, 2);
+
+    iOffset = mecha_angle_delta(world.aMechs[0].iFacing,
+                               world.aMechs[0].iLegYaw);
+    printf("   dashing sideways: legs %d off the shoulders (walk clamp"
+           " is %d)\n", iOffset, MECHA_LEG_YAW_LIMIT);
+    /* Past the clamp a strafing walk is held to: a boost is not a strafe,
+     * and the legs square up to it however far round that is. */
+    CHECK(abs(iOffset) > MECHA_LEG_YAW_LIMIT);
+    /* And the shoulders have not gone with them. */
+    CHECK(abs(mecha_angle_delta(iAim, world.aMechs[0].iFacing))
+          < MECHA_DEG(20));
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_a_cancel_drops_like_a_stone(void)
+{
+    tMechaWorld world;
+    tMechaInput aInputs[2];
+    float fPeak;
+    int iFallTicks = 0;
+    int i;
+
+    start_duel(&world, 0, 0, 0, 0xD40Fu, 1);
+    memset(aInputs, 0, sizeof(aInputs));
+    CHECK(clear_runway(&world, 0));
+
+    aInputs[0].bJump = true;
+    mecha_sim_tick(&world, aInputs, 2);
+    aInputs[0].bJump = false;
+    for (i = 0; i < 16; i++)
+        mecha_sim_tick(&world, aInputs, 2);
+    fPeak = world.aMechs[0].fY;
+    CHECK(fPeak > MECHA_M(2.0f));
+
+    aInputs[0].bGuard = true;
+    mecha_sim_tick(&world, aInputs, 2);
+    aInputs[0].bGuard = false;
+    CHECK(world.aMechs[0].byMove == MECHA_MOVE_CANCEL);
+
+    for (i = 0; i < MECHA_TICK_HZ; i++) {
+        mecha_sim_tick(&world, aInputs, 2);
+        iFallTicks++;
+        if (world.aMechs[0].byMove != MECHA_MOVE_CANCEL)
+            break;
+    }
+
+    printf("   cancelled from %.1f m and down in %d ticks\n",
+           fPeak / MECHA_METRE, iFallTicks);
+    /* Dropped, not lowered: at a hundred and twenty metres a second even a
+     * high arc is over inside a fifth of a second. */
+    CHECK(iFallTicks <= 12);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static int test_torso_turns_off_the_legs(void)
 {
     static tMechaQuad aStorage[MECHA_QUAD_CAPACITY];
@@ -3158,6 +3397,10 @@ int main(void)
         { "jump cancel", test_jump_cancel },
         { "guard turns melee aside", test_guard_turns_melee_aside },
         { "legs walk on jointed knees", test_legs_walk_on_jointed_knees },
+        { "the legs have four gaits", test_the_legs_have_four_gaits },
+        { "dashing squares the legs to the burst",
+          test_dashing_squares_the_legs_to_the_burst },
+        { "a cancel drops like a stone", test_a_cancel_drops_like_a_stone },
         { "torso turns off the legs", test_torso_turns_off_the_legs },
         { "arms and head follow the lock",
           test_arms_and_head_follow_the_lock },

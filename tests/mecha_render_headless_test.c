@@ -335,6 +335,33 @@ int main(int argc, char **argv)
             snprintf(szName, sizeof(szName), "arena_rig%d.png", iStep);
             dump_frame(szOutDir, szName);
         }
+        /* One frame per gait, from the same camera: walking, sprinting,
+         * hanging, and driving through the air. */
+        {
+            static const uint8 abyMove[4] = {
+                MECHA_MOVE_WALK, MECHA_MOVE_DASH, MECHA_MOVE_JUMP,
+                MECHA_MOVE_DASH
+            };
+            int iGait;
+
+            for (iGait = 0; iGait < 4; iGait++) {
+                char szName[32];
+
+                pRig->byMove = abyMove[iGait];
+                pRig->fY = iGait >= 2 ? MECHA_M(9.0f) : 0.0f;
+                pRig->fStepPhase = 0.12f;
+                pRig->iLegYaw = mecha_angle_wrap(pRig->iFacing
+                                                 + MECHA_DEG(40));
+                mecha_render_frame(pRenderer, &s_World, &s_Camera, iPlayer,
+                                   s_aFrame, FRAME_W, FRAME_H,
+                                   s_aQuads, MECHA_QUAD_CAPACITY);
+                snprintf(szName, sizeof(szName), "arena_gait%d.png", iGait);
+                dump_frame(szOutDir, szName);
+            }
+            pRig->byMove = MECHA_MOVE_WALK;
+            pRig->fY = 0.0f;
+        }
+
         /*
          * Four bolts in a row, one per recoloured copy of the plasma
          * frames. The tint is built out of the palette at run time, so the

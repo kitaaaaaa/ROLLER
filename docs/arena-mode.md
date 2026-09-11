@@ -93,7 +93,10 @@ On the ZIZIN KLR 330 the same two buttons drive it: **dash is the accelerator
 and guard is the brake**, the stick and the turn axis both steer, and jump does
 nothing because it has no legs to jump with. The stick answers the throttle as
 well, forward and back, because a car nobody can drive with the same keys they
-walk everything else with is a car nobody drives.
+walk everything else with is a car nobody drives. Its three triggers are three
+loads for one gun out of one magazine of nine -- buckshot left, the rifle in the
+centre, a lobbed shell on the right -- so brake into the corner, spin it round
+on the stick, and pick what to spend the next round on.
 
 ## How it plays
 
@@ -301,7 +304,7 @@ walk everything else with is a car nobody drives.
   does not survive being hit.
 
 - **Its steering is the race game's steering.** Whiplash works the lock out as
-  `input * (1 + (360 - speed) / 600)` and then throws it away entirely below the
+  `input * (1 + (360 - speed) / 60)` and then throws it away entirely below the
   car's own steering speed limit. Both halves are here: the lock is widest just
   off a standstill and narrows as the speed comes up, and a car that is not
   moving cannot be pointed at all. That second rule is the whole of how this
@@ -309,14 +312,61 @@ walk everything else with is a car nobody drives.
   it holds a lock, or lines up its gun, is to drive at somebody and keep them in
   the middle of the screen.
 
-- **One gun, three triggers, one magazine.** It carries all three weapon slots
-  so it reads and plays like everything else on the roster, but they are the
-  same gun: one heavy, accurate, fast round in the chamber and two and a half
-  seconds to put another one in. Firing any trigger empties all three, because a
-  long reload that could be skipped by rolling across the other two would not be
-  a long reload. And it shoves the car -- the recoil is a real push in the
-  simulation, not a drawing, which is the other half of what makes the reload
-  bearable: it buys distance.
+  360 is that game's reference speed, so the bonus runs from **seven times** the
+  input at a standstill to nothing at all flat out: 57 degrees a second on the
+  stick, times seven when crawling. Flat out the car barely turns and has to be
+  slowed into a corner rather than steered round one.
+
+- **And nothing limits how far it comes round.** Whiplash simply accumulates the
+  yaw; there is no ceiling on it anywhere, which is why a car can be spun
+  through a whole circle on the stick. What stopped that here was not a clamp
+  but a sign test: the steering flipped direction the moment the velocity fell
+  more than a quarter turn behind the nose, which is the middle of every drift,
+  so the stick fought the slide exactly when it should have been driving it.
+
+  Whiplash decides that on `fFinalSpeed`, the car's own signed speed along its
+  nose, and on a track that is the only speed it has -- position is advanced
+  straight along the heading, so a Whiplash car cannot travel at an angle to
+  where it points at all. This one carries a real velocity vector, so the test
+  is on the car's reverse speed instead, which is a third of its forward one and
+  nothing like drifting pace. Braking into full lock now takes it **364 degrees
+  round in two seconds with 180 degrees of slip**.
+
+- **Floored, it goes over on its roof.** Something tall enough to have a face
+  pitches forward onto it. A thing nine metres long and two high has nowhere to
+  pitch to, and a Zizin standing on its nose reads as a glitch rather than as a
+  wreck, so its knockdown is half a roll instead. The pose turns about the car's
+  own floor, so the origin is raised by however far the lowest corner has gone
+  under -- otherwise half a roll buries the whole body in the tarmac.
+
+- **One gun, three loads, nine rounds between them.** It carries all three
+  weapon slots so it reads and plays like everything else on the roster, but
+  they are three things to put through the same gun, not three guns -- a
+  magazine of nine that every trigger draws from and one long reload when it
+  runs dry. Every round spent is spent out of all three, because a magazine that
+  could be stretched by rolling across the other two triggers would not be a
+  magazine. So the choice is never which gun to use, it is what to spend the
+  next round on.
+
+  | Trigger | Load             | What it is for                                                                                                      |
+  | ------- | ---------------- | ------------------------------------------------------------------------------------------------------------------- |
+  | LW      | **KLR BUCKSHOT** | Seven pellets across five degrees, gone in half a second. Devastating at ramming distance and litter at any other.  |
+  | CW      | **KLR LANCE**    | One round, no spread, 520 m/s, and a long look down the barrel afterwards. The shot the machine is built around.    |
+  | RW      | **KLR MORTAR**   | A shell lobbed over whatever is in the way, with twelve metres of blast. Slow enough to dodge if it is seen coming. |
+
+  And it shoves the car -- the recoil is a real push in the simulation, not a
+  drawing, which is the other half of what makes the reload bearable: it buys
+  distance.
+
+- **The computer pilot had to learn what a spread is worth.** Scoring a
+  scattergun as though every pellet lands at any range made the car fire
+  buckshot across the whole arena and never once reach for its rifle: seven
+  pellets of twenty-four counted as a hundred and sixty-eight whether the target
+  was fifteen metres away or a hundred and fifty. What is scored now is the
+  share of the cone the target still covers at that distance, which puts all
+  three loads in use and costs the roster nothing measurable -- Kira, the only
+  other machine with a real spread, fights about as well either way, it just
+  reaches for its sabre sooner.
 
 - **With no melee row, its close-quarters answer is the bumper.** Running
   somebody over is charged on the speed the gap is closing at rather than on its
@@ -639,6 +689,17 @@ walk everything else with is a car nobody drives.
   acceleration and a brake, all in absolute metres per second squared. A siege
   platform sheds its old direction in about fourteen ticks and takes nineteen to
   reverse; an interceptor does both in four and seven.
+
+- **Close quarters draws a sword.** The melee hitbox used to be an ordinary
+  billboard: a bright square turned to face the camera, which reads as a shield
+  held up rather than as anything being swung. It is a blade now -- pointed,
+  level, running out along the line of the swing from the gun that threw it,
+  with a crossguard at the hilt so it does not read as a spike. Built as two
+  planes through the same axis, one flat and one upright, so it never turns
+  edge-on and vanishes; there is no camera anywhere in the geometry, which is
+  the point of it. Five quads, and the point lands just past the edge of the
+  hitbox rather than well beyond it, because a blade drawn longer than its reach
+  teaches a range the weapon does not have.
 
 - **Hills stop bullets.** The floor used to be the plane `y = 0`, which was true
   of the first three arenas and of nothing since. A shot fired across Coldwater

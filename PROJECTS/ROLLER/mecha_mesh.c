@@ -1065,26 +1065,50 @@ static void mecha_mesh_attitude(const tMechaMech *pMech, int *piYaw,
 
 //-------------------------------------------------------------------------------------------------
 
-static int mecha_mesh_fall_pitch(const tMechaMech *pMech)
+/*
+ * How far through going down a machine is: 0 standing, 1 flat out. Going
+ * down and getting up run the same curve off different clocks, and both
+ * kinds of machine measure themselves against it -- they just fall in
+ * different directions.
+ */
+static float mecha_mesh_fall_progress(const tMechaMech *pMech)
 {
-  const int iDownPitch = MECHA_DEG(78);
-
   switch (pMech->byMove) {
-  case MECHA_MOVE_DOWN: {
-    float fProgress = (float)pMech->iStateTicks / (float)MECHA_FALL_TICKS;
-
-    return (int)((float)iDownPitch * mecha_clampf(fProgress, 0.0f, 1.0f));
-  }
-  case MECHA_MOVE_RISE: {
+  case MECHA_MOVE_DOWN:
+    return mecha_clampf((float)pMech->iStateTicks / (float)MECHA_FALL_TICKS,
+                        0.0f, 1.0f);
+  case MECHA_MOVE_RISE:
     /* iStunTicks runs down through the rise, so it doubles as the
      * animation's own clock. */
-    float fProgress = (float)pMech->iStunTicks / (float)MECHA_RISE_TICKS;
+    return mecha_clampf((float)pMech->iStunTicks / (float)MECHA_RISE_TICKS,
+                        0.0f, 1.0f);
+  case MECHA_MOVE_DESTROYED: return 1.0f;
+  default:                   return 0.0f;
+  }
+}
 
-    return (int)((float)iDownPitch * mecha_clampf(fProgress, 0.0f, 1.0f));
-  }
-  case MECHA_MOVE_DESTROYED: return iDownPitch;
-  default:                   return 0;
-  }
+//-------------------------------------------------------------------------------------------------
+
+static int mecha_mesh_fall_pitch(const tMechaMech *pMech)
+{
+  return (int)((float)MECHA_DEG(78) * mecha_mesh_fall_progress(pMech));
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * A car does not fall on its face. It goes over.
+ *
+ * Something tall enough to have a face pitches forward onto it; a thing
+ * nine metres long and two high has nowhere to pitch to, and a Zizin
+ * standing on its nose reads as a glitch rather than as a wreck. So the
+ * knockdown for a wheeled machine is a half roll onto its roof, which is
+ * what happens to a car that has been hit hard enough to stop caring
+ * which way up it is.
+ */
+static int mecha_mesh_fall_roll(const tMechaMech *pMech)
+{
+  return (int)((float)MECHA_ANGLE_HALF * mecha_mesh_fall_progress(pMech));
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1343,7 +1367,7 @@ static void mecha_mesh_car(tMechaQuadList *pList, const tMechaWorld *pWorld,
 
   {
     int iYaw = pMech->iFacing;
-    int iPitch = mecha_mesh_fall_pitch(pMech);
+    int iPitch = 0;
     /* Negated for the same reason as the walkers': positive roll leans
      * left, and a car sliding right should lean right. */
     int iRoll = -(int)(pMech->fLeanRoll
@@ -1354,10 +1378,31 @@ static void mecha_mesh_car(tMechaQuadList *pList, const tMechaWorld *pWorld,
                                       / (pDef->fWalkSpeed > 1.0f
                                            ? pDef->fWalkSpeed : 1.0f),
                                       -1.0f, 1.0f));
+    int iFlip = mecha_mesh_fall_roll(pMech);
+    float fLift = 0.0f;
+
+    iRoll += iFlip;
+    /*
+     * Going over lifts it back onto the ground it is rolling off.
+     *
+     * The pose turns about the car's own floor, so half a roll puts the
+     * whole body below it -- a point at height h lands at h cos t, and at
+     * a hundred and eighty degrees the roof is a full height under the
+     * ground. Raising the origin by however far the lowest corner has
+     * gone under keeps the car resting on the floor the whole way over,
+     * which is what a car rolling looks like and what a car sinking into
+     * the tarmac does not.
+     */
+    if (iFlip != 0) {
+      float fDrop = -mecha_cos(iFlip);
+
+      if (fDrop > 0.0f)
+        fLift = pDef->fHeight * fDrop;
+    }
 
     mecha_mesh_attitude(pMech, &iYaw, &iPitch, &iRoll);
     mecha_pose_build(&pose, iYaw, iPitch, iRoll,
-                     pMech->fX, pMech->fY, pMech->fZ, 1.0f);
+                     pMech->fX, pMech->fY + fLift, pMech->fZ, 1.0f);
   }
 
   mecha_add_zizin_body(pList, &pose, fScale, 0.0f, pDef->abyPalette[0],
@@ -1954,6 +1999,121 @@ static void mecha_add_upright_billboard(tMechaQuadList *pList, int iCameraYaw,
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * The close-quarters blade.
+ *
+ * This used to be an ordinary billboard: a bright square facing the camera,
+ * which read as a shield held up rather than as anything being swung. What
+ * a close-quarters weapon wants is a shape with a direction in it, so this
+ * is an actual blade -- pointed, lying flat and level, running out along
+ * the line of the swing from the gun that threw it.
+ *
+ * Built as two planes through the same axis, one flat and one upright, so
+ * it never turns edge-on and vanishes: there is no camera in the geometry
+ * at all, which is the point. Each plane is a tapering body and a point,
+ * and a short crossguard at the hilt is what stops the whole thing reading
+ * as a spike.
+ */
+static void mecha_add_blade(tMechaQuadList *pList, float fX, float fY,
+                            float fZ, float fDirX, float fDirZ,
+                            float fReach, uint8_t byPalette)
+{
+  /* Proportions, against the reach: how far back the hilt sits, how wide
+   * the blade is, where it starts tapering, and the crossguard. */
+  const float fHilt = 0.34f;
+  const float fWide = 0.055f;
+  const float fShoulder = 0.66f;
+  const float fGuard = 0.22f;
+  float fLen = mecha_length2(fDirX, fDirZ);
+  float fAxisX;
+  float fAxisZ;
+  float fSideX;
+  float fSideZ;
+  float fBackX;
+  float fBackZ;
+  float fBackY = fY;
+  float afVert[4][3];
+  int iPlane;
+
+  if (fLen < 1e-4f)
+    return;
+  fAxisX = fDirX / fLen;
+  fAxisZ = fDirZ / fLen;
+  fSideX = fAxisZ;
+  fSideZ = -fAxisX;
+  fBackX = fX - fAxisX * fReach * fHilt;
+  fBackZ = fZ - fAxisZ * fReach * fHilt;
+
+  for (iPlane = 0; iPlane < 2; iPlane++) {
+    /* The flat of the blade, then the same blade stood on edge. */
+    float fOutX = iPlane == 0 ? fSideX * fReach * fWide : 0.0f;
+    float fOutZ = iPlane == 0 ? fSideZ * fReach * fWide : 0.0f;
+    float fOutY = iPlane == 0 ? 0.0f : fReach * fWide;
+    float fShoulderX = fBackX + fAxisX * fReach * fShoulder;
+    float fShoulderZ = fBackZ + fAxisZ * fReach * fShoulder;
+    float fTipX = fBackX + fAxisX * fReach;
+    float fTipZ = fBackZ + fAxisZ * fReach;
+
+    /* Body: the hilt end, squared off, out to the shoulder. */
+    afVert[0][0] = fBackX - fOutX;
+    afVert[0][1] = fBackY - fOutY;
+    afVert[0][2] = fBackZ - fOutZ;
+    afVert[1][0] = fBackX + fOutX;
+    afVert[1][1] = fBackY + fOutY;
+    afVert[1][2] = fBackZ + fOutZ;
+    afVert[2][0] = fShoulderX + fOutX;
+    afVert[2][1] = fBackY + fOutY;
+    afVert[2][2] = fShoulderZ + fOutZ;
+    afVert[3][0] = fShoulderX - fOutX;
+    afVert[3][1] = fBackY - fOutY;
+    afVert[3][2] = fShoulderZ - fOutZ;
+    mecha_quads_add(pList, afVert, byPalette,
+                    MECHA_QUAD_TWO_SIDED | MECHA_QUAD_GLOW);
+
+    /* Point: the same width collapsing onto the tip. Two of the corners
+     * land on the same place, which is how a quad list draws a triangle. */
+    afVert[0][0] = fShoulderX - fOutX;
+    afVert[0][1] = fBackY - fOutY;
+    afVert[0][2] = fShoulderZ - fOutZ;
+    afVert[1][0] = fShoulderX + fOutX;
+    afVert[1][1] = fBackY + fOutY;
+    afVert[1][2] = fShoulderZ + fOutZ;
+    afVert[2][0] = fTipX;
+    afVert[2][1] = fBackY;
+    afVert[2][2] = fTipZ;
+    afVert[3][0] = fTipX;
+    afVert[3][1] = fBackY;
+    afVert[3][2] = fTipZ;
+    mecha_quads_add(pList, afVert, byPalette,
+                    MECHA_QUAD_TWO_SIDED | MECHA_QUAD_GLOW);
+  }
+
+  /* The crossguard, across the hilt and lying flat. */
+  {
+    float fGuardX = fSideX * fReach * fGuard * 0.5f;
+    float fGuardZ = fSideZ * fReach * fGuard * 0.5f;
+    float fThickX = fAxisX * fReach * fWide * 0.7f;
+    float fThickZ = fAxisZ * fReach * fWide * 0.7f;
+
+    afVert[0][0] = fBackX - fGuardX - fThickX;
+    afVert[0][1] = fBackY;
+    afVert[0][2] = fBackZ - fGuardZ - fThickZ;
+    afVert[1][0] = fBackX + fGuardX - fThickX;
+    afVert[1][1] = fBackY;
+    afVert[1][2] = fBackZ + fGuardZ - fThickZ;
+    afVert[2][0] = fBackX + fGuardX + fThickX;
+    afVert[2][1] = fBackY;
+    afVert[2][2] = fBackZ + fGuardZ + fThickZ;
+    afVert[3][0] = fBackX - fGuardX + fThickX;
+    afVert[3][1] = fBackY;
+    afVert[3][2] = fBackZ - fGuardZ + fThickZ;
+    mecha_quads_add(pList, afVert, byPalette,
+                    MECHA_QUAD_TWO_SIDED | MECHA_QUAD_GLOW);
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+
 /* A streak along the segment the shot covered this tick, widened towards the
  * camera. This is what makes a fast round readable at 60 Hz instead of a dot
  * that teleports across the arena. */
@@ -2424,9 +2584,15 @@ void mecha_mesh_projectiles(tMechaQuadList *pList, const tMechaWorld *pWorld,
     }
 
     case MECHA_PROJ_MELEE:
-      /* The swing itself -- a broad bright arc rather than a projectile. */
-      mecha_add_billboard(pList, iCameraYaw, pShot->fX, pShot->fY, pShot->fZ,
-                          pShot->fRadius, pShot->byPalette);
+      /*
+       * The swing itself: a blade run out along the line of the lunge from
+       * the weapon that threw it, not a projectile and not a billboard.
+       * Long against the hitbox it draws, because a sword that is as wide
+       * as its reach is a shield.
+       */
+      mecha_add_blade(pList, pShot->fX, pShot->fY, pShot->fZ,
+                      pShot->fVelX, pShot->fVelZ,
+                      pShot->fRadius * MECHA_BLADE_REACH, pShot->byPalette);
       break;
 
     case MECHA_PROJ_BEAM:

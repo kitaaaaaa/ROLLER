@@ -281,6 +281,10 @@ static int mecha_ai_choose_weapon(const tMechaWorld *pWorld, int iMechIdx,
   const tMechaMech *pSelf = &pWorld->aMechs[iMechIdx];
   const tMechaMechDef *pDef = mecha_def_get((int)pSelf->byDefIdx);
   eMechaStance eStance = mecha_mech_stance(pSelf);
+  const tMechaMechDef *pTargetDef =
+    (pSelf->iTargetIdx >= 0 && pSelf->iTargetIdx < MECHA_MAX_MECHS)
+      ? mecha_def_get((int)pWorld->aMechs[pSelf->iTargetIdx].byDefIdx)
+      : NULL;
   float fBestScore = 0.0f;
   int iBest = -1;
   int iSlot;
@@ -288,6 +292,7 @@ static int mecha_ai_choose_weapon(const tMechaWorld *pWorld, int iMechIdx,
   for (iSlot = 0; iSlot < MECHA_WEAPON_SLOTS; iSlot++) {
     const tMechaWeaponDef *pWeapon = &pDef->aWeapons[iSlot][eStance];
     float fWant;
+    float fHits;
     float fScore;
 
     if (pSelf->aiAmmo[iSlot] <= 0 || pSelf->aiReload[iSlot] > 0)
@@ -308,10 +313,32 @@ static int mecha_ai_choose_weapon(const tMechaWorld *pWorld, int iMechIdx,
                          * MECHA_TICK_SECONDS)
       continue;
 
-    /* Damage per second, discounted by how far the shot is from the range it
-     * wants to be taken at. */
+    /*
+     * Damage per second, discounted by how far the shot is from the range
+     * it wants to be taken at -- and by how much of a spread will actually
+     * arrive.
+     *
+     * Counting every pellet of a scattergun as a hit at any distance is
+     * what made the gun car fire buckshot across the whole arena and never
+     * once reach for its rifle: seven pellets of twenty-four scored as a
+     * hundred and sixty-eight whether the target was fifteen metres away
+     * or a hundred and fifty. A cone that wide only lands as a cone up
+     * close, so what is scored is the share of it the target still covers.
+     */
     fWant = mecha_ai_weapon_range(pWeapon);
-    fScore = pWeapon->fDamage * (float)pWeapon->byCount
+    fHits = (float)pWeapon->byCount;
+    if (pWeapon->byCount > 1 && pWeapon->iSpreadAngle > 0
+        && fDistance > 0.0f) {
+      float fTarget = 2.0f * (pTargetDef ? pTargetDef->fRadius
+                                         : pDef->fRadius);
+      float fWidth = 2.0f * fDistance
+                     * mecha_sin(pWeapon->iSpreadAngle
+                                 * (pWeapon->byCount - 1) / 2);
+
+      if (fWidth > fTarget && fTarget > 0.0f)
+        fHits *= fTarget / fWidth;
+    }
+    fScore = pWeapon->fDamage * fHits
              / (float)(pWeapon->iRecoveryTicks + 1);
     fScore /= 1.0f + fabsf(fDistance - fWant) / fWant;
 

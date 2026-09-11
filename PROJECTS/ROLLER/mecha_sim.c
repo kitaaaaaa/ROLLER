@@ -795,6 +795,8 @@ static void mecha_update_facing(tMechaWorld *pWorld, int iMechIdx,
      * strafe for the stick to mean anything else by.
      */
     float fSpeed = mecha_length2(pMech->fVelX, pMech->fVelZ);
+    float fAlong = pMech->fVelX * mecha_sin(pMech->iFacing)
+                   + pMech->fVelZ * mecha_cos(pMech->iFacing);
     int iSteer = pInput->iTurn + pInput->iMoveX;
 
     if (bCanAct && iSteer != 0 && fSpeed >= pDef->fSteerFloor
@@ -805,9 +807,25 @@ static void mecha_update_facing(tMechaWorld *pWorld, int iMechIdx,
       int iStep = (int)(pDef->fTurnRate * MECHA_DT * fLock
                         * (float)mecha_clampi(iSteer, -100, 100) / 100.0f);
 
-      /* Backwards, the wheels point the other way round. */
-      if (pMech->fVelX * mecha_sin(pMech->iFacing)
-          + pMech->fVelZ * mecha_cos(pMech->iFacing) < 0.0f)
+      /*
+       * Backwards, the wheels point the other way round -- but only when
+       * the car is actually in reverse, not merely sliding.
+       *
+       * Whiplash decides this on fFinalSpeed, the car's own signed speed
+       * along its nose, and on a track that is the only speed it has:
+       * position is advanced straight along the heading, so a Whiplash car
+       * cannot travel at an angle to where it points. This one carries a
+       * real velocity vector, and in a drift that vector swings more than
+       * a quarter turn off the nose -- at which point a test on the dot
+       * product decides the car is reversing and flips the steering, which
+       * stops the slide dead. That was the rotation limit: not a clamp
+       * anywhere, but the stick fighting the spin halfway through it.
+       *
+       * Reverse is slow -- a third of the forward top speed -- and a drift
+       * is fast, so the car's own reverse speed separates the two cleanly.
+       */
+      if (fAlong < 0.0f
+          && fSpeed <= pDef->fWalkSpeed * MECHA_CAR_REVERSE)
         iStep = -iStep;
       pMech->iFacing = mecha_angle_wrap(pMech->iFacing + iStep);
     }
@@ -1897,11 +1915,16 @@ static void mecha_fire_weapon(tMechaWorld *pWorld, int iMechIdx, int iSlot)
   /*
    * One gun, three triggers, one magazine.
    *
-   * A machine that carries a single weapon still has all three slots, so it
-   * plays and reads like everything else on the roster -- but they are the
-   * same gun, and a long reload that could be skipped by rolling across the
-   * other two triggers would not be a long reload. So firing any of them
-   * empties all of them.
+   * A machine that carries a single weapon still has all three slots, so
+   * it plays and reads like everything else on the roster -- but they are
+   * three loads for the same gun, not three guns, and a magazine that
+   * could be stretched by rolling across the other two triggers would not
+   * be a magazine. So every round spent is spent out of all of them, and
+   * they run dry and reload together.
+   *
+   * Which makes the choice a real one: nine rounds, and each is either
+   * buckshot, a lance or a shell. Nothing about picking the third stops
+   * the first two costing exactly as much.
    */
   if (pDef->bWheeled) {
     int iOther;
@@ -1909,7 +1932,7 @@ static void mecha_fire_weapon(tMechaWorld *pWorld, int iMechIdx, int iSlot)
     for (iOther = 0; iOther < MECHA_WEAPON_SLOTS; iOther++) {
       if (iOther == iSlot)
         continue;
-      pMech->aiAmmo[iOther] = 0;
+      pMech->aiAmmo[iOther] = pMech->aiAmmo[iSlot];
       if (pMech->aiReload[iOther] < pMech->aiReload[iSlot])
         pMech->aiReload[iOther] = pMech->aiReload[iSlot];
     }

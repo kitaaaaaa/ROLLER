@@ -260,15 +260,26 @@
 /*
  * Steering, the way the race game does it.
  *
- * Whiplash works the lock out as `input * (1 + (360 - speed) / 600)` and
+ * Whiplash works the lock out as `input * (1 + (360 - speed) / 60)` and
  * then throws it away entirely below the car's own steering speed limit --
  * so a car turns hardest just above a walking pace, loses lock as it gets
  * quicker, and cannot turn at all standing still. Both halves are what
  * makes driving one feel like driving rather than like walking on wheels,
  * and the second half is why a machine on wheels has to keep moving to
  * point at anything.
+ *
+ * 360 is that game's reference speed, so the divisor is a sixth of it and
+ * the bonus runs from seven times the input at a standstill to nothing at
+ * all flat out. Written here against the machine's own top speed, that is
+ * a gain of six on the slack, which is the same curve.
+ *
+ * And there is no ceiling on any of it. The yaw is simply accumulated:
+ * nothing in the race game limits how far a car may come round, which is
+ * why one can be spun through a whole circle on the stick in a drift. The
+ * grip decides whether the car goes where its nose has gone, and that is a
+ * separate number.
  */
-#define MECHA_CAR_STEER_GAIN 0.60f
+#define MECHA_CAR_STEER_GAIN 6.0f
 /* How much of its forward speed it will do backwards, how hard it slows
  * with nothing pressed, and above what speed the wheels are rolling rather
  * than the car standing still. */
@@ -284,6 +295,11 @@
 #define MECHA_CAR_RAM_DOT     0.4f
 #define MECHA_CAR_RAM_TICKS   MECHA_SEC(0.55f)
 #define MECHA_CAR_RAM_STAGGER 0.9f
+/*
+ * Rounds in the gun car's magazine, shared across all three triggers.
+ * Named because the roster and the test both have to agree about it.
+ */
+#define MECHA_CAR_MAGAZINE    9
 
 /*
  * How the computer pilot drives. Inside the first it stops steering, which
@@ -298,6 +314,17 @@
 #define MECHA_ARM_PITCH_LIMIT  MECHA_DEG(38)
 #define MECHA_ARM_DROOP        MECHA_DEG(22)
 #define MECHA_ARM_RECOIL       MECHA_DEG(14)
+
+/*
+ * How long the close-quarters blade is drawn, against the hitbox it
+ * carries. A sword reads as a sword by being much longer than it is wide,
+ * and the hitbox is a sphere, so the drawing has to be the longer thing.
+ *
+ * Sized so the point lands just past the edge of the hitbox rather than
+ * well beyond it: a blade drawn longer than its reach teaches the player
+ * a range the weapon does not have.
+ */
+#define MECHA_BLADE_REACH      1.6f
 /*
  * At rest the whole arm unfolds and hangs: the shoulder stops tracking, the
  * elbow gives up all but this much of its right angle, and the gun ends up

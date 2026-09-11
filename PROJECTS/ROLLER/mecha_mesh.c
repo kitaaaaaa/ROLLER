@@ -1042,6 +1042,29 @@ static void mecha_mech_aim(const tMechaWorld *pWorld, int iMechIdx,
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * The drawn attitude, added up.
+ *
+ * Whiplash keeps the pieces apart all the way to the render pose and sums
+ * them in one place at the end (car.c: yaw takes the shake, pitch and roll
+ * take the landing wobble, the shake and the control offset). The same
+ * three lines are all that is needed here, and keeping them together is
+ * what makes it possible to read what a machine's body is doing without
+ * chasing the terms round the simulation.
+ */
+static void mecha_mesh_attitude(const tMechaMech *pMech, int *piYaw,
+                                int *piPitch, int *piRoll)
+{
+  const tMechaAttitude *pAtt = &pMech->attitude;
+
+  *piYaw += pAtt->iYawShake;
+  *piPitch += pAtt->iAirPitch + pAtt->iPitchDrive + pAtt->iPitchWobble
+              + pAtt->iPitchShake;
+  *piRoll += pAtt->iRollSteer + pAtt->iRollWobble + pAtt->iRollShake;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static int mecha_mesh_fall_pitch(const tMechaMech *pMech)
 {
   const int iDownPitch = MECHA_DEG(78);
@@ -1318,16 +1341,24 @@ static void mecha_mesh_car(tMechaQuadList *pList, const tMechaWorld *pWorld,
    * what says this thing is a sixth of a machine. */
   fScale = pDef->fHeight / fPlanHeight;
 
-  mecha_pose_build(&pose, pMech->iFacing, mecha_mesh_fall_pitch(pMech),
-                   (int)(pMech->fLeanRoll
-                         * mecha_clampf((pMech->fVelX
-                                           * mecha_cos(pMech->iFacing)
-                                         - pMech->fVelZ
-                                           * mecha_sin(pMech->iFacing))
-                                        / (pDef->fWalkSpeed > 1.0f
-                                             ? pDef->fWalkSpeed : 1.0f),
-                                        -1.0f, 1.0f)),
-                   pMech->fX, pMech->fY, pMech->fZ, 1.0f);
+  {
+    int iYaw = pMech->iFacing;
+    int iPitch = mecha_mesh_fall_pitch(pMech);
+    /* Negated for the same reason as the walkers': positive roll leans
+     * left, and a car sliding right should lean right. */
+    int iRoll = -(int)(pMech->fLeanRoll
+                       * mecha_clampf((pMech->fVelX
+                                         * mecha_cos(pMech->iFacing)
+                                       - pMech->fVelZ
+                                         * mecha_sin(pMech->iFacing))
+                                      / (pDef->fWalkSpeed > 1.0f
+                                           ? pDef->fWalkSpeed : 1.0f),
+                                      -1.0f, 1.0f));
+
+    mecha_mesh_attitude(pMech, &iYaw, &iPitch, &iRoll);
+    mecha_pose_build(&pose, iYaw, iPitch, iRoll,
+                     pMech->fX, pMech->fY, pMech->fZ, 1.0f);
+  }
 
   mecha_add_zizin_body(pList, &pose, fScale, 0.0f, pDef->abyPalette[0],
                        pDef->abyPalette[1]);
@@ -1405,13 +1436,21 @@ void mecha_mesh_mech(tMechaQuadList *pList, const tMechaWorld *pWorld,
                                                     pMech->fZ, pMech->fY)
                           + 0.05f * MECHA_METRE;
 
-  /* Lean into the direction of travel, scaled by how much of it is sideways.
-   * fLeanRoll is smoothed by the simulation so this never snaps. */
+  /*
+   * Lean into the direction of travel, scaled by how much of it is
+   * sideways. fLeanRoll is smoothed by the simulation so this never snaps.
+   *
+   * Negated, because positive roll lifts the right side and so leans the
+   * machine left: without the minus this leant away from the direction of
+   * travel, which is what the comment above has always said it should not
+   * do. A machine boosting to its right leans right, the way anything on
+   * wheels or blades does.
+   */
   fLateral = (pMech->fVelX * mecha_cos(pMech->iFacing)
               - pMech->fVelZ * mecha_sin(pMech->iFacing));
   if (pDef->fDashSpeed > 1.0f)
     fLateral /= pDef->fDashSpeed;
-  iRoll = (int)(pMech->fLeanRoll * mecha_clampf(fLateral, -1.0f, 1.0f));
+  iRoll = -(int)(pMech->fLeanRoll * mecha_clampf(fLateral, -1.0f, 1.0f));
 
   /* Zero means one, so a machine that never declares a build still gets the
    * proportions the mesh was originally written around. */
@@ -1510,8 +1549,18 @@ void mecha_mesh_mech(tMechaQuadList *pList, const tMechaWorld *pWorld,
    * pitches the whole thing over -- a dash lean belongs to the torso, which
    * is why the pitch is split in two.
    */
-  mecha_pose_build(&pose, pMech->iLegYaw, mecha_mesh_fall_pitch(pMech), iRoll,
-                   pMech->fX, pMech->fY + fLift, pMech->fZ, fVertical);
+  {
+    /* The whole machine, body and legs together: the tilt that answers the
+     * stick belongs to the machine, not to its torso, which is the
+     * difference between leaning and merely turning at the waist. */
+    int iPoseYaw = pMech->iLegYaw;
+    int iPosePitch = mecha_mesh_fall_pitch(pMech);
+    int iPoseRoll = iRoll;
+
+    mecha_mesh_attitude(pMech, &iPoseYaw, &iPosePitch, &iPoseRoll);
+    mecha_pose_build(&pose, iPoseYaw, iPosePitch, iPoseRoll,
+                     pMech->fX, pMech->fY + fLift, pMech->fZ, fVertical);
+  }
 
   /* --- legs -------------------------------------------------------------- */
   for (iSide = 0; iSide < 2; iSide++) {

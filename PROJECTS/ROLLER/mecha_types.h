@@ -355,6 +355,74 @@ typedef struct
 
 //-------------------------------------------------------------------------------------------------
 
+//-------------------------------------------------------------------------------------------------
+/*
+ * The drawn attitude of one machine, in the pieces the race game keeps it in.
+ */
+typedef struct
+{
+  /*
+   * The tilt that answers the stick, and the one piece of this that both
+   * kinds of machine have. Whiplash moves it *against* the steering (its
+   * iRollDynamicOffset, wound up at iRollResponseRate and clamped at
+   * iMaxRollOffset) so a car leans out of a corner the way a body loads
+   * its outside springs. Virtual-On's robots do the opposite and lean
+   * into the input, which reads as the machine answering faster than it
+   * really is. Two degrees either way: you would not name it if you saw
+   * it, and you would notice if it went.
+   */
+  int   iRollSteer;
+  /*
+   * Squat and dive. Whiplash's iPitchDynamicOffset: the nose comes up on
+   * the throttle at iPitchAccelRate, goes down on the brakes at
+   * iPitchDecayRate, and unwinds to level at the recovery rates.
+   */
+  int   iPitchDrive;
+  /*
+   * The nose follows the velocity vector while there is no ground under
+   * it -- Whiplash derives its airborne nPitch from atan2 of the vertical
+   * against the horizontal speed, so a car launched off a crest points
+   * where it is actually going rather than where it was pointed.
+   */
+  int   iAirPitch;
+  /*
+   * What is left of the last landing. The two amplitudes decay while the
+   * phase runs, and what comes out is a damped cosine about both axes at
+   * once: Whiplash seeds them from the attitude the car was holding at
+   * the moment of contact, which is why a flat landing barely registers
+   * and one off a hillside rings.
+   */
+  float fWobblePitchAmp;
+  float fWobbleRollAmp;
+  int   iWobblePhase;
+  int   iPitchWobble;
+  int   iRollWobble;
+  /*
+   * The body shake. White noise on all three axes, resampled every tick,
+   * scaled by how hard the machine is working -- which in the race game is
+   * road speed multiplied by how wrecked the car is, divided by the
+   * engine's iStabilityFactor. A healthy car at speed barely blurs; a
+   * wrecked one shakes itself apart.
+   */
+  int   iPitchShake;
+  int   iRollShake;
+  int   iYawShake;
+  /*
+   * What a legged machine shakes from, since it has no road speed to
+   * shake from. Set by taking a hit and bled off, so the shudder belongs
+   * to the blow rather than to the walking.
+   */
+  float fHitShake;
+  /*
+   * The shake has its own noise so that nothing cosmetic ever reaches into
+   * the draw sequence the fight is decided from. A machine rattling on
+   * screen must not be able to move an AI pilot's aim by a hair.
+   */
+  tMechaRng shake;
+} tMechaAttitude;
+
+//-------------------------------------------------------------------------------------------------
+
 typedef struct
 {
   bool    bActive;
@@ -439,6 +507,23 @@ typedef struct
 
   int   iRoundsWon;
   float fDamageDealt;
+
+  /*
+   * How the body sits, as against where the machine is.
+   *
+   * Whiplash keeps a car's drawn attitude in several independent pieces
+   * and adds them up at the last moment (car.c, where the render pose is
+   * composed): a dynamic offset that answers the controls, a damped
+   * oscillation left over from the last landing, and a per-frame shake.
+   * The same split is kept here because the pieces genuinely do not
+   * interact -- a car can be squatting under power, still ringing from a
+   * landing and rattling from damage all at once, and each is computed
+   * without reference to the others.
+   *
+   * All of it is cosmetic, all of it is in the shared 14-bit circle, and
+   * none of it is ever read back by the simulation.
+   */
+  tMechaAttitude attitude;
 
   /* Rendering-only smoothing; the simulation never reads these back. */
   float fLeanRoll;

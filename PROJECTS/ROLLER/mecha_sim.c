@@ -374,6 +374,18 @@ void mecha_sim_damage(tMechaWorld *pWorld, int iVictimIdx, int iAttackerIdx,
   pVictim->fVelZ += fPushZ / fMass;
   pVictim->fStagger += fStagger / fMass;
 
+  /*
+   * And it shudders. The race game shakes a car by road speed, which a
+   * walking machine has no equivalent of; what it does have is the moment
+   * something hits it, so that is what feeds the same noise here. Against
+   * mass, like everything else on this line: the same shell rattles a
+   * light machine and barely disturbs a heavy one.
+   */
+  pVictim->attitude.fHitShake =
+    mecha_clampf(pVictim->attitude.fHitShake
+                   + fDamage * MECHA_SHAKE_HIT_PER_HP / fMass,
+                 0.0f, 1.0f);
+
   if (pVictim->fArmour <= 0.0f) {
     pVictim->fArmour = 0.0f;
     pVictim->byMove = MECHA_MOVE_DESTROYED;
@@ -1033,6 +1045,26 @@ static bool mecha_advance_recovery(tMechaMech *pMech,
 //-------------------------------------------------------------------------------------------------
 
 /*
+ * Which pedal is down. Boost is the accelerator and guard is the brake,
+ * which is what the two buttons are for on a machine with no gauge to spend
+ * and nothing to guard with. The stick answers as well, because a car
+ * nobody can drive with the same keys they walk everything else with is a
+ * car nobody drives.
+ */
+static int mecha_car_throttle(const tMechaInput *pInput, bool bCanAct)
+{
+  if (!bCanAct)
+    return 0;
+  if (pInput->bDash || pInput->iMoveZ > 40)
+    return 1;
+  if (pInput->bGuard || pInput->iMoveZ < -40)
+    return -1;
+  return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
  * Driving.
  *
  * A wheeled machine has one number for its motion and it points along the
@@ -1068,19 +1100,7 @@ static void mecha_update_wheels(tMechaWorld *pWorld, int iMechIdx,
   if (mecha_advance_recovery(pMech, pDef, bAirborne))
     return;
 
-  /*
-   * Boost is the accelerator and guard is the brake, which is what the two
-   * buttons are for on a machine with no gauge to spend and nothing to
-   * guard with. The stick answers as well, because a car nobody can drive
-   * with the same keys they walk everything else with is a car nobody
-   * drives.
-   */
-  if (bCanAct) {
-    if (pInput->bDash || pInput->iMoveZ > 40)
-      iThrottle = 1;
-    else if (pInput->bGuard || pInput->iMoveZ < -40)
-      iThrottle = -1;
-  }
+  iThrottle = mecha_car_throttle(pInput, bCanAct);
 
   if (iThrottle > 0) {
     pMech->byMove = MECHA_MOVE_DASH;
@@ -1114,6 +1134,225 @@ static void mecha_update_wheels(tMechaWorld *pWorld, int iMechIdx,
 }
 
 //-------------------------------------------------------------------------------------------------
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * One axis of body shake: white noise, redrawn every tick.
+ *
+ * Whiplash writes this as (ROLLERrand() - 0x4000) * work / iStabilityFactor,
+ * where the rand is a full 15-bit draw, so the noise is symmetric about
+ * level and unfiltered -- a fresh number every frame rather than anything
+ * that wanders. That is what makes it read as vibration and not as sway.
+ */
+static int mecha_shake_axis(tMechaRng *pRng, float fWork)
+{
+  return (int)((mecha_rng_unit(pRng) * 2.0f - 1.0f) * MECHA_SHAKE_GAIN
+               * fWork);
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * Whiplash's decay factors are per tick at 36 Hz. Applying one of them
+ * sixty times a second instead of thirty-six would damp the wobble out
+ * nearly twice as fast, so each is raised to the ratio of the two rates --
+ * which is what makes a second of ringing here a second of ringing there.
+ */
+static float mecha_whip_decay(float fPerTick36)
+{
+  return powf(fPerTick36, MECHA_WHIP_HZ / (float)MECHA_TICK_HZ);
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * How the body sits.
+ *
+ * Everything here is drawn and nothing here is simulated: not one of these
+ * angles is read back by the movement code, by collision, or by the firing
+ * solution. That is deliberate and it is also what makes the whole thing
+ * affordable -- a machine can be squatting, ringing and rattling at once
+ * because none of the three has to agree with the others about anything.
+ */
+static void mecha_update_attitude(tMechaWorld *pWorld, int iMechIdx,
+                                  const tMechaInput *pInput, bool bCanAct)
+{
+  tMechaMech *pMech = &pWorld->aMechs[iMechIdx];
+  const tMechaMechDef *pDef = mecha_mech_def(pMech);
+  tMechaAttitude *pAtt = &pMech->attitude;
+  float fGround = mecha_arena_ground_height(&pWorld->arena, pMech->fX,
+                                            pMech->fZ, pMech->fY);
+  bool bAirborne = pMech->fY > fGround + MECHA_GROUND_EPS;
+  float fSpeed = mecha_length2(pMech->fVelX, pMech->fVelZ);
+  float fTop = pDef->fWalkSpeed > 1.0f ? pDef->fWalkSpeed : 1.0f;
+
+  /* --- the tilt that answers the stick ----------------------------------
+   *
+   * Both games do this and they do it in opposite directions, which is the
+   * only interesting thing about it. A car leans out of the corner because
+   * that is what weight transfer does to a body on springs; a robot leans
+   * into it because a machine that has already started moving before it
+   * has moved feels quicker to the hands than one that has not. Neither is
+   * more than a couple of degrees.
+   */
+  {
+    int iSign = pDef->bWheeled ? MECHA_TILT_CAR_SIGN : MECHA_TILT_MECH_SIGN;
+    int iCeiling = pDef->bWheeled ? MECHA_TILT_LIMIT : MECHA_TILT_MECH_LIMIT;
+    int iSteer = 0;
+
+    if (bCanAct && !bAirborne && mecha_mech_alive(pMech)) {
+      if (pDef->bWheeled) {
+        /*
+         * The wheels do nothing below the steering floor, so neither does
+         * the body: a car rolling at a walking pace does not load a
+         * spring. Whiplash zeroes its own steering input the same way, and
+         * for the same reason, before it ever reaches the roll.
+         */
+        if (fSpeed >= pDef->fSteerFloor)
+          iSteer = pInput->iTurn + pInput->iMoveX;
+      } else {
+        /*
+         * Input, not travel. There is already a lean that follows the
+         * velocity, and it is not this: this one is on the stick, so it
+         * arrives before the machine does.
+         */
+        iSteer = pInput->iMoveX;
+      }
+      iSteer = mecha_clampi(iSteer, -100, 100);
+    }
+
+    if (iSteer != 0) {
+      /* Whiplash's steering is a digital left or right and its tilt has one
+       * size to match. A stick that can be half over should get half the
+       * lean, so the limit is scaled and the winding rate is not: full
+       * deflection then behaves exactly as the original does. */
+      int iLimit = iCeiling * (iSteer < 0 ? -iSteer : iSteer) / 100;
+      int iWant = iSteer > 0 ? iSign * iLimit : -iSign * iLimit;
+
+      pAtt->iRollSteer = mecha_stepi(pAtt->iRollSteer, iWant,
+                                          MECHA_TILT_RATE);
+    } else {
+      pAtt->iRollSteer = mecha_stepi(pAtt->iRollSteer, 0,
+                                          MECHA_TILT_CENTRE);
+    }
+  }
+
+  /* --- squat and dive, which only a car has ----------------------------- */
+  if (pDef->bWheeled && !bAirborne) {
+    int iThrottle = mecha_mech_alive(pMech)
+                      ? mecha_car_throttle(pInput, bCanAct) : 0;
+
+    if (iThrottle > 0)
+      pAtt->iPitchDrive = mecha_clampi(pAtt->iPitchDrive + MECHA_SQUAT_RATE,
+                                       -MECHA_SQUAT_LIMIT,
+                                       MECHA_SQUAT_LIMIT);
+    else if (iThrottle < 0)
+      pAtt->iPitchDrive = mecha_clampi(pAtt->iPitchDrive - MECHA_SQUAT_RATE,
+                                       -MECHA_SQUAT_LIMIT,
+                                       MECHA_SQUAT_LIMIT);
+    else
+      pAtt->iPitchDrive = mecha_stepi(pAtt->iPitchDrive, 0,
+                                           MECHA_SQUAT_RECOVER);
+  } else {
+    pAtt->iPitchDrive = mecha_stepi(pAtt->iPitchDrive, 0,
+                                         MECHA_SQUAT_RECOVER);
+  }
+
+  /* --- the nose in the air ----------------------------------------------
+   *
+   * A car that has left the road points where it is going rather than
+   * where it was pointed, which Whiplash gets from the arctangent of the
+   * climb against the run. Walkers are excluded: a mech in the air is
+   * jumping, and a jumping mech that pitches nose-down on the way back
+   * looks like a mech that has been shot.
+   */
+  if (pDef->bWheeled && bAirborne) {
+    pAtt->iAirPitch = mecha_angle_wrap(mecha_atan2_angle(-pMech->fVelY,
+                                                         fSpeed));
+    if (pAtt->iAirPitch > MECHA_ANGLE_HALF)
+      pAtt->iAirPitch -= MECHA_ANGLE_FULL;
+    pAtt->iAirPitch = mecha_clampi(pAtt->iAirPitch, -MECHA_AIR_PITCH_LIMIT,
+                                   MECHA_AIR_PITCH_LIMIT);
+  } else {
+    /*
+     * Back on the ground it goes straight to level, and does not unwind:
+     * the landing has already copied it into the wobble, which is what
+     * carries the attitude from here. Leaving it to decay would have the
+     * two of them describing the same motion at once.
+     */
+    pAtt->iAirPitch = 0;
+  }
+
+  /* --- what is left of the last landing --------------------------------- */
+  {
+    float fAmp = pAtt->fWobblePitchAmp < 0.0f ? -pAtt->fWobblePitchAmp
+                                              : pAtt->fWobblePitchAmp;
+    float fRollAmp = pAtt->fWobbleRollAmp < 0.0f ? -pAtt->fWobbleRollAmp
+                                                 : pAtt->fWobbleRollAmp;
+
+    if (fAmp < MECHA_WOBBLE_FLOOR && fRollAmp < MECHA_WOBBLE_FLOOR) {
+      pAtt->fWobblePitchAmp = 0.0f;
+      pAtt->fWobbleRollAmp = 0.0f;
+      pAtt->iWobblePhase = 0;
+      pAtt->iPitchWobble = 0;
+      pAtt->iRollWobble = 0;
+    } else {
+      /*
+       * The larger the wobble the faster it dies, which is why the two
+       * decay rates are named max and min the way round they are: 0.95 is
+       * the "max" and it is the smaller number. Blended by amplitude
+       * measured in quarter-circles, exactly as the original blends it.
+       */
+      float fBlend = fAmp * (MECHA_WOBBLE_DECAY_MAX - MECHA_WOBBLE_DECAY_MIN)
+                     * MECHA_WOBBLE_BLEND + MECHA_WOBBLE_DECAY_MIN;
+      float fCos;
+
+      pAtt->fWobblePitchAmp *= mecha_whip_decay(fBlend);
+      pAtt->fWobbleRollAmp *= mecha_whip_decay(MECHA_WOBBLE_ROLL_DECAY);
+      pAtt->iWobblePhase = (pAtt->iWobblePhase + 1) % MECHA_ANGLE_FULL;
+      fCos = mecha_cos(mecha_angle_wrap(MECHA_WOBBLE_FREQ
+                                        * pAtt->iWobblePhase));
+      pAtt->iPitchWobble = (int)(pAtt->fWobblePitchAmp * fCos);
+      pAtt->iRollWobble = (int)(pAtt->fWobbleRollAmp * fCos);
+    }
+  }
+
+  /* --- the shake --------------------------------------------------------- */
+  {
+    float fHealth = pDef->fArmour > 0.0f
+                      ? mecha_clampf(pMech->fArmour / pDef->fArmour, 0.0f,
+                                     1.0f)
+                      : 1.0f;
+    float fHurt = 1.0f + (MECHA_SHAKE_DAMAGE_MAX - 1.0f) * (1.0f - fHealth);
+    float fWork;
+
+    if (pDef->bWheeled) {
+      /*
+       * Road speed times damage, which is the race game's own product and
+       * the reason it works: a healthy car at speed barely blurs, a
+       * wrecked one at speed shakes itself apart, and a wreck standing
+       * still sits perfectly quiet.
+       */
+      fWork = (fSpeed / fTop) * fHurt;
+    } else {
+      /*
+       * A walker has nothing equivalent to road speed, so what shakes it
+       * is being hit. The impulse is set where the damage lands and bled
+       * off here, which puts the shudder on the blow rather than on the
+       * walking.
+       */
+      pAtt->fHitShake = mecha_approachf(pAtt->fHitShake, 0.0f,
+                                        MECHA_SHAKE_HIT_DECAY * MECHA_DT);
+      fWork = pAtt->fHitShake * fHurt;
+    }
+    if (!mecha_mech_alive(pMech))
+      fWork = 0.0f;
+    pAtt->iPitchShake = mecha_shake_axis(&pAtt->shake, fWork);
+    pAtt->iRollShake = mecha_shake_axis(&pAtt->shake, fWork);
+    pAtt->iYawShake = mecha_shake_axis(&pAtt->shake, fWork);
+  }
+}
 
 //-------------------------------------------------------------------------------------------------
 
@@ -1361,6 +1600,10 @@ integrate:
                                       pMech->fY);
   if (pMech->fY <= fGround) {
     bool bWasFalling = pMech->fVelY < 0.0f;
+    /* How hard it arrived. Taken now because the contact rules below are
+     * about to zero the vertical speed, and the landing wobble is sized
+     * from the drop. */
+    float fImpactVelY = pMech->fVelY;
     /*
      * Off a ramp, the way the race game does it.
      *
@@ -1396,6 +1639,25 @@ integrate:
      * exact tick it should happen, at the lip, and the machine walks onto
      * the flat top as though the ramp had been a staircase.
      */
+    if (fImpactVelY < -MECHA_WOBBLE_MIN_DROP
+        && pMech->attitude.iAirPitch != 0) {
+      /*
+       * The landing wobble, seeded the way Whiplash seeds it: the attitude
+       * the machine was holding at the moment of contact becomes the
+       * amplitude of a damped oscillation about the same two axes, and the
+       * phase is restarted so the ring begins at full deflection. A flat
+       * landing was barely pitched and barely rings; one off the side of a
+       * hill was pitched a long way and rings for a second.
+       */
+      pMech->attitude.fWobblePitchAmp =
+        (float)mecha_clampi(pMech->attitude.iAirPitch, -MECHA_WOBBLE_LIMIT,
+                            MECHA_WOBBLE_LIMIT);
+      pMech->attitude.fWobbleRollAmp =
+        (float)mecha_clampi(pMech->attitude.iRollSteer, -MECHA_WOBBLE_LIMIT,
+                            MECHA_WOBBLE_LIMIT);
+      pMech->attitude.iWobblePhase = 0;
+      pMech->attitude.iAirPitch = 0;
+    }
     if ((pMech->byMove == MECHA_MOVE_JUMP
          || pMech->byMove == MECHA_MOVE_CANCEL) && bWasFalling) {
       bool bCancelled = pMech->byMove == MECHA_MOVE_CANCEL;
@@ -1444,6 +1706,8 @@ integrate:
   pMech->fGroundY = fGround;
 
   /* --- cosmetic smoothing ---------------------------------------------- */
+
+  mecha_update_attitude(pWorld, iMechIdx, pInput, bCanAct);
 
   {
     float fSpeed = mecha_length2(pMech->fVelX, pMech->fVelZ);
@@ -2579,6 +2843,12 @@ static void mecha_reset_mech_for_round(tMechaWorld *pWorld, int iMechIdx,
   pMech->fStepPhase = 0.0f;
   pMech->iLegYaw = pMech->iFacing;
   pMech->bLegsBackward = false;
+
+  memset(&pMech->attitude, 0, sizeof(pMech->attitude));
+  /* Its own stream, and a different one per machine, so four identical
+   * cars in a row do not rattle in unison. */
+  mecha_rng_seed(&pMech->attitude.shake,
+                 0x9E3779B9u * (uint32_t)(iMechIdx + 1) + 0x51ED270Bu);
 }
 
 //-------------------------------------------------------------------------------------------------

@@ -322,6 +322,111 @@
 #define MECHA_PUSH_PER_TICK    MECHA_M(0.9f)
 
 //-------------------------------------------------------------------------------------------------
+/*
+ * Attitude: the numbers the race game draws its cars with.
+ *
+ * All of these are lifted from Whiplash rather than invented. The engine
+ * table in engines.c gives every car the same figures for this -- the
+ * differences between cars are in the gearing and the grip, not in how
+ * the body sits -- so they are written here as the constants they are.
+ * Both games count a full circle as 16384, so the angles carry over
+ * untouched; only the rates need scaling, because Whiplash's control loop
+ * runs at 36 Hz (control.c advances lap time by 1/36 a tick) and this one
+ * runs at 60.
+ */
+#define MECHA_WHIP_HZ          36.0f
+#define MECHA_WHIP_RATE(x)     ((int)((float)(x) * MECHA_WHIP_HZ \
+                                      / (float)MECHA_TICK_HZ + 0.5f))
+
+/* iRollResponseRate, iMaxRollOffset, iRollCenteringRate. The limit is two
+ * and a fifth degrees, which is the whole of the effect. */
+#define MECHA_TILT_RATE        MECHA_WHIP_RATE(10)
+#define MECHA_TILT_LIMIT       100
+#define MECHA_TILT_CENTRE      MECHA_WHIP_RATE(30)
+
+/* iPitchAccelRate, iMaxPitchOffset, iPitchDecayRate, iMinPitchOffset and
+ * the two recovery rates, which the table gives as one number twice. */
+#define MECHA_SQUAT_RATE       MECHA_WHIP_RATE(4)
+#define MECHA_SQUAT_LIMIT      80
+#define MECHA_SQUAT_RECOVER    MECHA_WHIP_RATE(8)
+
+/*
+ * iOscillationFreq, and the pair fOscillationMax/fOscillationMin that
+ * Whiplash blends between by amplitude -- max is the *smaller* number, so
+ * a big wobble dies faster than a small one, which is the one thing about
+ * this that looks wrong written down and right on screen. Roll decays at a
+ * flat 0.9 in the original. Raised to 36/60 so a second of decay is a
+ * second of decay at either rate.
+ */
+#define MECHA_WOBBLE_FREQ      MECHA_WHIP_RATE(1200)
+#define MECHA_WOBBLE_DECAY_MAX 0.95f
+#define MECHA_WOBBLE_DECAY_MIN 0.97f
+#define MECHA_WOBBLE_ROLL_DECAY 0.9f
+/* Whiplash's 0.00024414062, which is 1/4096: amplitude measured in
+ * quarter-circles is what picks the point between the two decay rates. */
+#define MECHA_WOBBLE_BLEND     (1.0f / 4096.0f)
+/* Below this there is nothing left to see and the oscillator is stopped,
+ * so a parked car is not quietly running a sine wave forever. */
+#define MECHA_WOBBLE_FLOOR     4.0f
+/*
+ * The most a landing can rock a body.
+ *
+ * Whiplash seeds this straight from the attitude at contact and gets away
+ * with it because a car coming off a racetrack jump is barely pitched. A
+ * machine dropping off the side of Tower Seven is pitched a great deal
+ * further than that, and feeding the whole of it in gives a landing that
+ * reads as a crash. Clamping the seed keeps what the original is for --
+ * a gentle touchdown barely registers and a hard one rings -- without
+ * letting a long fall turn the car over.
+ */
+#define MECHA_WOBBLE_LIMIT     MECHA_DEG(8)
+/* And how hard it has to come down to ring at all. Without this, a car
+ * jostling over broken ground touches down with a trace of fall speed
+ * every few ticks and re-seeds the oscillator each time, which is a car
+ * permanently shivering rather than one that has landed. */
+#define MECHA_WOBBLE_MIN_DROP  MECHA_MPS(6.0f)
+
+/*
+ * The shake. Whiplash computes (rand - 0x4000) * damage * speed /
+ * iStabilityFactor per axis per tick, where damage runs 1 at full health
+ * to 8 at wrecked. iStabilityFactor is 262144 for every engine in the
+ * table; with speed expressed here as a fraction of the machine's own top
+ * speed rather than in the race game's road units, the divisor becomes a
+ * gain instead, chosen to land the healthy car at the same fraction of a
+ * degree the original does.
+ */
+#define MECHA_SHAKE_DAMAGE_MAX 8.0f
+#define MECHA_SHAKE_GAIN       22.0f
+/* A hit shakes a legged machine, since it has no road speed to shake from.
+ * Full deflection from one heavy blow, bled off over about a second. */
+#define MECHA_SHAKE_HIT_PER_HP 0.016f
+#define MECHA_SHAKE_HIT_DECAY  1.1f            /* per second */
+
+/*
+ * Which way the tilt goes. Whiplash's cars lean out of the corner; the
+ * robots lean into it. The sign is the entire difference and it is worth
+ * naming rather than burying in a minus.
+ *
+ * Positive roll in the pose lifts the machine's right side, so a positive
+ * angle leans it *left*. That is not obvious from the matrix and was got
+ * wrong the first time; it was settled by building a mesh at a known roll
+ * and measuring which flank came out lower, which is the only way to be
+ * sure of a sign convention.
+ */
+#define MECHA_TILT_CAR_SIGN    (1)
+#define MECHA_TILT_MECH_SIGN   (-1)
+/* The robots get a little more of it than the cars do, because a machine
+ * that tall shows less of a given angle. Still under three degrees. */
+#define MECHA_TILT_MECH_LIMIT  128
+/*
+ * How far the nose can follow the velocity vector. Whiplash lets a car
+ * point wherever it is falling, but it draws that against a road; here a
+ * long drop off Tower Seven would have the car pointing straight down,
+ * which reads as a crash rather than as a jump.
+ */
+#define MECHA_AIR_PITCH_LIMIT  MECHA_DEG(35)
+
+//-------------------------------------------------------------------------------------------------
 
 int mecha_def_count(void);
 /* Out-of-range indices wrap, so callers can cycle a select screen freely. */

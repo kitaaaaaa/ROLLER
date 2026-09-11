@@ -153,6 +153,19 @@ float mecha_approachf(float fValue, float fTarget, float fMaxStep)
 
 //-------------------------------------------------------------------------------------------------
 
+int mecha_stepi(int iValue, int iTarget, int iMaxStep)
+{
+  if (iMaxStep < 0)
+    iMaxStep = -iMaxStep;
+  if (iValue < iTarget)
+    return iValue + iMaxStep > iTarget ? iTarget : iValue + iMaxStep;
+  if (iValue > iTarget)
+    return iValue - iMaxStep < iTarget ? iTarget : iValue - iMaxStep;
+  return iValue;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 float mecha_length2(float fX, float fZ)
 {
   return sqrtf(fX * fX + fZ * fZ);

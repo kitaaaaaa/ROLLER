@@ -38,6 +38,36 @@
 #define MECHA_PAL_ROCK_TOP  130
 
 //-------------------------------------------------------------------------------------------------
+/*
+ * Marching a shot across the ground.
+ *
+ * The stride is what decides whether a bullet can step over a hillside
+ * between two samples. A metre against hills forty metres wide leaves no
+ * gap to step through, and the fastest shot in the game covers seven
+ * metres in a tick, so a segment is eight samples at worst. The cap is
+ * only there so an absurdly long query cannot turn into an unbounded loop.
+ */
+#define MECHA_TRACE_STRIDE  MECHA_M(1.0f)
+#define MECHA_TRACE_STEPS   48
+#define MECHA_TRACE_BISECT  12
+/*
+ * How far under the surface counts as still being above it.
+ *
+ * The gun car's weapon floats six metres off its right flank, so parked
+ * across the steepest hillside in Coldwater Meadow its muzzle dips about
+ * three centimetres into the slope. Sweeping every machine over every
+ * square metre of that arena at sixteen facings found that in 24 of 2.28
+ * million samples -- rare, and unplayable where it happens, because a shot
+ * that begins underground detonates at the muzzle.
+ *
+ * So the ground is treated as beginning a little below where it is drawn.
+ * Twenty centimetres is six times the worst graze measured and small
+ * enough to be invisible: a shot stopping into a slope stops a fifth of a
+ * metre late along the normal, on hills that stand twenty-six metres.
+ */
+#define MECHA_TRACE_SKIN    MECHA_M(0.2f)
+
+//-------------------------------------------------------------------------------------------------
 
 #define MECHA_ARENA_COUNT 5
 
@@ -788,6 +818,32 @@ bool mecha_arena_resolve_cylinder(const tMechaArena *pArena,
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * How far a point sits above the ground beneath it, and whether there is
+ * any ground beneath it at all.
+ *
+ * The floor used to be the y = 0 plane, which was true of the first three
+ * arenas and of nothing since. A shot crossing Coldwater Meadow passed
+ * clean through every hill it met, and one fired across Tower Seven went
+ * through the tabletop, because neither is at zero. The terrain query is
+ * what the ground mesh is built from, so asking it here is what makes the
+ * shape you can see the shape that stops a bullet.
+ *
+ * A platform arena has ground only where the platform is; past the edge a
+ * shot keeps going rather than striking a floor that is not there.
+ */
+static bool mecha_arena_floor_gap(const tMechaArena *pArena, float fX,
+                                  float fY, float fZ, float *pfGap)
+{
+  if (pArena->byShape == MECHA_ARENA_OPEN
+      && !mecha_arena_contains(pArena, fX, fZ))
+    return false;
+  *pfGap = fY - mecha_arena_terrain(pArena, fX, fZ);
+  return true;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static bool mecha_arena_slab(float fStart, float fDelta,
                              float fMin, float fMax,
                              float *pfEnter, float *pfExit)
@@ -828,12 +884,58 @@ bool mecha_arena_trace_segment(const tMechaArena *pArena,
   if (!pArena)
     return false;
 
-  /* Floor. */
-  if (fY1 <= 0.0f) {
-    if (fY0 <= 0.0f)
-      fBest = 0.0f;
-    else if (fDy < -1e-6f)
-      fBest = fY0 / (fY0 - fY1);
+  /* Floor, which is not a plane. */
+  {
+    float fLength = sqrtf(fDx * fDx + fDy * fDy + fDz * fDz);
+    int iSteps = (int)(fLength / MECHA_TRACE_STRIDE) + 1;
+    float fPrevT = 0.0f;
+    bool bPrevOver;
+    float fPrevGap = 0.0f;
+    int iStep;
+
+    if (iSteps > MECHA_TRACE_STEPS)
+      iSteps = MECHA_TRACE_STEPS;
+
+    bPrevOver = mecha_arena_floor_gap(pArena, fX0, fY0, fZ0, &fPrevGap);
+    if (bPrevOver && fPrevGap <= -MECHA_TRACE_SKIN) {
+      fBest = 0.0f;                             /* started inside the hill */
+    } else {
+      for (iStep = 1; iStep <= iSteps; iStep++) {
+        float fT = (float)iStep / (float)iSteps;
+        float fGap = 0.0f;
+        bool bOver = mecha_arena_floor_gap(pArena, fX0 + fDx * fT,
+                                           fY0 + fDy * fT,
+                                           fZ0 + fDz * fT, &fGap);
+
+        if (bOver && bPrevOver && fPrevGap > -MECHA_TRACE_SKIN
+            && fGap <= -MECHA_TRACE_SKIN) {
+          float fLo = fPrevT;
+          float fHi = fT;
+          int iBisect;
+
+          /* The straddling step is short; a dozen halvings put the hit
+           * well under a centimetre of the real slope. */
+          for (iBisect = 0; iBisect < MECHA_TRACE_BISECT; iBisect++) {
+            float fMid = (fLo + fHi) * 0.5f;
+            float fMidGap = 0.0f;
+
+            if (mecha_arena_floor_gap(pArena, fX0 + fDx * fMid,
+                                      fY0 + fDy * fMid,
+                                      fZ0 + fDz * fMid, &fMidGap)
+                && fMidGap <= -MECHA_TRACE_SKIN)
+              fHi = fMid;
+            else
+              fLo = fMid;
+          }
+          if (fHi < fBest)
+            fBest = fHi;
+          break;
+        }
+        fPrevT = fT;
+        fPrevGap = fGap;
+        bPrevOver = bOver;
+      }
+    }
   }
 
   /* Walls, as four planes. Only an outward crossing counts, so a shot fired

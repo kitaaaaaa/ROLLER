@@ -51,6 +51,10 @@ int mecha_atan2_angle(float fX, float fZ);
 float mecha_clampf(float fValue, float fLow, float fHigh);
 int mecha_clampi(int iValue, int iLow, int iHigh);
 float mecha_approachf(float fValue, float fTarget, float fMaxStep);
+/* The same, in whole units and without the circle: for angles held as small
+ * signed offsets from level, where wrapping -6 round to 16378 is exactly
+ * the wrong answer. */
+int mecha_stepi(int iValue, int iTarget, int iMaxStep);
 
 /* Length of (fX, fZ) on the ground plane. */
 float mecha_length2(float fX, float fZ);

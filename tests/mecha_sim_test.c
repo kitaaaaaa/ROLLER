@@ -2577,11 +2577,26 @@ static int arena_by_name(const char *szName)
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * How long after a hit a machine still counts as having been shoved.
+ *
+ * The first version of this asked whether stagger was above zero on the
+ * exact tick the machine crossed the line, and that is not the same
+ * question. Stagger bleeds off at fifty-five a second, so a mech hit hard
+ * at the far end of a slide arrives at the edge with none left and books
+ * itself down as having strolled -- two of the six seeds here did exactly
+ * that, each after being shot the whole way across the roof. What matters
+ * is whether anybody had shot it recently, so that is what is recorded.
+ */
+#define ROOF_SHOVE_MEMORY MECHA_SEC(2.0f)
+
 static int roof_excursions(uint32_t uiSeed, int *piStroll, int *piPushed)
 {
     tMechaWorld world;
     int iArena = arena_by_name("TOWER SEVEN ROOF");
     bool abWasLethal[2] = { false, false };
+    float afLastArmour[2] = { 0.0f, 0.0f };
+    int aiHitAgo[2] = { 0, 0 };
     int i;
 
     CHECK(iArena >= 0);
@@ -2589,6 +2604,8 @@ static int roof_excursions(uint32_t uiSeed, int *piStroll, int *piPushed)
     CHECK(mecha_sim_add_mech(&world, 1, MECHA_CONTROL_AI, 0) >= 0);
     CHECK(mecha_sim_add_mech(&world, 2, MECHA_CONTROL_AI, 1) >= 0);
     mecha_sim_begin_match(&world);
+    for (i = 0; i < 2; i++)
+        afLastArmour[i] = world.aMechs[i].fArmour;
 
     for (i = 0; i < MECHA_TICK_HZ * 60; i++) {
         int iMech;
@@ -2599,6 +2616,15 @@ static int roof_excursions(uint32_t uiSeed, int *piStroll, int *piPushed)
             uint32_t uiSurface = mecha_arena_surface(&world.arena, pMech->fX,
                                                      pMech->fZ);
             bool bLethal;
+
+            /* Armour going down is somebody shooting; stagger rising is
+             * being shoved by something that did no damage. Either starts
+             * the clock. */
+            if (pMech->fArmour < afLastArmour[iMech] || pMech->fStagger > 0.0f)
+                aiHitAgo[iMech] = ROOF_SHOVE_MEMORY;
+            else if (aiHitAgo[iMech] > 0)
+                aiHitAgo[iMech]--;
+            afLastArmour[iMech] = pMech->fArmour;
 
             if (!mecha_mech_alive(pMech)) {
                 abWasLethal[iMech] = false;
@@ -2620,7 +2646,7 @@ static int roof_excursions(uint32_t uiSeed, int *piStroll, int *piPushed)
                  * fight; walking over it under your own power is not. The
                  * stagger a hit leaves behind is what tells the two apart.
                  */
-                if (pMech->fStagger > 0.0f)
+                if (aiHitAgo[iMech] > 0)
                     (*piPushed)++;
                 else {
                     (*piStroll)++;
@@ -3141,6 +3167,455 @@ static int test_the_gun_car_never_turns_itself(void)
     printf("   a second of knife range turned it %d units\n",
            mecha_angle_delta(iStart, world.aMechs[0].iFacing));
     CHECK(world.aMechs[0].iFacing == iStart);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * A hill is a wall you can see over.
+ *
+ * The floor used to be the plane y = 0, so every shot fired across
+ * Coldwater Meadow went through its hills and every shot across Tower
+ * Seven went through the tabletop. Ground that can be stood on and ground
+ * that can be shot through were two different shapes, and only one of them
+ * was drawn.
+ */
+/* Degrees, for reading angles back out of the 14-bit circle. */
+static float as_degrees(int iAngle)
+{
+    return (float)iAngle * 360.0f / (float)MECHA_ANGLE_FULL;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * Which way a machine is actually leaning, read off the built mesh.
+ *
+ * Returns +1 if its right flank hangs lower than its left, -1 the other
+ * way, 0 if it is level. Measured rather than reasoned about: which sign
+ * of roll tips which way is not readable off the rotation matrix without
+ * also knowing the multiply order and whether the vectors are rows or
+ * columns, and getting it wrong costs a build and looks like a physics
+ * bug rather than a sign.
+ */
+static int lean_side(tMechaWorld *pWorld, int iMechIdx)
+{
+    static tMechaQuad aStorage[MECHA_QUAD_CAPACITY];
+    const tMechaMech *pMech = &pWorld->aMechs[iMechIdx];
+    tMechaQuadList list;
+    float fRightX = mecha_cos(pMech->iFacing);
+    float fRightZ = -mecha_sin(pMech->iFacing);
+    float fLowRight = 1e9f;
+    float fLowLeft = 1e9f;
+    int i;
+    int c;
+
+    mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
+    mecha_mesh_mech(&list, pWorld, iMechIdx);
+    for (i = 0; i < list.iCount; i++)
+        for (c = 0; c < 4; c++) {
+            float fSide = (list.paQuads[i].afVert[c][0] - pMech->fX) * fRightX
+                          + (list.paQuads[i].afVert[c][2] - pMech->fZ)
+                            * fRightZ;
+            float fY = list.paQuads[i].afVert[c][1];
+
+            if (fSide > MECHA_M(1.0f) && fY < fLowRight)
+                fLowRight = fY;
+            if (fSide < -MECHA_M(1.0f) && fY < fLowLeft)
+                fLowLeft = fY;
+        }
+    if (fLowRight < fLowLeft - MECHA_M(0.05f))
+        return 1;
+    if (fLowLeft < fLowRight - MECHA_M(0.05f))
+        return -1;
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * How the bodies sit, which is the whole of what the race game does to
+ * make a car look like it has weight.
+ *
+ * Four separate things, none of which the simulation reads back: the tilt
+ * that answers the stick, the squat that answers the throttle, the damped
+ * ring left by a landing, and the shake. Every figure asserted here is
+ * small on purpose -- if any of them ever grows into something you would
+ * describe rather than merely feel, it has broken.
+ */
+static int test_the_bodies_lean_squat_ring_and_shake(void)
+{
+    tMechaWorld world;
+    tMechaInput aInputs[2];
+    int iCar = wheeled_def();
+    int iLegs = -1;
+    int i;
+    int iSettled;
+    int iCarTilt;
+    int iMechTilt;
+
+    CHECK(iCar >= 0);
+    for (i = 0; i < mecha_def_count(); i++)
+        if (!mecha_def_get(i)->bWheeled) {
+            iLegs = i;
+            break;
+        }
+    CHECK(iLegs >= 0);
+
+    /* --- the car leans out of the corner --------------------------------- */
+    start_duel(&world, 0, iCar, iLegs, 0x7E11u, 1);
+    CHECK(clear_runway(&world, 0));
+    memset(aInputs, 0, sizeof(aInputs));
+
+    aInputs[0].bDash = true;
+    run_ticks(&world, aInputs, 2, MECHA_TICK_HZ * 2);
+    /* Nothing on the stick, nothing in the body. */
+    CHECK(world.aMechs[0].attitude.iRollSteer == 0);
+
+    aInputs[0].iTurn = 100;
+    run_ticks(&world, aInputs, 2, MECHA_TICK_HZ);
+    iCarTilt = world.aMechs[0].attitude.iRollSteer;
+    /* Right lock, left lean: the springs load on the outside. Positive
+     * roll is a left lean, which is why the sign reads the way it does. */
+    CHECK(iCarTilt > 0);
+    CHECK(iCarTilt == MECHA_TILT_LIMIT);
+
+    /* Let go and it comes back, and quickly -- Whiplash centres this three
+     * times as fast as it winds it on. */
+    aInputs[0].iTurn = 0;
+    for (iSettled = 0; iSettled < MECHA_TICK_HZ
+                       && world.aMechs[0].attitude.iRollSteer != 0; iSettled++)
+        mecha_sim_tick(&world, aInputs, 2);
+    CHECK(world.aMechs[0].attitude.iRollSteer == 0);
+    CHECK(iSettled < MECHA_TICK_HZ / 4);
+
+    /* Half a stick is half a lean. */
+    aInputs[0].iTurn = 50;
+    run_ticks(&world, aInputs, 2, MECHA_TICK_HZ);
+    CHECK(world.aMechs[0].attitude.iRollSteer > 0);
+    CHECK(world.aMechs[0].attitude.iRollSteer
+          <= MECHA_TILT_LIMIT / 2 + MECHA_TILT_RATE);
+    aInputs[0].iTurn = 0;
+
+    /* --- and squats on the throttle -------------------------------------- */
+    run_ticks(&world, aInputs, 2, MECHA_TICK_HZ);
+    aInputs[0].bDash = true;
+    run_ticks(&world, aInputs, 2, MECHA_TICK_HZ * 2);
+    CHECK(world.aMechs[0].attitude.iPitchDrive == MECHA_SQUAT_LIMIT);
+    aInputs[0].bDash = false;
+    aInputs[0].bGuard = true;
+    run_ticks(&world, aInputs, 2, MECHA_TICK_HZ * 2);
+    CHECK(world.aMechs[0].attitude.iPitchDrive == -MECHA_SQUAT_LIMIT);
+
+    printf("   the car leans %.2f deg out of a corner and squats %.2f\n",
+           as_degrees(iCarTilt), as_degrees(MECHA_SQUAT_LIMIT));
+    /* Subtle, and staying that way. */
+    CHECK(as_degrees(MECHA_TILT_LIMIT) < 3.0f);
+    CHECK(as_degrees(MECHA_SQUAT_LIMIT) < 3.0f);
+
+    /* --- a shake that is road speed times damage ------------------------- */
+    memset(aInputs, 0, sizeof(aInputs));
+    run_ticks(&world, aInputs, 2, MECHA_TICK_HZ * 2);
+    {
+        int iStillWorst = 0;
+        int iFastWorst = 0;
+        int iHurtWorst = 0;
+
+        for (i = 0; i < MECHA_TICK_HZ; i++) {
+            int iShake;
+
+            /* Held at a standstill: the shake is road speed times damage,
+             * so with no road speed there is nothing to multiply. */
+            world.aMechs[0].fVelX = 0.0f;
+            world.aMechs[0].fVelZ = 0.0f;
+            mecha_sim_tick(&world, aInputs, 2);
+            iShake = abs(world.aMechs[0].attitude.iPitchShake);
+            if (iShake > iStillWorst)
+                iStillWorst = iShake;
+        }
+        /* Parked, it is perfectly still, wrecked or not. */
+        CHECK(iStillWorst == 0);
+
+        aInputs[0].bDash = true;
+        run_ticks(&world, aInputs, 2, MECHA_TICK_HZ * 3);
+        for (i = 0; i < MECHA_TICK_HZ; i++) {
+            int iShake = abs(world.aMechs[0].attitude.iPitchShake);
+
+            if (iShake > iFastWorst)
+                iFastWorst = iShake;
+            mecha_sim_tick(&world, aInputs, 2);
+        }
+        CHECK(iFastWorst > 0);
+
+        /* Now hurt it, and the same speed shakes it a great deal harder. */
+        world.aMechs[0].fArmour = mecha_def_get(iCar)->fArmour * 0.1f;
+        run_ticks(&world, aInputs, 2, MECHA_TICK_HZ);
+        for (i = 0; i < MECHA_TICK_HZ; i++) {
+            int iShake = abs(world.aMechs[0].attitude.iPitchShake);
+
+            if (iShake > iHurtWorst)
+                iHurtWorst = iShake;
+            mecha_sim_tick(&world, aInputs, 2);
+        }
+        printf("   at speed it shakes %.2f deg healthy, %.2f deg wrecked\n",
+               as_degrees(iFastWorst), as_degrees(iHurtWorst));
+        CHECK(iHurtWorst > iFastWorst * 2);
+        CHECK(as_degrees(iHurtWorst) < 5.0f);
+    }
+
+    /* --- the landing rings ------------------------------------------------
+     *
+     * Dropped from a height, the nose follows the fall; the attitude it is
+     * holding at contact becomes the amplitude of a damped cosine, so the
+     * wobble crosses zero several times and is gone within a second or two.
+     */
+    {
+        int iCrossings = 0;
+        int iPrev = 0;
+        int iPeak = 0;
+        bool bRang = false;
+
+        memset(aInputs, 0, sizeof(aInputs));
+        run_ticks(&world, aInputs, 2, MECHA_TICK_HZ);
+        world.aMechs[0].fY += MECHA_M(24.0f);
+        world.aMechs[0].fVelY = 0.0f;
+
+        for (i = 0; i < MECHA_TICK_HZ * 8; i++) {
+            int iNow;
+
+            mecha_sim_tick(&world, aInputs, 2);
+            iNow = world.aMechs[0].attitude.iPitchWobble;
+            if (abs(iNow) > iPeak)
+                iPeak = abs(iNow);
+            if (iNow != 0)
+                bRang = true;
+            if ((iNow > 0 && iPrev < 0) || (iNow < 0 && iPrev > 0))
+                iCrossings++;
+            if (iNow != 0)
+                iPrev = iNow;
+        }
+        printf("   a landing rings %.2f deg and crosses level %d times\n",
+               as_degrees(iPeak), iCrossings);
+        CHECK(bRang);
+        CHECK(iCrossings >= 2);         /* an oscillation, not a decay */
+        /* Big enough to see, small enough not to look like a crash. */
+        CHECK(as_degrees(iPeak) > 1.0f && as_degrees(iPeak) < 10.0f);
+        /* And it is over rather than a permanent sway. */
+        CHECK(world.aMechs[0].attitude.iPitchWobble == 0);
+        CHECK(world.aMechs[0].attitude.fWobblePitchAmp == 0.0f);
+
+        /*
+         * A bump is not a landing. Dropped from a few centimetres the car
+         * touches down with a trace of fall speed, which without a
+         * threshold would re-seed the oscillator -- and a car crossing
+         * broken ground does that several times a second, so what looks
+         * like a landing wobble becomes a permanent shiver.
+         */
+        world.aMechs[0].fY += MECHA_M(0.05f);
+        run_ticks(&world, aInputs, 2, MECHA_TICK_HZ);
+        CHECK(world.aMechs[0].attitude.fWobblePitchAmp == 0.0f);
+    }
+
+    /* --- the robots lean the other way ----------------------------------- */
+    start_duel(&world, 0, iLegs, iLegs, 0x7E12u, 1);
+    CHECK(clear_runway(&world, 0));
+    memset(aInputs, 0, sizeof(aInputs));
+    CHECK(world.aMechs[0].attitude.iRollSteer == 0);
+
+    aInputs[0].iMoveX = 100;
+    run_ticks(&world, aInputs, 2, MECHA_TICK_HZ);
+    iMechTilt = world.aMechs[0].attitude.iRollSteer;
+    /* Right on the stick, right lean: into the input, not out of it. A
+     * right lean is a negative roll. */
+    CHECK(iMechTilt < 0);
+    CHECK(-iMechTilt == MECHA_TILT_MECH_LIMIT);
+    printf("   the robot leans %.2f deg into the stick\n",
+           as_degrees(-iMechTilt));
+    CHECK(as_degrees(MECHA_TILT_MECH_LIMIT) < 3.0f);
+    /* Opposite signs for the same stick is the entire point. */
+    CHECK((iCarTilt < 0) != (iMechTilt < 0));
+
+    /*
+     * And what those signs mean on screen, read off the built mesh rather
+     * than argued from the rotation matrix: right on the stick puts the
+     * robot's right flank lower, and right lock puts the car's higher.
+     */
+    {
+        tMechaWorld posed;
+        int iSide;
+
+        CHECK(lean_side(&world, 0) == 1);        /* robot, right stick */
+
+        start_duel(&posed, 0, iCar, iLegs, 0x7E13u, 1);
+        memset(&posed.aMechs[0].attitude, 0, sizeof(posed.aMechs[0].attitude));
+        posed.aMechs[0].fVelX = 0.0f;
+        posed.aMechs[0].fVelZ = 0.0f;
+        posed.aMechs[0].fLeanRoll = 0.0f;
+        posed.aMechs[0].attitude.iRollSteer = MECHA_TILT_CAR_SIGN
+                                              * MECHA_TILT_LIMIT * 8;
+        iSide = lean_side(&posed, 0);
+        printf("   full right lock drops the car's %s flank\n",
+               iSide > 0 ? "right" : "left");
+        CHECK(iSide == -1);                      /* car, right lock */
+    }
+
+    /* --- and shake when they are hit, not when they walk ------------------ */
+    memset(aInputs, 0, sizeof(aInputs));
+    aInputs[0].iMoveZ = 100;
+    run_ticks(&world, aInputs, 2, MECHA_TICK_HZ * 2);
+    {
+        int iWalkWorst = 0;
+        int iHitWorst = 0;
+        int iAfter = 0;
+
+        for (i = 0; i < MECHA_TICK_HZ; i++) {
+            int iShake = abs(world.aMechs[0].attitude.iRollShake);
+
+            if (iShake > iWalkWorst)
+                iWalkWorst = iShake;
+            mecha_sim_tick(&world, aInputs, 2);
+        }
+        /* Walking is not shaking. */
+        CHECK(iWalkWorst == 0);
+
+        world.aMechs[0].iInvulnTicks = 0;
+        mecha_sim_damage(&world, 0, -1, 60.0f, 0.0f, 0.0f, 0.0f);
+        for (i = 0; i < MECHA_TICK_HZ / 2; i++) {
+            int iShake = abs(world.aMechs[0].attitude.iRollShake);
+
+            if (iShake > iHitWorst)
+                iHitWorst = iShake;
+            mecha_sim_tick(&world, aInputs, 2);
+        }
+        CHECK(iHitWorst > 0);
+
+        /* And it dies away rather than becoming a permanent tremble. */
+        run_ticks(&world, aInputs, 2, MECHA_TICK_HZ * 3);
+        for (i = 0; i < MECHA_TICK_HZ; i++) {
+            int iShake = abs(world.aMechs[0].attitude.iRollShake);
+
+            if (iShake > iAfter)
+                iAfter = iShake;
+            mecha_sim_tick(&world, aInputs, 2);
+        }
+        printf("   a hit shakes a robot %.2f deg, and %.2f deg later\n",
+               as_degrees(iHitWorst), as_degrees(iAfter));
+        CHECK(iAfter == 0);
+    }
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_the_ground_itself_stops_a_shot(void)
+{
+    tMechaArena arena;
+    int iArena = arena_by_name("COLDWATER MEADOW");
+    float fPeakX = 0.0f;
+    float fPeakZ = 0.0f;
+    float fPeak = 0.0f;
+    float fHitX;
+    float fHitY;
+    float fHitZ;
+    int i;
+
+    CHECK(iArena >= 0);
+    mecha_arena_init(&arena, iArena);
+
+    /* Find the tallest hill rather than assuming where it was put. */
+    for (i = 0; i < 96 * 96; i++) {
+        float fX = -arena.fHalfExtent
+                   + arena.fHalfExtent * 2.0f * (float)(i % 96) / 96.0f;
+        float fZ = -arena.fHalfExtent
+                   + arena.fHalfExtent * 2.0f * (float)((i / 96) % 96) / 96.0f;
+        float fHere = mecha_arena_terrain_height(&arena, fX, fZ);
+
+        if (fHere > fPeak) {
+            fPeak = fHere;
+            fPeakX = fX;
+            fPeakZ = fZ;
+        }
+    }
+    CHECK(fPeak > MECHA_M(15.0f));
+
+    /* A shot aimed through the hill at half its height stops in it, and
+     * stops on the slope -- not on the plane the floor used to be. */
+    CHECK(mecha_arena_trace_segment(&arena,
+                                    fPeakX - MECHA_M(70.0f), fPeak * 0.5f,
+                                    fPeakZ,
+                                    fPeakX + MECHA_M(70.0f), fPeak * 0.5f,
+                                    fPeakZ, &fHitX, &fHitY, &fHitZ));
+    CHECK(fHitY > MECHA_M(2.0f));
+    CHECK(near(fHitY, mecha_arena_terrain_height(&arena, fHitX, fHitZ),
+               MECHA_M(0.5f)));
+
+    /*
+     * A muzzle grazing the surface is not a shot fired from inside a hill.
+     * The gun car's weapon floats six metres off its flank, so parked
+     * across the steepest slope in this arena it dips a few centimetres
+     * into the ground -- and without a little slack every shot from there
+     * would detonate in the driver's face.
+     */
+    {
+        float fGrazeX = fPeakX - MECHA_M(30.0f);
+        float fGrazeY = mecha_arena_terrain_height(&arena, fGrazeX, fPeakZ)
+                        - MECHA_M(0.05f);
+
+        /* Fired up the slope, so the rising ground is what stops it. */
+        CHECK(mecha_arena_trace_segment(&arena, fGrazeX, fGrazeY, fPeakZ,
+                                        fGrazeX + MECHA_M(40.0f), fGrazeY,
+                                        fPeakZ, &fHitX, &fHitY, &fHitZ));
+        /* It travels: the hit is somewhere up the slope, not at the
+         * muzzle it left. */
+        CHECK(fHitX > fGrazeX + MECHA_M(0.2f));
+
+        /* And across level ground a grazing shot goes the distance. */
+        {
+            float fFlatY = mecha_arena_terrain_height(&arena, 0.0f, 0.0f)
+                           - MECHA_M(0.05f);
+
+            CHECK(!mecha_arena_trace_segment(&arena, 0.0f, fFlatY, 0.0f,
+                                             0.0f, fFlatY, MECHA_M(30.0f),
+                                             NULL, NULL, NULL));
+        }
+    }
+
+    /* Clearing the crest clears the hill. */
+    CHECK(!mecha_arena_trace_segment(&arena,
+                                     fPeakX - MECHA_M(8.0f),
+                                     fPeak + MECHA_M(4.0f), fPeakZ,
+                                     fPeakX + MECHA_M(8.0f),
+                                     fPeak + MECHA_M(4.0f), fPeakZ,
+                                     NULL, NULL, NULL));
+
+    printf("   meadow hill at %.0f, %.0f stands %.0f m and is hit at %.0f m"
+           " up\n", fPeakX / MECHA_METRE, fPeakZ / MECHA_METRE,
+           fPeak / MECHA_METRE, fHitY / MECHA_METRE);
+
+    /* The same on the tabletop, which is answered rather than gridded. */
+    iArena = arena_by_name("TOWER SEVEN ROOF");
+    CHECK(iArena >= 0);
+    mecha_arena_init(&arena, iArena);
+    CHECK(arena.fMesaHeight > 0.0f);
+
+    CHECK(mecha_arena_trace_segment(&arena,
+                                    -arena.fMesaBase - MECHA_M(10.0f),
+                                    arena.fMesaHeight * 0.5f, 0.0f,
+                                    arena.fMesaBase + MECHA_M(10.0f),
+                                    arena.fMesaHeight * 0.5f, 0.0f,
+                                    &fHitX, &fHitY, &fHitZ));
+    CHECK(near(fHitY, mecha_arena_mesa_height(&arena, fHitX, fHitZ),
+               MECHA_M(0.5f)));
+
+    /* Off the edge of a platform there is no floor to hit at all: a shot
+     * that leaves the roof keeps going down into the night. */
+    CHECK(!mecha_arena_trace_segment(&arena,
+                                     arena.fHalfExtent + MECHA_M(20.0f),
+                                     MECHA_M(4.0f), 0.0f,
+                                     arena.fHalfExtent + MECHA_M(20.0f),
+                                     -MECHA_M(60.0f), 0.0f,
+                                     NULL, NULL, NULL));
     return 0;
 }
 
@@ -4683,6 +5158,10 @@ int main(void)
           test_the_meadow_is_an_octagon_with_hills },
         { "the forest stands outside the fight",
           test_the_forest_stands_outside_the_fight },
+        { "the ground itself stops a shot",
+          test_the_ground_itself_stops_a_shot },
+        { "the bodies lean, squat, ring and shake",
+          test_the_bodies_lean_squat_ring_and_shake },
         { "the gun car is a car with a gun",
           test_the_gun_car_is_a_car_with_a_gun },
         { "the gun car wears the game's own paint",

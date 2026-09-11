@@ -3417,26 +3417,38 @@ static int test_the_bodies_lean_squat_ring_and_shake(void)
         /* Parked, it is perfectly still, wrecked or not. */
         CHECK(iStillWorst == 0);
 
+        /*
+         * Held at the machine's own top speed, for the same reason the
+         * standstill above is held: what is being measured is the shake
+         * against speed and damage, and a car left to find its own way
+         * around a walled arena is measuring where the walls are. It used
+         * to drive for three seconds and hope -- which worked until the
+         * car was given enough grip to reach a wall.
+         */
         aInputs[0].bDash = true;
-        run_ticks(&world, aInputs, 2, MECHA_TICK_HZ * 3);
         for (i = 0; i < MECHA_TICK_HZ; i++) {
-            int iShake = abs(world.aMechs[0].attitude.iPitchShake);
+            int iShake;
 
+            world.aMechs[0].fVelX = 0.0f;
+            world.aMechs[0].fVelZ = mecha_def_get(iCar)->fWalkSpeed;
+            mecha_sim_tick(&world, aInputs, 2);
+            iShake = abs(world.aMechs[0].attitude.iPitchShake);
             if (iShake > iFastWorst)
                 iFastWorst = iShake;
-            mecha_sim_tick(&world, aInputs, 2);
         }
         CHECK(iFastWorst > 0);
 
         /* Now hurt it, and the same speed shakes it a great deal harder. */
         world.aMechs[0].fArmour = mecha_def_get(iCar)->fArmour * 0.1f;
-        run_ticks(&world, aInputs, 2, MECHA_TICK_HZ);
         for (i = 0; i < MECHA_TICK_HZ; i++) {
-            int iShake = abs(world.aMechs[0].attitude.iPitchShake);
+            int iShake;
 
+            world.aMechs[0].fVelX = 0.0f;
+            world.aMechs[0].fVelZ = mecha_def_get(iCar)->fWalkSpeed;
+            mecha_sim_tick(&world, aInputs, 2);
+            iShake = abs(world.aMechs[0].attitude.iPitchShake);
             if (iShake > iHurtWorst)
                 iHurtWorst = iShake;
-            mecha_sim_tick(&world, aInputs, 2);
         }
         printf("   at speed it shakes %.2f deg healthy, %.2f deg wrecked\n",
                as_degrees(iFastWorst), as_degrees(iHurtWorst));
@@ -3795,6 +3807,111 @@ static int test_the_gun_car_spins_and_rolls(void)
  * stays on it down any slope its wheels could follow, and one that came
  * in fast enough to be thrown off the rise still flies.
  */
+/*
+ * The ground holds a wheel, and holds it as well as the race game's best
+ * surface unless an arena says otherwise.
+ *
+ * Whiplash stores a grip grade per track chunk -- centre and each shoulder
+ * separately -- indexing a fourteen-row table that runs from a hundred at
+ * the top down to twenty at the bottom. Every track it ships is laid at
+ * the maximum bar one bonus track, so maximum is the default here and a
+ * slippery arena is the thing that has to be declared.
+ */
+static int test_the_ground_grips_unless_told_otherwise(void)
+{
+    tMechaWorld world;
+    tMechaInput aInputs[2];
+    int iCar = wheeled_def();
+    int iArena;
+    int i;
+    float fSlipHigh = 0.0f;
+    float fSlipLow = 0.0f;
+
+    CHECK(iCar >= 0);
+
+    /* --- the table is the race game's ----------------------------------- */
+    CHECK(near(mecha_arena_grip_level(0), 1.00f, 1e-5f));
+    CHECK(near(mecha_arena_grip_level(MECHA_GRIP_LEVELS - 1), 0.20f, 1e-5f));
+    for (i = 1; i < MECHA_GRIP_LEVELS; i++)
+        CHECK(mecha_arena_grip_level(i) < mecha_arena_grip_level(i - 1));
+    /* Out of range clamps rather than reading off the end of it. */
+    CHECK(near(mecha_arena_grip_level(-5), 1.00f, 1e-5f));
+    CHECK(near(mecha_arena_grip_level(900),
+               mecha_arena_grip_level(MECHA_GRIP_LEVELS - 1), 1e-5f));
+
+    /* --- and every arena is laid at the best of it ----------------------- */
+    for (iArena = 0; iArena < mecha_arena_count(); iArena++) {
+        tMechaArena arena;
+
+        mecha_arena_init(&arena, iArena);
+        CHECK(arena.byGripLevel == 0);
+        CHECK(near(mecha_arena_grip(&arena, 0.0f, 0.0f), 1.00f, 1e-5f));
+    }
+
+    /*
+     * --- and it is wired to the wheels ----------------------------------
+     *
+     * The same corner on the same ground, once at the grade every arena
+     * gets and once at the worst the table has. Grip is what decides how
+     * far off its own nose a car travels, so the slippery run has to crab
+     * further -- otherwise the surface grade is a number nothing reads.
+     */
+    for (i = 0; i < 2; i++) {
+        float fSlipSum = 0.0f;
+        int iSamples = 0;
+        int iTick;
+
+        start_duel(&world, 3, iCar, iCar, 0x6819u, 1);
+        memset(aInputs, 0, sizeof(aInputs));
+        /* Clear ground, well away from the hills and the trees. */
+        world.aMechs[1].fX = MECHA_M(900.0f);
+        world.aMechs[1].fZ = MECHA_M(900.0f);
+        world.aMechs[0].fX = -MECHA_M(78.0f);
+        world.aMechs[0].fZ = -MECHA_M(190.0f);
+        world.aMechs[0].fY =
+            mecha_arena_terrain_height(&world.arena, world.aMechs[0].fX,
+                                       world.aMechs[0].fZ);
+        world.aMechs[0].fGroundY = world.aMechs[0].fY;
+        world.aMechs[0].iFacing = 0;
+        world.aMechs[0].fVelX = 0.0f;
+        world.aMechs[0].fVelZ = 0.0f;
+        world.arena.byGripLevel = i == 0 ? 0 : MECHA_GRIP_LEVELS - 1;
+
+        aInputs[0].bDash = true;
+        aInputs[0].iTurn = 100;
+        for (iTick = 0; iTick < MECHA_TICK_HZ * 5; iTick++) {
+            const tMechaMech *pMech = &world.aMechs[0];
+            float fSpeed;
+
+            mecha_sim_tick(&world, aInputs, 2);
+            if (iTick < MECHA_TICK_HZ * 3)
+                continue;
+            fSpeed = mecha_length2(pMech->fVelX, pMech->fVelZ);
+            if (fSpeed > MECHA_MPS(2.0f)) {
+                int iTravel = mecha_atan2_angle(pMech->fVelX, pMech->fVelZ);
+
+                fSlipSum += (float)abs(mecha_angle_delta(pMech->iFacing,
+                                                        iTravel));
+                iSamples++;
+            }
+        }
+        CHECK(iSamples > 0);
+        if (i == 0)
+            fSlipHigh = fSlipSum / (float)iSamples;
+        else
+            fSlipLow = fSlipSum / (float)iSamples;
+    }
+    printf("   cornering: %.0f deg of slip on the best surface, %.0f on the"
+           " worst\n", as_degrees((int)fSlipHigh), as_degrees((int)fSlipLow));
+    CHECK(fSlipLow > fSlipHigh * 1.2f);
+    /* On good ground the car points roughly where it is going rather than
+     * travelling permanently sideways. */
+    CHECK(as_degrees((int)fSlipHigh) < 45.0f);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static int test_hills_are_rolled_down_not_fallen_down(void)
 {
     tMechaWorld world;
@@ -5885,6 +6002,8 @@ int main(void)
           test_the_gun_car_follows_the_ground },
         { "hills are rolled down, not fallen down",
           test_hills_are_rolled_down_not_fallen_down },
+        { "the ground grips unless told otherwise",
+          test_the_ground_grips_unless_told_otherwise },
         { "the gun car is a car with a gun",
           test_the_gun_car_is_a_car_with_a_gun },
         { "the gun car wears the game's own paint",

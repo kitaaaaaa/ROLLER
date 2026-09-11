@@ -58,6 +58,22 @@ float mecha_arena_terrain_height(const tMechaArena *pArena, float fX,
  * a point is on it rather than how high the ground is there. */
 float mecha_arena_mesa_height(const tMechaArena *pArena, float fX, float fZ);
 
+//-------------------------------------------------------------------------------------------------
+/*
+ * How much of its grip a machine keeps on this ground, 0 to 1.
+ *
+ * Takes a position because grip is a property of the surface and the race
+ * game varies it across a track; nothing here does yet, so every point in
+ * an arena answers the same. One is the best surface the race game has,
+ * and is what an arena gets unless it asks for worse.
+ */
+float mecha_arena_grip(const tMechaArena *pArena, float fX, float fZ);
+
+/* The race game's own fourteen grades, 0 being the best. Out-of-range
+ * levels clamp rather than reading off the end of the table. */
+#define MECHA_GRIP_LEVELS 14
+float mecha_arena_grip_level(int iLevel);
+
 /*
  * Where there is no floor at all -- off the edge of an open arena. Far
  * enough down that nothing lands on it and gravity has time to do its work

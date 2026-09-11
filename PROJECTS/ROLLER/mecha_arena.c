@@ -572,6 +572,49 @@ float mecha_arena_mesa_height(const tMechaArena *pArena, float fX, float fZ)
 }
 
 //-------------------------------------------------------------------------------------------------
+/*
+ * Grip, in the race game's own fourteen grades.
+ *
+ * Whiplash keeps a table of surfaces and stores an index into it per track
+ * chunk, separately for the centre lane and each shoulder. What the
+ * physics reads off it is iGripModifier, which runs 100, 95, 90, 85, 80,
+ * 75, 70, 65, 60, 55, 50, 40, 30, 20 -- and then adds the engine's own
+ * grip bonus and divides by how wrecked the car is. Only the first of
+ * those is a property of the ground, so only the first is here: the engine
+ * bonus is the machine's own grip figure in the roster, and damage is
+ * already accounted for elsewhere.
+ *
+ * Written as a fraction of the best surface, so grade zero is 1.0 and
+ * costs nothing. Every track the race game ships is laid at the maximum
+ * bar one bonus track, which is why an arena that says nothing gets the
+ * best of it.
+ */
+float mecha_arena_grip_level(int iLevel)
+{
+  static const float kafGrip[MECHA_GRIP_LEVELS] = {
+    1.00f, 0.95f, 0.90f, 0.85f, 0.80f, 0.75f, 0.70f,
+    0.65f, 0.60f, 0.55f, 0.50f, 0.40f, 0.30f, 0.20f,
+  };
+
+  if (iLevel < 0)
+    iLevel = 0;
+  if (iLevel >= MECHA_GRIP_LEVELS)
+    iLevel = MECHA_GRIP_LEVELS - 1;
+  return kafGrip[iLevel];
+}
+
+//-------------------------------------------------------------------------------------------------
+
+float mecha_arena_grip(const tMechaArena *pArena, float fX, float fZ)
+{
+  (void)fX;
+  (void)fZ;
+  if (!pArena)
+    return 1.0f;
+  return mecha_arena_grip_level((int)pArena->byGripLevel);
+}
+
+//-------------------------------------------------------------------------------------------------
 
 static float mecha_arena_terrain(const tMechaArena *pArena, float fX,
                                  float fZ)

@@ -730,6 +730,20 @@ typedef struct
   /* And how finely it is shaped, which is the grid above. Zero takes
    * MECHA_TERRAIN_CELLS_DEFAULT; nothing may exceed MECHA_TERRAIN_CELLS. */
   int      iTerrainCells;
+
+  /*
+   * How well the ground holds a wheel, as one of the race game's own
+   * fourteen surface grades.
+   *
+   * Whiplash stores a grip level per track chunk -- and separately for the
+   * centre and each shoulder -- indexing a table that runs from a hundred
+   * at the top down to twenty at the bottom. In practice every track it
+   * ships is laid at the maximum and one bonus track is not, which is the
+   * convention followed here: zero is the best surface there is, so an
+   * arena that says nothing about grip gets the best of it, and only an
+   * arena that wants to be slippery has to say so.
+   */
+  uint8_t  byGripLevel;
 } tMechaArena;
 
 //-------------------------------------------------------------------------------------------------

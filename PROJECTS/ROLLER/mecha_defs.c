@@ -473,7 +473,15 @@ static const tMechaMechDef s_aMechDefs[] = {
    */
   .szName = "ZIZIN KLR 330", .szClass = "GUN CAR",
   .bWheeled = true,
-  .fGrip = MECHA_MPS(11.0f), .fDriveAccel = MECHA_MPS(34.0f),
+  /*
+   * Traction. Eleven left the car crabbing sixty-five degrees off its own
+   * nose through any corner it tried to take under power -- permanently
+   * sliding rather than driving, and four seconds to gather up a slide.
+   * Thirty puts the nose roughly where the car is going, clears the same
+   * slide in a third of the time and still spins right round on the brakes
+   * when it is asked to.
+   */
+  .fGrip = MECHA_MPS(30.0f), .fDriveAccel = MECHA_MPS(34.0f),
   .fBrake = MECHA_MPS(72.0f),
   .fSteerFloor = MECHA_MPS(4.0f),
   .fRamDamage = 3.4f, .fRamSpeed = MECHA_MPS(28.0f),

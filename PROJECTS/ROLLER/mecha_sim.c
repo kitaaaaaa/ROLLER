@@ -1146,7 +1146,8 @@ static void mecha_update_wheels(tMechaWorld *pWorld, int iMechIdx,
   if (bAirborne)
     pMech->byMove = MECHA_MOVE_JUMP;
   else
-    mecha_drive(pMech, pDef, fNoseX, fNoseZ, fTarget, fScale, 1.0f);
+    mecha_drive(pMech, pDef, fNoseX, fNoseZ, fTarget, fScale,
+                mecha_arena_grip(&pWorld->arena, pMech->fX, pMech->fZ));
 
   pMech->iCoastTicks = 0;
 }

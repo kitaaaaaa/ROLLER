@@ -343,6 +343,31 @@ on the stick, and pick what to spend the next round on.
   stick, times seven when crawling. Flat out the car barely turns and has to be
   slowed into a corner rather than steered round one.
 
+- **The ground grips, and grips as well as it can unless told otherwise.**
+  Whiplash stores a grip grade per track chunk -- separately for the centre lane
+  and each shoulder -- indexing a fourteen-row table whose grip modifier runs
+  100, 95, 90, 85, 80, 75, 70, 65, 60, 55, 50, 40, 30, 20. The physics adds the
+  engine's own grip bonus to that and divides by how wrecked the car is. Only
+  the first of the three is a property of the ground, so only the first is here:
+  the engine bonus is the machine's own grip figure in the roster, and damage is
+  accounted for elsewhere.
+
+  Every track the race game ships is laid at the maximum bar one bonus track, so
+  that is the convention: `byGripLevel` zero is the best surface there is, an
+  arena that says nothing about grip gets the best of it, and only an arena that
+  wants to be slippery has to declare it. All five are currently at maximum.
+  Taking the same corner on the worst grade instead doubles how far the car
+  travels off its own nose -- 36 degrees of slip against 74.
+
+  The car's own traction went up with it. Eleven metres a second squared left it
+  crabbing sixty-five degrees through any corner it took under power --
+  permanently sliding rather than driving, and nearly four seconds to gather up
+  a slide. Thirty puts the nose roughly where the car is going, clears the same
+  slide in a third of the time, and spins further rather than less on the
+  brakes, because a car that keeps its speed through the rotation carries more
+  of it round: a brake-and-turn now comes 451 degrees about where it used to
+  manage 364.
+
 - **And nothing limits how far it comes round.** Whiplash simply accumulates the
   yaw; there is no ceiling on it anywhere, which is why a car can be spun
   through a whole circle on the stick. What stopped that here was not a clamp

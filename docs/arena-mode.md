@@ -332,6 +332,22 @@ on the stick, and pick what to spend the next round on.
   nothing like drifting pace. Braking into full lock now takes it **364 degrees
   round in two seconds with 180 degrees of slip**.
 
+- **It sits on the ground, not above it.** A car sitting perfectly flat while it
+  drives up the side of a hill is what gives away that the hill is a height
+  field rather than a surface. So the machine asks what the ground is doing
+  across its own footprint -- fore against aft for the climb, left against right
+  for the traverse, both measured against its own collision radius -- and takes
+  the slope's own angle. A one-in-three grade comes out as eighteen degrees,
+  because that is what a one-in-three grade is. It eases rather than snaps, so a
+  gradient changing between grid cells reads as suspension rather than as a
+  glitch.
+
+  Only on wheels: a walking machine has feet and a gait to put them down with,
+  and tilting the whole of it to match the ground would fight both. And only on
+  the terrain -- up on the roof of a box the height field underneath is
+  describing ground the machine is nowhere near, and following it would lean the
+  car over on a flat roof.
+
 - **Floored, it goes over on its roof.** Something tall enough to have a face
   pitches forward onto it. A thing nine metres long and two high has nowhere to
   pitch to, and a Zizin standing on its nose reads as a glitch rather than as a
@@ -563,6 +579,21 @@ on the stick, and pick what to spend the next round on.
   while you steer. Inside `MECHA_CLOSE_QUARTERS` it swings onto the lock and
   centres the target instead, which is where an exchange is too fast to frame by
   hand.
+
+- **And it does not dodge what it cannot see past.** It used to: a segment trace
+  to whatever it was looking at, and up to six three-metre steps upward until
+  the line came clear. That was always a little eager -- it swung the whole
+  arena for one pillar -- and it got a great deal worse once the ground itself
+  started blocking that trace, because then every hill you drove behind heaved
+  the camera into the air.
+
+  Virtual-On does not move the camera for this at all. It leaves the camera
+  where it belongs and turns whatever is in the way transparent, which keeps the
+  frame still and tells the player exactly what is happening. That wants a
+  renderer that can blend, so it is not written yet; until it is, nothing
+  happens, which is better than the wrong thing happening quickly. The floor
+  clamp is not this and stays -- keeping the camera out of the ground is not
+  occlusion avoidance, it is not being underground.
 
 - **Firing off a boost brings you back onto the lock.** A shot fired out of a
   dash, out of a jump, or through a cancel snaps the machine onto its target for

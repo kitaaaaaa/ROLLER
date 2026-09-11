@@ -453,6 +453,28 @@
  */
 #define MECHA_AIR_PITCH_LIMIT  MECHA_DEG(35)
 
+/*
+ * Standing on the ground rather than merely above it.
+ *
+ * How far the machine's footprint reaches when it asks what the ground is
+ * doing -- fore and aft against across, because a car is longer than it is
+ * wide and a wheelbase reads a slope differently from a track. Both are
+ * measured against the machine's own collision radius, so this scales with
+ * whatever is driving.
+ */
+#define MECHA_CONTOUR_WHEELBASE 1.6f
+#define MECHA_CONTOUR_TRACK     1.0f
+/* Sampling the terrain is only right while the machine is on the terrain;
+ * up on the roof of a box it is standing on something flat that the height
+ * field underneath knows nothing about. */
+#define MECHA_CONTOUR_CONTACT   MECHA_M(0.6f)
+/* Suspension, more or less: fast enough to follow ground crossed at speed,
+ * slow enough that a gradient changing between grid cells does not snap. */
+#define MECHA_CONTOUR_RATE      MECHA_DEG(240)   /* per second */
+/* Nothing the arenas contain is this steep, so this only ever catches a
+ * sampling artefact at an edge. */
+#define MECHA_CONTOUR_LIMIT     MECHA_DEG(38)
+
 //-------------------------------------------------------------------------------------------------
 
 int mecha_def_count(void);

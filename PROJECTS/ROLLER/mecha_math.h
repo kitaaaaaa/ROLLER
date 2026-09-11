@@ -46,6 +46,11 @@ float mecha_cos(int iAngle);
 /* Heading of the vector (fX, fZ) on the same circle, with 0 along +Z. */
 int mecha_atan2_angle(float fX, float fZ);
 
+/* The same angle measured as a signed offset from zero, in [-8192, 8191].
+ * An angle used as a small tilt rather than as a heading has to be signed:
+ * wrapping a two-degree nose-down to 16293 is exactly the wrong answer. */
+int mecha_angle_signed(int iAngle);
+
 //-------------------------------------------------------------------------------------------------
 
 float mecha_clampf(float fValue, float fLow, float fHigh);

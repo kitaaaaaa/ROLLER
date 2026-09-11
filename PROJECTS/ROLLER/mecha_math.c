@@ -44,6 +44,14 @@ int mecha_angle_wrap(int iAngle)
 
 //-------------------------------------------------------------------------------------------------
 
+int mecha_angle_signed(int iAngle)
+{
+  iAngle = mecha_angle_wrap(iAngle);
+  return iAngle > MECHA_ANGLE_HALF ? iAngle - MECHA_ANGLE_FULL : iAngle;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 int mecha_angle_delta(int iFrom, int iTo)
 {
   int iDelta = (iTo - iFrom) & MECHA_ANGLE_MASK;

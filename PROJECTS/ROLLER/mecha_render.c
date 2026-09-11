@@ -128,14 +128,25 @@ static const uint8 s_aabyFont[][MECHA_GLYPH_H] = {
 #define MECHA_CAM_HEIGHT     14.0f
 
 /*
- * Cover is 5 to 20 metres tall, so no fixed low camera clears all of it --
- * and parking the camera above the tallest block is what made the arena read
- * as a floor plan. Instead it sits low and lifts only when something is
- * actually between it and what it is looking at, which is the same segment
- * trace the computer pilot uses to decide whether it has a shot.
+ * The camera does not dodge what it cannot see past.
+ *
+ * It used to: a segment trace to whatever it was looking at, and up to six
+ * three-metre steps upward until the line came clear. That was always a
+ * little eager -- it swung the whole arena for one pillar -- and it got a
+ * great deal worse once the ground itself started blocking that trace,
+ * because then every hill the player drove behind heaved the camera into
+ * the air.
+ *
+ * Virtual-On does not move the camera for this at all. It leaves the
+ * camera where it belongs and turns whatever is in the way transparent,
+ * which keeps the frame still and tells the player exactly what is
+ * happening. That wants a renderer that can blend, so it is not written
+ * yet; until it is, nothing happens, which is better than the wrong thing
+ * happening quickly.
+ *
+ * The floor clamp below is not this and stays: keeping the camera out of
+ * the ground is not occlusion avoidance, it is not being underground.
  */
-#define MECHA_CAM_LIFT_STEP   3.0f
-#define MECHA_CAM_LIFT_STEPS  6
 #define MECHA_CAM_FLOOR       2.5f
 /*
  * The chase is written around a machine fourteen metres tall, which is what
@@ -524,23 +535,6 @@ void mecha_camera_update(tMechaCamera *pCamera, const tMechaWorld *pWorld,
                                       pCamera->fZ, pCamera->fY);
   if (pCamera->fY < fGround + MECHA_CAM_FLOOR * MECHA_METRE * fRig)
     pCamera->fY = fGround + MECHA_CAM_FLOOR * MECHA_METRE * fRig;
-
-  /* Lift over anything standing in the way. Stepping rather than solving
-   * because the trace is cheap and the answer only has to be good enough to
-   * see past a box; a camera that slid sideways instead would swing the
-   * whole arena around the player for what is usually one pillar. */
-  {
-    int iStep;
-
-    for (iStep = 0; iStep < MECHA_CAM_LIFT_STEPS; iStep++) {
-      if (!mecha_arena_trace_segment(&pWorld->arena,
-                                     pCamera->fX, pCamera->fY, pCamera->fZ,
-                                     fFocusX, fFocusY, fFocusZ,
-                                     NULL, NULL, NULL))
-        break;
-      pCamera->fY += MECHA_CAM_LIFT_STEP * MECHA_METRE;
-    }
-  }
 
   fFlat = mecha_length2(fFocusX - pCamera->fX, fFocusZ - pCamera->fZ);
   pCamera->iPitch = fFlat > 1.0f

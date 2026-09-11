@@ -3770,6 +3770,158 @@ static int test_the_gun_car_spins_and_rolls(void)
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * The car sits on the ground, not above it.
+ *
+ * A machine on wheels sitting perfectly flat while it drives up the side
+ * of a hill is what gives away that the hill is a height field rather
+ * than a surface. This asserts the body takes the slope's own angle:
+ * nose up a climb, nose down a drop, leaning downhill on a traverse --
+ * and none of it on a walking machine, which has feet and a gait to put
+ * them down with.
+ */
+static int test_the_gun_car_follows_the_ground(void)
+{
+    tMechaWorld world;
+    tMechaInput aInputs[2];
+    tMechaArena probe;
+    int iArena = arena_by_name("COLDWATER MEADOW");
+    int iCar = wheeled_def();
+    int iLegs = -1;
+    float fSlopeX = 0.0f;
+    float fSlopeZ = 0.0f;
+    float fBestGrade = 99.0f;
+    int iUphill = 0;
+    int i;
+
+    CHECK(iArena >= 0 && iCar >= 0);
+    for (i = 0; i < mecha_def_count(); i++)
+        if (!mecha_def_get(i)->bWheeled) {
+            iLegs = i;
+            break;
+        }
+    CHECK(iLegs >= 0);
+    mecha_arena_init(&probe, iArena);
+
+    /*
+     * A piece of ordinary hillside and which way is up -- the one closest
+     * to a one-in-three grade rather than the steepest in the arena. The
+     * steepest is steep enough to sit on the tilt limit, and a test parked
+     * on a clamp is testing the clamp.
+     */
+    for (i = 0; i < 140 * 140; i++) {
+        float fX = -probe.fHalfExtent
+                   + probe.fHalfExtent * 2.0f * (float)(i % 140) / 140.0f;
+        float fZ = -probe.fHalfExtent
+                   + probe.fHalfExtent * 2.0f * (float)((i / 140) % 140)
+                     / 140.0f;
+        float fStep = MECHA_M(4.0f);
+        float fDx = mecha_arena_terrain_height(&probe, fX + fStep, fZ)
+                    - mecha_arena_terrain_height(&probe, fX - fStep, fZ);
+        float fDz = mecha_arena_terrain_height(&probe, fX, fZ + fStep)
+                    - mecha_arena_terrain_height(&probe, fX, fZ - fStep);
+        float fGrade = mecha_length2(fDx, fDz) / (2.0f * fStep);
+
+        if (fabsf(fGrade - 0.33f) < fabsf(fBestGrade - 0.33f)) {
+            fBestGrade = fGrade;
+            fSlopeX = fX;
+            fSlopeZ = fZ;
+            iUphill = mecha_atan2_angle(fDx, fDz);
+        }
+    }
+    CHECK(fBestGrade > 0.25f && fBestGrade < 0.45f);
+    printf("   a %.2f grade of hillside at %.0f, %.0f\n", fBestGrade,
+           fSlopeX / MECHA_METRE, fSlopeZ / MECHA_METRE);
+
+    /*
+     * Parked on that slope facing each of four ways round it, one tick at
+     * a time until the suspension has settled. Nothing is driven: this is
+     * about the ground, not about the driving.
+     */
+    {
+        static const char *aszWay[] = { "up", "across right", "down",
+                                        "across left" };
+        int aiPitch[4];
+        int aiRoll[4];
+        int iWay;
+
+        for (iWay = 0; iWay < 4; iWay++) {
+            int iFace = mecha_angle_wrap(iUphill
+                                         + iWay * MECHA_ANGLE_QUARTER);
+
+            start_duel(&world, iArena, iCar, iCar, 0x51C0u, 1);
+            memset(aInputs, 0, sizeof(aInputs));
+            world.aMechs[1].fX = fSlopeX + MECHA_M(900.0f);
+            world.aMechs[0].fX = fSlopeX;
+            world.aMechs[0].fZ = fSlopeZ;
+            world.aMechs[0].fY = mecha_arena_terrain_height(&world.arena,
+                                                            fSlopeX, fSlopeZ);
+            world.aMechs[0].fGroundY = world.aMechs[0].fY;
+            world.aMechs[0].iFacing = iFace;
+            world.aMechs[0].fVelX = 0.0f;
+            world.aMechs[0].fVelZ = 0.0f;
+
+            for (i = 0; i < MECHA_TICK_HZ; i++) {
+                world.aMechs[0].fX = fSlopeX;
+                world.aMechs[0].fZ = fSlopeZ;
+                world.aMechs[0].iFacing = iFace;
+                mecha_sim_tick(&world, aInputs, 2);
+            }
+            aiPitch[iWay] = world.aMechs[0].attitude.iContourPitch;
+            aiRoll[iWay] = world.aMechs[0].attitude.iContourRoll;
+            printf("   facing %-13s pitch %+5.0f deg, roll %+5.0f deg\n",
+                   aszWay[iWay], as_degrees(aiPitch[iWay]),
+                   as_degrees(aiRoll[iWay]));
+        }
+
+        /*
+         * Facing uphill the nose comes up, which is a negative pose pitch;
+         * facing downhill it goes down. Across the slope there is no climb
+         * to speak of and the body leans instead, and the two ways across
+         * lean opposite ways.
+         */
+        CHECK(aiPitch[0] < -MECHA_DEG(6));
+        CHECK(aiPitch[2] > MECHA_DEG(6));
+        CHECK(abs(aiPitch[1]) < abs(aiPitch[0]) / 3);
+        CHECK(abs(aiPitch[3]) < abs(aiPitch[0]) / 3);
+
+        CHECK(abs(aiRoll[1]) > MECHA_DEG(6));
+        CHECK(abs(aiRoll[3]) > MECHA_DEG(6));
+        CHECK((aiRoll[1] < 0) != (aiRoll[3] < 0));
+        /* Facing straight up or down the fall line there is nothing to
+         * lean against. */
+        CHECK(abs(aiRoll[0]) < abs(aiRoll[1]) / 3);
+        CHECK(abs(aiRoll[2]) < abs(aiRoll[1]) / 3);
+
+        /* And the angle is the slope's own, not a stylised lean: a one in
+         * three grade is eighteen degrees, and nothing here is clamped. */
+        CHECK(abs(aiPitch[0]) < MECHA_CONTOUR_LIMIT);
+        CHECK(abs(aiRoll[1]) < MECHA_CONTOUR_LIMIT);
+        CHECK(as_degrees(abs(aiPitch[0])) > 10.0f);
+        CHECK(as_degrees(abs(aiPitch[0])) < 30.0f);
+    }
+
+    /* --- and none of it on legs ----------------------------------------- */
+    start_duel(&world, iArena, iLegs, iLegs, 0x51E0u, 1);
+    memset(aInputs, 0, sizeof(aInputs));
+    world.aMechs[0].fX = fSlopeX;
+    world.aMechs[0].fZ = fSlopeZ;
+    world.aMechs[0].fY = mecha_arena_terrain_height(&world.arena, fSlopeX,
+                                                    fSlopeZ);
+    world.aMechs[0].fGroundY = world.aMechs[0].fY;
+    world.aMechs[0].iFacing = iUphill;
+    for (i = 0; i < MECHA_TICK_HZ; i++) {
+        world.aMechs[0].fX = fSlopeX;
+        world.aMechs[0].fZ = fSlopeZ;
+        mecha_sim_tick(&world, aInputs, 2);
+    }
+    CHECK(world.aMechs[0].attitude.iContourPitch == 0);
+    CHECK(world.aMechs[0].attitude.iContourRoll == 0);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static int test_close_quarters_swings_a_blade(void)
 {
     static tMechaQuad aStorage[MECHA_QUAD_CAPACITY];
@@ -5543,6 +5695,8 @@ int main(void)
           test_close_quarters_swings_a_blade },
         { "the gun car spins and rolls",
           test_the_gun_car_spins_and_rolls },
+        { "the gun car follows the ground",
+          test_the_gun_car_follows_the_ground },
         { "the gun car is a car with a gun",
           test_the_gun_car_is_a_car_with_a_gun },
         { "the gun car wears the game's own paint",

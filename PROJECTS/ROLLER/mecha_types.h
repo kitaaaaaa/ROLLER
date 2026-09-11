@@ -386,6 +386,18 @@ typedef struct
    */
   int   iAirPitch;
   /*
+   * The ground under the wheels.
+   *
+   * A car sitting flat while it drives up the side of a hill is the one
+   * thing that gives away that the hill is a height field and not a
+   * surface. These are the pitch and roll of the slope the machine is
+   * actually standing on, sampled across its own footprint and eased
+   * rather than snapped, so it noses up a climb, drops over the crest and
+   * leans along a traverse.
+   */
+  int   iContourPitch;
+  int   iContourRoll;
+  /*
    * What is left of the last landing. The two amplitudes decay while the
    * phase runs, and what comes out is a damped cosine about both axes at
    * once: Whiplash seeds them from the attitude the car was holding at

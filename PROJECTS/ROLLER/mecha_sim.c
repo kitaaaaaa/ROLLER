@@ -1286,12 +1286,10 @@ static void mecha_update_attitude(tMechaWorld *pWorld, int iMechIdx,
    * looks like a mech that has been shot.
    */
   if (pDef->bWheeled && bAirborne) {
-    pAtt->iAirPitch = mecha_angle_wrap(mecha_atan2_angle(-pMech->fVelY,
-                                                         fSpeed));
-    if (pAtt->iAirPitch > MECHA_ANGLE_HALF)
-      pAtt->iAirPitch -= MECHA_ANGLE_FULL;
-    pAtt->iAirPitch = mecha_clampi(pAtt->iAirPitch, -MECHA_AIR_PITCH_LIMIT,
-                                   MECHA_AIR_PITCH_LIMIT);
+    pAtt->iAirPitch =
+      mecha_clampi(mecha_angle_signed(mecha_atan2_angle(-pMech->fVelY,
+                                                        fSpeed)),
+                   -MECHA_AIR_PITCH_LIMIT, MECHA_AIR_PITCH_LIMIT);
   } else {
     /*
      * Back on the ground it goes straight to level, and does not unwind:
@@ -1300,6 +1298,74 @@ static void mecha_update_attitude(tMechaWorld *pWorld, int iMechIdx,
      * two of them describing the same motion at once.
      */
     pAtt->iAirPitch = 0;
+  }
+
+  /* --- the shape of the ground it is standing on -------------------------
+   *
+   * A car sitting perfectly flat while it drives up the side of a hill is
+   * what gives away that the hill is a height field rather than a surface.
+   * So the machine asks what the ground is doing across its own footprint
+   * -- fore against aft for the climb, left against right for the
+   * traverse -- and sits on the answer.
+   *
+   * Only on wheels. A walking machine has feet and a gait to put them
+   * down with, and tilting the whole of it to match the ground would
+   * fight both.
+   *
+   * Only on the terrain, too: standing on the roof of a box, the height
+   * field underneath is describing ground the machine is nowhere near,
+   * and following it would lean the car over on a flat roof.
+   */
+  if (pDef->bWheeled && !bAirborne) {
+    float fHere = mecha_arena_terrain_height(&pWorld->arena, pMech->fX,
+                                             pMech->fZ);
+    int iWantPitch = 0;
+    int iWantRoll = 0;
+
+    if (pMech->fY - fHere < MECHA_CONTOUR_CONTACT
+        && fHere - pMech->fY < MECHA_CONTOUR_CONTACT) {
+      float fNoseX = mecha_sin(pMech->iFacing);
+      float fNoseZ = mecha_cos(pMech->iFacing);
+      float fLong = pDef->fRadius * MECHA_CONTOUR_WHEELBASE;
+      float fWide = pDef->fRadius * MECHA_CONTOUR_TRACK;
+      float fFront = mecha_arena_terrain_height(&pWorld->arena,
+                                                pMech->fX + fNoseX * fLong,
+                                                pMech->fZ + fNoseZ * fLong);
+      float fBack = mecha_arena_terrain_height(&pWorld->arena,
+                                               pMech->fX - fNoseX * fLong,
+                                               pMech->fZ - fNoseZ * fLong);
+      /* The machine's right is the nose turned a quarter clockwise. */
+      float fRight = mecha_arena_terrain_height(&pWorld->arena,
+                                                pMech->fX + fNoseZ * fWide,
+                                                pMech->fZ - fNoseX * fWide);
+      float fLeft = mecha_arena_terrain_height(&pWorld->arena,
+                                               pMech->fX - fNoseZ * fWide,
+                                               pMech->fZ + fNoseX * fWide);
+
+      /* Positive pose pitch puts the nose down, so climbing is negative;
+       * positive roll lifts the right side, so ground higher on the right
+       * is a positive roll. Both signs were settled by measurement, not
+       * by reading the rotation matrix. */
+      iWantPitch = -mecha_angle_signed(mecha_atan2_angle(fFront - fBack,
+                                                         2.0f * fLong));
+      iWantRoll = mecha_angle_signed(mecha_atan2_angle(fRight - fLeft,
+                                                       2.0f * fWide));
+      iWantPitch = mecha_clampi(iWantPitch, -MECHA_CONTOUR_LIMIT,
+                                MECHA_CONTOUR_LIMIT);
+      iWantRoll = mecha_clampi(iWantRoll, -MECHA_CONTOUR_LIMIT,
+                               MECHA_CONTOUR_LIMIT);
+    }
+    pAtt->iContourPitch = mecha_stepi(pAtt->iContourPitch, iWantPitch,
+                                      (int)(MECHA_CONTOUR_RATE * MECHA_DT));
+    pAtt->iContourRoll = mecha_stepi(pAtt->iContourRoll, iWantRoll,
+                                     (int)(MECHA_CONTOUR_RATE * MECHA_DT));
+  } else {
+    /* In the air there is no ground to follow; the nose follows the fall
+     * instead, and the two must not both be describing the attitude. */
+    pAtt->iContourPitch = mecha_stepi(pAtt->iContourPitch, 0,
+                                      (int)(MECHA_CONTOUR_RATE * MECHA_DT));
+    pAtt->iContourRoll = mecha_stepi(pAtt->iContourRoll, 0,
+                                     (int)(MECHA_CONTOUR_RATE * MECHA_DT));
   }
 
   /* --- what is left of the last landing --------------------------------- */

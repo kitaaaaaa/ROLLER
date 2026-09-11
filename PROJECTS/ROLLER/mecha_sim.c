@@ -1682,6 +1682,37 @@ integrate:
 
   fGround = mecha_arena_ground_height(&pWorld->arena, pMech->fX, pMech->fZ,
                                       pMech->fY);
+
+  /*
+   * Staying on a slope that is running away downhill.
+   *
+   * The contact rules below only see a machine that has sunk to or below
+   * the ground. Going downhill it never does: the ground drops out from
+   * under it far faster than one tick of gravity follows, so it is left
+   * hanging a fraction of a metre up, falls, lands, and is hanging again
+   * -- the invisible staircase. A machine that was on the ground when the
+   * tick began and is over ground that has merely sloped away is put back
+   * on it, and then falls through the ordinary contact rules like anything
+   * else standing on something.
+   *
+   * Three things stop this from gluing a machine to the world. It has to
+   * have been in contact already, so nothing in flight is caught. It has
+   * to not be climbing, so a launch off a crest is never undone. And the
+   * ground has to have sloped rather than ended: past one in one it is a
+   * cliff, not a hill, and driving off it should fly.
+   */
+  if (pMech->fY > fGround && !bAirborne && pMech->fVelY <= 0.0f) {
+    float fDrop = (pMech->fGroundY - fGround) / MECHA_DT;
+    float fSpeed = mecha_length2(pMech->fVelX, pMech->fVelZ);
+    uint32_t uiHere = mecha_arena_surface(&pWorld->arena, pMech->fX,
+                                          pMech->fZ);
+
+    if ((uiHere & MECHA_SURF_NON_MAGNETIC) != 0 && fDrop > 0.0f
+        && fSpeed > MECHA_RAMP_STICK_SPEED
+        && fDrop <= fSpeed * MECHA_RAMP_STICK_GRADE)
+      pMech->fY = fGround;
+  }
+
   if (pMech->fY <= fGround) {
     bool bWasFalling = pMech->fVelY < 0.0f;
     /* How hard it arrived. Taken now because the contact rules below are

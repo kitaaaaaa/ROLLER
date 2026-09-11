@@ -3780,6 +3780,192 @@ static int test_the_gun_car_spins_and_rolls(void)
  * and none of it on a walking machine, which has feet and a gait to put
  * them down with.
  */
+/*
+ * Hills are rolled down, not fallen down.
+ *
+ * The launch rule was one-sided, and the other side of it is what makes a
+ * non-magnetic hill unusable. Going down, the ground drops out from under
+ * a machine faster than one tick of gravity follows it, so the machine is
+ * left hanging, falls, lands, and is hanging again -- an invisible
+ * staircase all the way to the bottom. Whiplash does exactly this, which
+ * is why a hill there has to be painted magnetic everywhere except its
+ * apex quads to be drivable at all.
+ *
+ * What is asserted here is the pair: a machine already on the ground
+ * stays on it down any slope its wheels could follow, and one that came
+ * in fast enough to be thrown off the rise still flies.
+ */
+static int test_hills_are_rolled_down_not_fallen_down(void)
+{
+    tMechaWorld world;
+    tMechaInput aInputs[2];
+    tMechaArena probe;
+    int iArena = arena_by_name("COLDWATER MEADOW");
+    int iCar = wheeled_def();
+    float fPeakX = 0.0f;
+    float fPeakZ = 0.0f;
+    float fPeak = 0.0f;
+    int i;
+
+    CHECK(iArena >= 0 && iCar >= 0);
+    mecha_arena_init(&probe, iArena);
+    for (i = 0; i < 150 * 150; i++) {
+        float fX = -probe.fHalfExtent
+                   + probe.fHalfExtent * 2.0f * (float)(i % 150) / 150.0f;
+        float fZ = -probe.fHalfExtent
+                   + probe.fHalfExtent * 2.0f * (float)((i / 150) % 150)
+                     / 150.0f;
+        float fHere = mecha_arena_terrain_height(&probe, fX, fZ);
+
+        if (fHere > fPeak) {
+            fPeak = fHere;
+            fPeakX = fX;
+            fPeakZ = fZ;
+        }
+    }
+    CHECK(fPeak > MECHA_M(15.0f));
+
+    /* --- off the top of it, eight ways, under power ---------------------- */
+    {
+        int iWorstAir = 0;
+        int iDir;
+
+        for (iDir = 0; iDir < 8; iDir++) {
+            int iFace = iDir * MECHA_ANGLE_FULL / 8;
+            int iAir = 0;
+
+            start_duel(&world, iArena, iCar, iCar, 0x50E0u, 1);
+            memset(aInputs, 0, sizeof(aInputs));
+            world.aMechs[1].fX = fPeakX + MECHA_M(900.0f);
+            world.aMechs[0].fX = fPeakX;
+            world.aMechs[0].fZ = fPeakZ;
+            world.aMechs[0].fY = fPeak;
+            world.aMechs[0].fGroundY = fPeak;
+            world.aMechs[0].iFacing = iFace;
+            world.aMechs[0].fVelX = mecha_sin(iFace) * MECHA_MPS(45.0f);
+            world.aMechs[0].fVelZ = mecha_cos(iFace) * MECHA_MPS(45.0f);
+
+            /*
+             * Half a second, which at this speed is twenty-two metres --
+             * still on the hill's own flank, and nowhere near the next
+             * rise. So every tick of this is descent and nothing here is
+             * allowed to leave the ground at all. Run it longer and the
+             * machine reaches the neighbouring slope and is thrown off it,
+             * which is the launch rule working and not what is being
+             * measured.
+             */
+            aInputs[0].bDash = true;
+            for (i = 0; i < 30; i++) {
+                const tMechaMech *pMech = &world.aMechs[0];
+                float fG;
+
+                mecha_sim_tick(&world, aInputs, 2);
+                fG = mecha_arena_ground_height(&world.arena, pMech->fX,
+                                               pMech->fZ, pMech->fY);
+                /* Only count a real departure, not a tick of float. */
+                if (pMech->fY > fG + MECHA_M(0.35f))
+                    iAir++;
+            }
+            if (iAir > iWorstAir)
+                iWorstAir = iAir;
+        }
+        printf("   off the hilltop eight ways: worst run spent %d of 30"
+               " ticks airborne\n", iWorstAir);
+        CHECK(iWorstAir == 0);
+    }
+
+    /* --- and at the flank of it: fast flies, slow sticks ----------------- */
+    {
+        int iFastAir = 0;
+        int iSlowAir = 0;
+        float fFastHigh = 0.0f;
+        int iPass;
+
+        for (iPass = 0; iPass < 2; iPass++) {
+            float fEntry = iPass == 0 ? MECHA_MPS(60.0f) : MECHA_MPS(12.0f);
+
+            start_duel(&world, iArena, iCar, iCar, 0x50E1u, 1);
+            memset(aInputs, 0, sizeof(aInputs));
+            world.aMechs[1].fX = fPeakX + MECHA_M(900.0f);
+            /* Aimed at the side of the hill, out on the flat, coasting --
+             * no throttle, so the entry speed is the entry speed. */
+            world.aMechs[0].fX = fPeakX - MECHA_M(13.0f);
+            world.aMechs[0].fZ = fPeakZ - MECHA_M(46.0f);
+            world.aMechs[0].fY =
+                mecha_arena_terrain_height(&world.arena,
+                                           world.aMechs[0].fX,
+                                           world.aMechs[0].fZ);
+            world.aMechs[0].fGroundY = world.aMechs[0].fY;
+            world.aMechs[0].iFacing = 0;
+            world.aMechs[0].fVelX = 0.0f;
+            world.aMechs[0].fVelZ = fEntry;
+
+            for (i = 0; i < 110; i++) {
+                const tMechaMech *pMech = &world.aMechs[0];
+                float fG;
+
+                mecha_sim_tick(&world, aInputs, 2);
+                fG = mecha_arena_ground_height(&world.arena, pMech->fX,
+                                               pMech->fZ, pMech->fY);
+                if (pMech->fY > fG + MECHA_M(0.35f)) {
+                    if (iPass == 0) {
+                        iFastAir++;
+                        if (pMech->fY - fG > fFastHigh)
+                            fFastHigh = pMech->fY - fG;
+                    } else {
+                        iSlowAir++;
+                    }
+                }
+            }
+        }
+        printf("   into the flank: at 60 m/s %d ticks air (%.0f m up),"
+               " at 12 m/s %d\n", iFastAir, fFastHigh / MECHA_METRE,
+               iSlowAir);
+        /* Fast enough and the rise throws it off without ever reaching the
+         * top; slow enough and it simply drives over. */
+        CHECK(iFastAir > 30);
+        CHECK(fFastHigh > MECHA_M(8.0f));
+        CHECK(iSlowAir == 0);
+    }
+
+    /* --- but a cliff is not a slope -------------------------------------- */
+    {
+        int iArenaRoof = arena_by_name("TOWER SEVEN ROOF");
+        bool bFell = false;
+
+        CHECK(iArenaRoof >= 0);
+        start_duel(&world, iArenaRoof, iCar, iCar, 0x50E2u, 1);
+        memset(aInputs, 0, sizeof(aInputs));
+        world.aMechs[1].fX = MECHA_M(900.0f);
+        /* Rolling at the lip of the platform, level and quick. */
+        world.aMechs[0].fX = 0.0f;
+        world.aMechs[0].fZ = world.arena.fHalfExtent - MECHA_M(12.0f);
+        world.aMechs[0].fY = mecha_arena_ground_height(&world.arena,
+                                                       world.aMechs[0].fX,
+                                                       world.aMechs[0].fZ,
+                                                       0.0f);
+        world.aMechs[0].fGroundY = world.aMechs[0].fY;
+        world.aMechs[0].iFacing = 0;
+        world.aMechs[0].fVelX = 0.0f;
+        world.aMechs[0].fVelZ = MECHA_MPS(50.0f);
+
+        for (i = 0; i < 120; i++) {
+            mecha_sim_tick(&world, aInputs, 2);
+            if (world.aMechs[0].fY < -MECHA_M(20.0f)
+                || !mecha_mech_alive(&world.aMechs[0]))
+                bFell = true;
+        }
+        printf("   and off the edge of the roof it %s\n",
+               bFell ? "falls" : "does not fall");
+        /* Sticking a machine to the ground must never mean sticking it to
+         * ground that has ended. */
+        CHECK(bFell);
+    }
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static int test_the_gun_car_follows_the_ground(void)
 {
     tMechaWorld world;
@@ -5697,6 +5883,8 @@ int main(void)
           test_the_gun_car_spins_and_rolls },
         { "the gun car follows the ground",
           test_the_gun_car_follows_the_ground },
+        { "hills are rolled down, not fallen down",
+          test_hills_are_rolled_down_not_fallen_down },
         { "the gun car is a car with a gun",
           test_the_gun_car_is_a_car_with_a_gun },
         { "the gun car wears the game's own paint",

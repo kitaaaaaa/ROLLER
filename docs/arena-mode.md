@@ -221,6 +221,32 @@ on the stick, and pick what to spend the next round on.
   tops are flat rather than pointed because a cone with a peak on it throws a
   walking machine into the air at the apex.
 
+- **And coming down it, you roll rather than fall.** That launch rule is
+  one-sided, and the other side of it is what makes a non-magnetic hill
+  unusable. Going down, the ground drops out from under a machine far faster
+  than one tick of gravity follows it -- at forty-five metres a second on a
+  one-in-three grade the ground falls a third of a metre in a tick and gravity
+  accounts for a centimetre of that -- so the machine is left hanging, falls,
+  lands, and is hanging again. An invisible staircase all the way to the bottom.
+  Driving off the top of the meadow's tallest hill used to spend up to 128 of
+  150 ticks in the air, peaking nineteen metres up.
+
+  Whiplash does exactly this, which is why a hill there has to be painted
+  magnetic everywhere except its apex quads to be drivable at all. Rather than
+  ask the arenas to paint that by hand, a machine already in contact stays in
+  contact down any slope its wheels could follow. Three things stop that from
+  gluing a machine to the world: it has to have been on the ground when the tick
+  began, so nothing in flight is caught; it has to not be climbing, so a launch
+  off a crest is never undone; and the ground has to have sloped rather than
+  ended, because past one in one it is a cliff and driving off it should fly.
+
+  The apex behaviour then falls out of the speed rather than out of the arena
+  data. Coasting into the side of that same hill at 60 m/s throws the machine
+  clear without it ever reaching the top -- eighty-two ticks of air, forty-six
+  metres up -- and at 12 m/s the identical line simply drives over it without
+  once leaving the ground. Off the top in any of eight directions, the first
+  half-second of descent is now entirely on the ground.
+
 - **The computer pilot watches its feet.** It does not path around anything; it
   declines to walk into it. Three separate distances: a stride plus what it is
   carrying on foot, the whole length of a burst before it presses boost, and

@@ -222,6 +222,35 @@
 
 #define MECHA_RAMP_LAUNCH_CLIMB MECHA_MPS(18.0f)
 
+/*
+ * Rolling down is not falling down.
+ *
+ * The launch rule above is one-sided, and the other side of it is what
+ * makes a non-magnetic hill unusable. Going down, the ground drops out
+ * from under the machine faster than one tick of gravity can follow it --
+ * at forty-five metres a second on a one-in-three grade the ground falls
+ * a third of a metre in a tick and gravity accounts for a centimetre of
+ * that -- so the machine is left hanging, falls, lands, and is hanging
+ * again. Whiplash does exactly this, which is why a hill there has to be
+ * magnetic everywhere except its apex quads to be drivable at all.
+ *
+ * Rather than asking the arenas to paint that by hand, a machine already
+ * in contact stays in contact down any slope its wheels could follow. The
+ * test is the gradient, not the rate: a hillside is under one in one
+ * however fast it is taken, and the lip of a box roof is a cliff at any
+ * speed. Past the limit the ground has genuinely gone and the machine
+ * flies, which is what driving off the side of something should do.
+ *
+ * A machine that did leave the ground on the way up is airborne, so none
+ * of this applies to it -- crest a hill fast enough and you fly, take the
+ * same hill slowly and you are stuck to it. That is the behaviour the
+ * hand-painted magnetic quads exist to produce.
+ */
+#define MECHA_RAMP_STICK_GRADE  1.0f
+/* Below this there is no meaningful forward speed to measure a gradient
+ * against, and a machine going nowhere is not driving off anything. */
+#define MECHA_RAMP_STICK_SPEED  MECHA_MPS(3.0f)
+
 #define MECHA_STRIDE_METRES     MECHA_M(5.2f)
 
 /*

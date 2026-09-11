@@ -120,6 +120,41 @@ static float mecha_ai_weapon_range(const tMechaWeaponDef *pWeapon)
 //-------------------------------------------------------------------------------------------------
 
 /*
+ * How far ahead a machine has to look, which is how far it takes to stop.
+ *
+ * This was a linear guess -- a stride plus a fixed fraction of the speed --
+ * and it undershot badly at the top end. A machine at seventy metres a
+ * second checked forty-one metres ahead and needed eighty-six to stop,
+ * so by the time the edge was inside its look-ahead it was already past
+ * saving. Braking distance is v squared over twice the deceleration, and
+ * the machine's own grip is what that deceleration is, so the number is
+ * available rather than guessable.
+ *
+ * The stride on the front is reaction: a machine standing still still has
+ * to not step off, and the multiplier is how much of the slide the state
+ * in question can actually steer out of.
+ */
+static float mecha_ai_stopping_look(const tMechaMechDef *pDef, float fSpeed,
+                                    float fScale)
+{
+  float fBrake = pDef->fGrip > 0.0f ? pDef->fGrip : MECHA_MPS(30.0f);
+  float fStop = fSpeed * fSpeed / (2.0f * fBrake);
+  float fGuess = fScale * fSpeed;
+
+  /*
+   * Whichever is further. The old linear guess is the better number for a
+   * machine that stops hard -- a walker's grip is three times a car's, so
+   * its braking distance at a walking pace is shorter than its own
+   * reaction -- and the braking distance is the better number at the top
+   * end, where the guess undershoots by half. Taking the larger means
+   * this can only ever look further ahead than it used to.
+   */
+  return MECHA_AI_FOOTING_WALK + (fStop > fGuess ? fStop : fGuess);
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
  * Is there still an arena that way? fLook out along a direction that need
  * not be normalised; a zero-length direction is going nowhere and so is
  * always fine.
@@ -436,7 +471,7 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
     if (fSpeed > 0.01f) {
       bClear = mecha_ai_footing_clear(
           pWorld, pSelf, pSelf->fVelX, pSelf->fVelZ,
-          MECHA_AI_FOOTING_WALK + fSpeed * MECHA_AI_FOOTING_CANCEL,
+          mecha_ai_stopping_look(pDef, fSpeed, MECHA_AI_FOOTING_CANCEL),
           pWorld->arena.byShape == MECHA_ARENA_OPEN);
     }
 
@@ -604,8 +639,8 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
     /* On foot, a stride of reaction and whatever it is still carrying. */
     if (!bCommitted
         && !mecha_ai_footing_clear(pWorld, pSelf, fWantX, fWantZ,
-                                   MECHA_AI_FOOTING_WALK
-                                       + fSpeed * MECHA_AI_FOOTING_LEAD,
+                                   mecha_ai_stopping_look(
+                                       pDef, fSpeed, MECHA_AI_FOOTING_LEAD),
                                    bEdgeKills)) {
       pOut->bDash = false;
       bBack = true;
@@ -626,15 +661,15 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
     if (!bCommitted && pSelf->byMove != MECHA_MOVE_JUMP
         && pSelf->byMove != MECHA_MOVE_CANCEL
         && !mecha_ai_footing_clear(pWorld, pSelf, pSelf->fVelX, pSelf->fVelZ,
-                                   MECHA_AI_FOOTING_WALK
-                                       + fSpeed * MECHA_AI_FOOTING_LEAD,
+                                   mecha_ai_stopping_look(
+                                       pDef, fSpeed, MECHA_AI_FOOTING_LEAD),
                                    bEdgeKills)) {
       float fOutX = -pSelf->fVelX / fSpeed;
       float fOutZ = -pSelf->fVelZ / fSpeed;
 
       (void)mecha_ai_footing_escape(pWorld, pSelf, pSelf->fVelX, pSelf->fVelZ,
-                                    MECHA_AI_FOOTING_WALK
-                                        + fSpeed * MECHA_AI_FOOTING_LEAD,
+                                    mecha_ai_stopping_look(
+                                        pDef, fSpeed, MECHA_AI_FOOTING_LEAD),
                                     bEdgeKills, &fOutX, &fOutZ);
       pOut->iMoveZ = (int)((fOutX * fForwardX + fOutZ * fForwardZ) * 100.0f);
       pOut->iMoveX = (int)((fOutX * fForwardZ - fOutZ * fForwardX) * 100.0f);
@@ -651,7 +686,8 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
      */
     if (pSelf->byMove == MECHA_MOVE_JUMP
         || pSelf->byMove == MECHA_MOVE_CANCEL) {
-      float fLook = MECHA_AI_FOOTING_WALK + fSpeed * MECHA_AI_FOOTING_AIR;
+      float fLook = mecha_ai_stopping_look(pDef, fSpeed,
+                                           MECHA_AI_FOOTING_AIR);
       float fOutX;
       float fOutZ;
 
@@ -685,8 +721,9 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
 
       if (fCarry > 0.01f
           && !mecha_ai_footing_clear(pWorld, pSelf, fCarryX, fCarryZ,
-                                     MECHA_AI_FOOTING_WALK
-                                         + fSpeed * MECHA_AI_FOOTING_CANCEL,
+                                     mecha_ai_stopping_look(
+                                       pDef, fSpeed,
+                                       MECHA_AI_FOOTING_CANCEL),
                                      bEdgeKills)) {
         /* Back against the line it is travelling, in its own terms, and
          * the boost button to make the cancel take. */
@@ -694,8 +731,9 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
         float fOutZ = -fCarryZ / fCarry;
 
         (void)mecha_ai_footing_escape(pWorld, pSelf, fCarryX, fCarryZ,
-                                      MECHA_AI_FOOTING_WALK
-                                          + fSpeed * MECHA_AI_FOOTING_CANCEL,
+                                      mecha_ai_stopping_look(
+                                        pDef, fSpeed,
+                                        MECHA_AI_FOOTING_CANCEL),
                                       bEdgeKills, &fOutX, &fOutZ);
         pOut->iMoveZ = (int)((fOutX * fForwardX + fOutZ * fForwardZ)
                              * 100.0f);

@@ -303,6 +303,89 @@ static void mecha_spawn_burst(tMechaWorld *pWorld, float fX, float fY,
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * Wearing the damage.
+ *
+ * The race game's dospray() runs every frame over every car and throws a
+ * particle when a die roll beats the car's health factor: the worse the
+ * car, the more often it lands, so a machine does not switch from clean to
+ * smoking, it gets gradually dirtier. The same shape is here, with one
+ * addition -- Whiplash has a single damage tier and this has two, so a
+ * machine that is merely hurt smokes and one that is nearly gone burns as
+ * well.
+ *
+ * Every draw comes off the machine's own generator rather than the
+ * world's. Written the other way first, this took three extra numbers a
+ * tick out of the shared stream and moved a rooftop fight off a cliff --
+ * the particles were fine, the fight was simply no longer the same fight.
+ */
+static void mecha_emit_damage(tMechaWorld *pWorld, int iMechIdx)
+{
+  tMechaMech *pMech = &pWorld->aMechs[iMechIdx];
+  const tMechaMechDef *pDef = mecha_mech_def(pMech);
+  float fHealth;
+  float fX;
+  float fY;
+  float fZ;
+  int iYaw;
+
+  if (!mecha_mech_alive(pMech) || pDef->fArmour <= 0.0f)
+    return;
+  /* Staggered by machine so a pair of wrecks do not both throw on the
+   * same tick and then leave the table idle for four. */
+  if ((pWorld->iTick + iMechIdx) % MECHA_DAMAGE_INTERVAL != 0)
+    return;
+  fHealth = mecha_clampf(pMech->fArmour / pDef->fArmour, 0.0f, 1.0f);
+  if (fHealth >= MECHA_DAMAGE_SMOKE)
+    return;
+  /* The race game's own gate, which is a chance per frame rather than a
+   * timer: rand() * factor < k. Scaled here to a unit draw. */
+  if (fHealth > 0.0f
+      && mecha_rng_unit(&pMech->spray) * fHealth > MECHA_DAMAGE_RATE)
+    return;
+
+  /* Somewhere round the hull, not out of one hole. */
+  iYaw = mecha_rng_range(&pMech->spray, MECHA_ANGLE_FULL);
+  fX = pMech->fX + mecha_sin(iYaw) * pDef->fRadius * 0.55f;
+  fZ = pMech->fZ + mecha_cos(iYaw) * pDef->fRadius * 0.55f;
+  fY = pMech->fY + pDef->fHeight * MECHA_DAMAGE_HEIGHT;
+
+  {
+    tMechaEffect *pFx =
+      mecha_alloc_effect(pWorld, MECHA_FX_SMOKE, fX, fY, fZ,
+                         pDef->fRadius * (0.30f + 0.25f
+                                          * mecha_rng_unit(&pMech->spray)),
+                         0, MECHA_DAMAGE_SMOKE_LIFE);
+
+    if (pFx) {
+      /* Rising, and carried by whatever the machine is doing. */
+      pFx->fVelX = pMech->fVelX * 0.35f;
+      pFx->fVelY = MECHA_DAMAGE_RISE * (0.6f + 0.8f
+                                        * mecha_rng_unit(&pMech->spray));
+      pFx->fVelZ = pMech->fVelZ * 0.35f;
+    }
+  }
+
+  if (fHealth < MECHA_DAMAGE_FIRE) {
+    /* And alight. The ember is the race game's fire-into-smoke particle,
+     * which is what a machine burning from the inside looks like. */
+    tMechaEffect *pFx =
+      mecha_alloc_effect(pWorld, MECHA_FX_EMBER, fX,
+                         fY - pDef->fHeight * 0.12f, fZ,
+                         pDef->fRadius * (0.24f + 0.20f
+                                          * mecha_rng_unit(&pMech->spray)),
+                         0, MECHA_DAMAGE_FIRE_LIFE);
+
+    if (pFx) {
+      pFx->fVelX = pMech->fVelX * 0.5f;
+      pFx->fVelY = MECHA_DAMAGE_RISE * 0.5f;
+      pFx->fVelZ = pMech->fVelZ * 0.5f;
+    }
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+
 void mecha_sim_spawn_effect(tMechaWorld *pWorld, uint8_t byKind,
                             float fX, float fY, float fZ,
                             float fScale, uint8_t byPalette, int iLife)
@@ -346,6 +429,36 @@ static void mecha_guard_mitigation(const tMechaMech *pVictim, uint8_t byKind,
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * Whether anything can land on this machine right now.
+ *
+ * Three ways to be off the table: destroyed, invulnerable through a rise,
+ * or lying on the floor. The last is the point of it -- a machine that has
+ * been knocked down takes the blow that knocked it down and nothing else,
+ * so a knockdown is a reprieve rather than an invitation to empty a
+ * magazine into something that cannot move.
+ *
+ * The reprieve starts on the tick after the knockdown, not on the hit, so
+ * that a single volley resolves in full. Buckshot is seven projectiles and
+ * one trigger pull; if the first pellet to arrive closed the door on the
+ * other six, a shotgun would do a seventh of its damage exactly when it
+ * was working.
+ */
+static bool mecha_mech_hittable(const tMechaWorld *pWorld, int iMechIdx)
+{
+  const tMechaMech *pMech;
+
+  if (!pWorld || iMechIdx < 0 || iMechIdx >= MECHA_MAX_MECHS)
+    return false;
+  pMech = &pWorld->aMechs[iMechIdx];
+  if (!mecha_mech_alive(pMech) || pMech->iInvulnTicks > 0)
+    return false;
+  return pMech->byMove != MECHA_MOVE_DOWN
+         || pWorld->iTick == pMech->iDownTick;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 void mecha_sim_damage(tMechaWorld *pWorld, int iVictimIdx, int iAttackerIdx,
                       float fDamage, float fStagger,
                       float fPushX, float fPushZ)
@@ -357,7 +470,7 @@ void mecha_sim_damage(tMechaWorld *pWorld, int iVictimIdx, int iAttackerIdx,
   if (!pWorld || iVictimIdx < 0 || iVictimIdx >= MECHA_MAX_MECHS)
     return;
   pVictim = &pWorld->aMechs[iVictimIdx];
-  if (!mecha_mech_alive(pVictim) || pVictim->iInvulnTicks > 0)
+  if (!mecha_mech_hittable(pWorld, iVictimIdx))
     return;
 
   pDef = mecha_mech_def(pVictim);
@@ -415,6 +528,8 @@ void mecha_sim_damage(tMechaWorld *pWorld, int iVictimIdx, int iAttackerIdx,
   if (pVictim->fStagger >= MECHA_STAGGER_DOWN) {
     pVictim->fStagger = 0.0f;
     pVictim->byMove = MECHA_MOVE_DOWN;
+    /* The rest of this tick can still land on it; nothing after can. */
+    pVictim->iDownTick = pWorld->iTick;
     pVictim->iStateTicks = 0;
     pVictim->iStunTicks = MECHA_DOWN_TICKS;
     pVictim->iRecovery = 0;
@@ -1824,6 +1939,7 @@ integrate:
   /* --- cosmetic smoothing ---------------------------------------------- */
 
   mecha_update_attitude(pWorld, iMechIdx, pInput, bCanAct);
+  mecha_emit_damage(pWorld, iMechIdx);
 
   {
     float fSpeed = mecha_length2(pMech->fVelX, pMech->fVelZ);
@@ -2372,7 +2488,7 @@ static void mecha_update_shell(tMechaWorld *pWorld, tMechaProjectile *pShell)
 
     if ((pShell->byHitMask & (uint8_t)(1u << i)) != 0)
       continue;
-    if (!mecha_mech_alive(pMech) || pMech->iInvulnTicks > 0)
+    if (!mecha_mech_hittable(pWorld, i))
       continue;
     pDef = mecha_mech_def(pMech);
     fDist = mecha_length3(pMech->fX - pShell->fX,
@@ -2653,9 +2769,12 @@ static void mecha_update_projectiles(tMechaWorld *pWorld)
       const tMechaMechDef *pMechDef;
       float fT;
 
-      if (iMech == (int)pShot->byOwner || !mecha_mech_alive(pMech))
+      if (iMech == (int)pShot->byOwner)
         continue;
-      if (pMech->iInvulnTicks > 0)
+      /* Shots pass through anything that cannot be hit rather than
+       * detonating on it, so a machine on the floor does not soak fire
+       * meant for whoever is standing behind it. */
+      if (!mecha_mech_hittable(pWorld, iMech))
         continue;
 
       pMechDef = mecha_def_get((int)pMech->byDefIdx);
@@ -2936,6 +3055,8 @@ static void mecha_reset_mech_for_round(tMechaWorld *pWorld, int iMechIdx,
   pMech->iStunTicks = 0;
   pMech->iInvulnTicks = 0;
   pMech->iRecovery = 0;
+  /* No tick is tick -1, so nothing is inside its knockdown grace. */
+  pMech->iDownTick = -1;
   pMech->iLungeTicks = 0;
   pMech->fLungeSpeed = 0.0f;
   pMech->iLastFiredSlot = -1;
@@ -2970,6 +3091,8 @@ static void mecha_reset_mech_for_round(tMechaWorld *pWorld, int iMechIdx,
    * cars in a row do not rattle in unison. */
   mecha_rng_seed(&pMech->attitude.shake,
                  0x9E3779B9u * (uint32_t)(iMechIdx + 1) + 0x51ED270Bu);
+  mecha_rng_seed(&pMech->spray,
+                 0x85EBCA6Bu * (uint32_t)(iMechIdx + 1) + 0xC2B2AE35u);
 }
 
 //-------------------------------------------------------------------------------------------------

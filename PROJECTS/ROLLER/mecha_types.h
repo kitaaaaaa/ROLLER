@@ -160,7 +160,13 @@ typedef enum
    * trick is what turns a blast here from one expanding quad into something
    * that reads as debris.
    */
-  MECHA_FX_EMBER     = 6
+  MECHA_FX_EMBER     = 6,
+  /*
+   * A puff off a damaged machine. Rises and spreads rather than falling
+   * and cooling, which is the difference between something thrown off an
+   * explosion and something pouring out of a hole.
+   */
+  MECHA_FX_SMOKE     = 7
 } eMechaEffectKind;
 
 //-------------------------------------------------------------------------------------------------
@@ -516,6 +522,29 @@ typedef struct
    * only thing separating a pilot who can shoot from one who cannot; the
    * computer pilot rolls it per shot and the player leaves it at zero. */
   int   iAimError;
+
+  /*
+   * The tick the machine went down on.
+   *
+   * A machine on the floor is not a target: whatever put it there lands,
+   * and nothing after that does until it is back on its feet. But a volley
+   * is one shot, and a volley is several projectiles -- so the grace is
+   * the tick rather than the hit, and every pellet of the buckshot that
+   * floored it still counts.
+   */
+  int   iDownTick;
+
+  /*
+   * Noise for the smoke and flames a damaged machine throws.
+   *
+   * Private, for exactly the reason the body shake's is private: nothing
+   * cosmetic may reach into the sequence a fight is decided from. This was
+   * first written off the world's own generator and it took three extra
+   * draws a tick out of it, which was enough to send a rooftop fight
+   * somewhere else entirely -- the particles were not wrong, the fight
+   * simply was not the same fight any more.
+   */
+  tMechaRng spray;
 
   int   iRoundsWon;
   float fDamageDealt;

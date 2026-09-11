@@ -354,6 +354,43 @@
  * a range the weapon does not have.
  */
 #define MECHA_BLADE_REACH      1.6f
+
+/*
+ * Wearing the damage, the way the race game shows it.
+ *
+ * Whiplash computes a health factor of (health + 34) / 100, clamped to
+ * one, and its dospray() starts throwing particles once that drops below
+ * 0.66 -- widening from two emitter points to four below 0.75, and with a
+ * per-frame chance of `rand() * factor < 8192` so the rate climbs as the
+ * car gets worse. The 0.66 and the shape of that probability are the race
+ * game's; everything below is this project's, because Whiplash has one
+ * damage tier and this wants two.
+ *
+ * Smoke from a machine that is hurt, fire from one that is nearly gone.
+ */
+#define MECHA_DAMAGE_SMOKE     0.66f
+#define MECHA_DAMAGE_FIRE      0.33f
+/* Numerator of the race game's own emission chance, against a health
+ * factor: at the smoke threshold that is one tick in three, and by the
+ * time a machine is burning it is almost every tick. */
+#define MECHA_DAMAGE_RATE      0.22f
+/*
+ * And how often it may even try.
+ *
+ * The effect table is ninety-six slots shared by everything -- blasts,
+ * debris, dust, muzzle flashes. Whiplash can be generous here because
+ * every car owns a private thirty-two-slot spray array; this cannot. Left
+ * to roll every tick, one machine at fifteen per cent health held
+ * sixty-five slots at once and would have starved the explosion that
+ * finally killed it. One roll every five ticks, staggered between
+ * machines, keeps a burning wreck to about eighteen.
+ */
+#define MECHA_DAMAGE_INTERVAL  5
+#define MECHA_DAMAGE_SMOKE_LIFE MECHA_SEC(1.0f)
+#define MECHA_DAMAGE_FIRE_LIFE  MECHA_SEC(0.55f)
+/* How far up the machine the damage sits, and how far it drifts. */
+#define MECHA_DAMAGE_HEIGHT    0.62f
+#define MECHA_DAMAGE_RISE      MECHA_MPS(7.0f)
 /*
  * At rest the whole arm unfolds and hangs: the shoulder stops tracking, the
  * elbow gives up all but this much of its right angle, and the gun ends up

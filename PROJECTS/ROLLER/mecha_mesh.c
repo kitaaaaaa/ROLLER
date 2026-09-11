@@ -1968,6 +1968,48 @@ static void mecha_add_billboard(tMechaQuadList *pList, int iCameraYaw,
 }
 
 /*
+ * Half a billboard, offset sideways, optionally mirrored.
+ *
+ * POLYTEX takes its texture coordinates from the projected corners, so a
+ * quad always carries the whole tile however wide it is drawn -- which
+ * means the way to mirror a sprite is to reverse the order its corners
+ * arrive in, and MECHA_QUAD_TEX_FLIP is exactly that switch. Two of these
+ * side by side, one flipped, is one sprite and its own reflection meeting
+ * down the middle.
+ */
+static void mecha_add_billboard_half(tMechaQuadList *pList, int iCameraYaw,
+                                     float fX, float fY, float fZ,
+                                     float fHalfW, float fHalfH,
+                                     float fShift, bool bMirror,
+                                     uint8_t byPalette)
+{
+  float fRightX = mecha_cos(iCameraYaw);
+  float fRightZ = -mecha_sin(iCameraYaw);
+  float fCx = fX + fRightX * fShift;
+  float fCz = fZ + fRightZ * fShift;
+  float afVert[4][3];
+  uint8_t byFlags = MECHA_QUAD_TWO_SIDED | MECHA_QUAD_GLOW;
+
+  afVert[0][0] = fCx - fRightX * fHalfW;
+  afVert[0][1] = fY - fHalfH;
+  afVert[0][2] = fCz - fRightZ * fHalfW;
+  afVert[1][0] = fCx + fRightX * fHalfW;
+  afVert[1][1] = fY - fHalfH;
+  afVert[1][2] = fCz + fRightZ * fHalfW;
+  afVert[2][0] = fCx + fRightX * fHalfW;
+  afVert[2][1] = fY + fHalfH;
+  afVert[2][2] = fCz + fRightZ * fHalfW;
+  afVert[3][0] = fCx - fRightX * fHalfW;
+  afVert[3][1] = fY + fHalfH;
+  afVert[3][2] = fCz - fRightZ * fHalfW;
+  if (bMirror)
+    byFlags |= MECHA_QUAD_TEX_FLIP;
+  mecha_quads_add(pList, afVert, byPalette, byFlags);
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
  * A billboard standing on the ground rather than centred on a point: its
  * bottom edge is at fBase and it is as tall as it is wide, which is what a
  * tree is. No glow -- a self-lit tree is a lamp -- so it sorts on its own
@@ -2796,16 +2838,53 @@ void mecha_mesh_effects(tMechaQuadList *pList, const tMechaWorld *pWorld,
                                            MECHA_SPRITE_BLAST_LAST, fAge));
       break;
 
-    case MECHA_FX_THRUSTER:
-      /* Burning fuel, not a bolt: the fire frames, cycling, because a boost
-       * lasts longer than one pass through them. */
-      fSize = pFx->fScale * (1.0f - 0.6f * fAge);
+    case MECHA_FX_SMOKE: {
+      /*
+       * Damage smoke: it grows and thins rather than shrinking, because
+       * something pouring out of a machine spreads as it leaves. Palette
+       * walks a grey ramp so a puff goes from dirty to faint instead of
+       * blinking out at full strength.
+       */
+      static const uint8_t abyFade[] = { 121, 123, 125, 127, 129 };
+      const int iSteps = (int)(sizeof(abyFade) / sizeof(abyFade[0]));
+      int iStep = mecha_clampi((int)(fAge * (float)iSteps), 0, iSteps - 1);
+
+      fSize = pFx->fScale * (0.7f + 1.1f * fAge);
       mecha_add_billboard(pList, iCameraYaw, pFx->fX, pFx->fY, pFx->fZ,
-                          fSize, pFx->byPalette);
+                          fSize, abyFade[iStep]);
       mecha_tag_texture(pList, MECHA_TEX_EFFECT,
-                        mecha_sprite_frame(MECHA_SPRITE_FIRE_FIRST,
-                                           MECHA_SPRITE_FIRE_LAST, fAge));
+                        mecha_sprite_frame(MECHA_SPRITE_SMOKE_FIRST,
+                                           MECHA_SPRITE_SMOKE_LAST, fAge));
       break;
+    }
+
+    case MECHA_FX_THRUSTER: {
+      /*
+       * Burning fuel, not a bolt: the fire frames, cycling, because a
+       * boost lasts longer than one pass through them.
+       *
+       * Drawn twice across the same plane, the right-hand copy mirrored,
+       * so the flame is symmetrical about the thruster it is coming out
+       * of. The fire tiles are drawn leaning one way -- a single one reads
+       * as a flame blown sideways, which is wrong for something pointing
+       * straight down out of a jetpack. Two halves meeting down the middle
+       * cost one extra quad and no overlap, so nothing is drawn twice into
+       * the same pixels and the painter's order has nothing to decide.
+       */
+      int iFrame = mecha_sprite_frame(MECHA_SPRITE_FIRE_FIRST,
+                                      MECHA_SPRITE_FIRE_LAST, fAge);
+      int iHalf;
+
+      fSize = pFx->fScale * (1.0f - 0.6f * fAge);
+      for (iHalf = 0; iHalf < 2; iHalf++) {
+        mecha_add_billboard_half(pList, iCameraYaw, pFx->fX, pFx->fY,
+                                 pFx->fZ, fSize * 0.5f, fSize,
+                                 (iHalf == 0 ? -0.5f : 0.5f) * fSize,
+                                 iHalf != 0, pFx->byPalette);
+        mecha_tag_texture(pList, MECHA_TEX_EFFECT, iFrame);
+      }
+      break;
+    }
 
     default:
       fSize = pFx->fScale * (1.0f - 0.6f * fAge);

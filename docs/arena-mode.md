@@ -247,6 +247,17 @@ on the stick, and pick what to spend the next round on.
   once leaving the ground. Off the top in any of eight directions, the first
   half-second of descent is now entirely on the ground.
 
+- **The computer pilot looks as far ahead as it takes to stop.** The look-ahead
+  was a linear guess -- a stride plus a fixed fraction of the speed -- and it
+  undershot badly at the top end: a machine at seventy metres a second checked
+  forty-one metres ahead and needed eighty-six to stop, so by the time the edge
+  was inside its look-ahead it was already past saving. Braking distance is
+  `v² / 2a` and the machine's own grip is that `a`, so the number was available
+  rather than guessable. It takes whichever of the two is further, because a
+  walker's grip is three times a car's and its braking distance at a walking
+  pace is shorter than its own reaction time. That took walking off Tower Seven
+  from about one fight in eight to one in twenty.
+
 - **The computer pilot watches its feet.** It does not path around anything; it
   declines to walk into it. Three separate distances: a stride plus what it is
   carrying on foot, the whole length of a burst before it presses boost, and
@@ -342,6 +353,41 @@ on the stick, and pick what to spend the next round on.
   input at a standstill to nothing at all flat out: 57 degrees a second on the
   stick, times seven when crawling. Flat out the car barely turns and has to be
   slowed into a corner rather than steered round one.
+
+- **A machine on the floor is not a target.** A knockdown used to be an
+  invitation to empty a magazine into something that could not move. Whatever
+  put a machine down still lands; nothing after it does, all the way through
+  getting back up. The reprieve starts on the tick *after* the knockdown rather
+  than on the hit, and that detail is the whole of it: buckshot is seven
+  projectiles and one trigger pull, so if the first pellet to arrive closed the
+  door on the other six, a shotgun would do a seventh of its damage exactly when
+  it was working. Shots pass through a downed machine rather than detonating on
+  it, so it does not soak fire meant for whoever is standing behind it.
+
+- **Damaged machines wear it.** Whiplash computes a health factor of
+  `(health + 34) / 100` and its `dospray()` starts throwing particles once that
+  drops below 0.66 -- widening from two emitter points to four below 0.75, with
+  a per-frame chance of `rand() * factor < 8192` so the rate climbs as the car
+  gets worse. The 0.66 and the shape of that probability are the race game's.
+  The second tier is not: Whiplash has one, and this wants smoke from a machine
+  that is hurt and fire from one that is nearly gone, so the fire threshold at a
+  third of health is this project's own.
+
+  The particles come off the machine's own noise, not the world's. Written the
+  other way first, they took three extra draws a tick out of the shared
+  generator and moved a rooftop fight off a cliff -- the smoke was fine, the
+  fight was simply no longer the same fight. The rate is throttled too: the
+  effect table is ninety-six slots shared with blasts, debris and dust, and a
+  wreck rolling every tick held sixty-five of them at once. One roll every five
+  ticks, staggered between machines, keeps a burning wreck to about nineteen.
+
+- **The boost flame is symmetrical.** The fire tiles are drawn leaning one way,
+  which reads as a flame blown sideways -- wrong for something pointing straight
+  down out of a jetpack. It is drawn as two halves meeting down the middle now,
+  the right-hand one mirrored by reversing the order its corners reach POLYTEX,
+  which is the same `MECHA_QUAD_TEX_FLIP` switch the car's paint uses. One extra
+  quad, and no overlap, so nothing is drawn twice into the same pixels and the
+  painter's order has nothing to decide.
 
 - **The ground grips, and grips as well as it can unless told otherwise.**
   Whiplash stores a grip grade per track chunk -- separately for the centre lane

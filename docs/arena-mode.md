@@ -354,6 +354,32 @@ on the stick, and pick what to spend the next round on.
   stick, times seven when crawling. Flat out the car barely turns and has to be
   slowed into a corner rather than steered round one.
 
+- **The machines were inside out.** `mecha_add_box` builds all of them -- every
+  limb, the head, the thrusters, the gun car's handgun -- and its face table was
+  wound so the renderer took the inside of each box for the front. Reversing
+  those six faces turns the lot the right way round. The retail car body does
+  not go through it and was never affected, which is why that one alone looked
+  right. The test that pinned the old winding pinned the wrong convention with
+  it: what it should assert is that six faces of a box agree, not which way they
+  agree.
+
+- **A cancel from a great height lands on the roof.** A platform answers a
+  height query only to something near enough above it -- below the lip it is a
+  wall, not a floor, which is what stops a machine underneath a roof popping up
+  onto it. A jump cancel falls at a hundred and twenty metres a second, two
+  metres a tick against a lip of one and a half, so a cancel from high over
+  Tower Seven stepped straight past the roof in a single tick, was told there
+  was no floor, and fell through solid ground to its death at −449 m. The ground
+  query now asks from the higher of where the feet were and where they have got
+  to, so it sees the surface the machine was standing over when the tick began.
+
+- **The spin onto the lock happens on the jump.** It used to fire on the cancel,
+  which is the bottom of the arc with nothing left to spend it on; starting it
+  as the machine leaves the ground means it is already facing the right way by
+  the time it lands, which is the shape a jump cancel is meant to have. It also
+  turns four times as fast while it runs -- a spin that takes as long as an
+  ordinary lock-follow is not a spin.
+
 - **A machine on the floor is not a target.** A knockdown used to be an
   invitation to empty a magazine into something that could not move. Whatever
   put a machine down still lands; nothing after it does, all the way through

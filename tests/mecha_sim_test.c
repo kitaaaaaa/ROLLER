@@ -3841,6 +3841,61 @@ static int test_the_gun_car_spins_and_rolls(void)
  * A machine on the floor takes the blow that put it there and nothing
  * after -- but a volley is one blow however many projectiles it is made of.
  */
+/*
+ * A cancel from high over a platform lands on it.
+ *
+ * A platform answers a height query only to something near enough above
+ * it, and a jump cancel falls fast enough to step past that lip in one
+ * tick -- so a cancel from a great height over Tower Seven was told there
+ * was no floor and fell through solid roof to its death.
+ */
+static int test_a_high_cancel_lands_on_the_roof(void)
+{
+    tMechaWorld world;
+    tMechaInput aInputs[2];
+    int iArena = arena_by_name("TOWER SEVEN ROOF");
+    int iLegs = -1;
+    int i;
+
+    CHECK(iArena >= 0);
+    for (i = 0; i < mecha_def_count(); i++)
+        if (!mecha_def_get(i)->bWheeled) {
+            iLegs = i;
+            break;
+        }
+    CHECK(iLegs >= 0);
+
+    start_duel(&world, iArena, iLegs, iLegs, 0x0CA9u, 1);
+    memset(aInputs, 0, sizeof(aInputs));
+    world.aMechs[1].fX = MECHA_M(900.0f);
+    /* Over the middle of the roof, high up, coming down at the speed a
+     * cancel comes down at. */
+    world.aMechs[0].fX = 0.0f;
+    world.aMechs[0].fZ = 0.0f;
+    world.aMechs[0].fY = MECHA_M(120.0f);
+    world.aMechs[0].fGroundY = 0.0f;
+    world.aMechs[0].byMove = MECHA_MOVE_CANCEL;
+    world.aMechs[0].fVelX = 0.0f;
+    world.aMechs[0].fVelZ = 0.0f;
+    world.aMechs[0].fVelY = -MECHA_CANCEL_FALL_SPEED;
+
+    for (i = 0; i < MECHA_TICK_HZ * 4; i++) {
+        mecha_sim_tick(&world, aInputs, 2);
+        if (world.aMechs[0].byMove == MECHA_MOVE_LAND
+            || world.aMechs[0].byMove == MECHA_MOVE_STAND)
+            break;
+    }
+    printf("   a cancel from 120 m up ends at %.1f m, alive=%d\n",
+           world.aMechs[0].fY / MECHA_METRE,
+           mecha_mech_alive(&world.aMechs[0]));
+    CHECK(mecha_mech_alive(&world.aMechs[0]));
+    /* On the roof, not under it. */
+    CHECK(world.aMechs[0].fY > -MECHA_M(1.0f));
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static int test_a_downed_machine_is_not_a_target(void)
 {
     tMechaWorld world;
@@ -6009,7 +6064,15 @@ static int test_mesh_geometry(void)
             for (iAxis = 0; iAxis < 3; iAxis++)
                 fDot += pQuad->afNormal[iAxis]
                         * (pQuad->afVert[0][iAxis] - afCentre[iAxis]);
-            CHECK(fDot > 0.0f);
+            /*
+             * Every face of a box agrees about which way round it is, and
+             * the sign is the renderer's to choose: the machines were
+             * drawn inside out until the box winding was reversed, so the
+             * front of a face is the one whose derived normal points back
+             * at the middle of the box. What this pins is the consistency
+             * -- six faces, one convention -- not the handedness.
+             */
+            CHECK(fDot < 0.0f);
         }
     }
 
@@ -6211,6 +6274,8 @@ int main(void)
           test_hills_are_rolled_down_not_fallen_down },
         { "the ground grips unless told otherwise",
           test_the_ground_grips_unless_told_otherwise },
+        { "a high cancel lands on the roof",
+          test_a_high_cancel_lands_on_the_roof },
         { "a downed machine is not a target",
           test_a_downed_machine_is_not_a_target },
         { "damaged machines smoke and burn",

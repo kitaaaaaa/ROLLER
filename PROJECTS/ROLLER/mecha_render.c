@@ -470,7 +470,8 @@ void mecha_camera_update(tMechaCamera *pCamera, const tMechaWorld *pWorld,
             + (MECHA_CAM_BACK_FAR - MECHA_CAM_BACK_NEAR)
               * mecha_clampf(fRange / (90.0f * MECHA_METRE), 0.0f, 1.0f);
 
-    if (fRange <= MECHA_CLOSE_QUARTERS) {
+    if (fRange <= MECHA_CLOSE_QUARTERS
+                  * (pDef->bWheeled ? MECHA_CAM_CAR_RANGE : 1.0f)) {
       /*
        * Knife range: look along the lock and centre the enemy. This is the
        * one distance where the two machines are close enough that framing

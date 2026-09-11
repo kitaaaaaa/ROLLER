@@ -256,12 +256,12 @@ static void mecha_pose_child(tMechaPose *pOut, const tMechaPose *pParent,
  * which is what makes back-face rejection work on a closed box.
  */
 static const uint8_t s_aabyBoxFaces[6][4] = {
-  { 1, 3, 7, 5 },   /* +X */
-  { 0, 4, 6, 2 },   /* -X */
-  { 2, 6, 7, 3 },   /* +Y */
-  { 0, 1, 5, 4 },   /* -Y */
-  { 4, 5, 7, 6 },   /* +Z */
-  { 0, 2, 3, 1 },   /* -Z */
+  { 5, 7, 3, 1 },   /* +X */
+  { 2, 6, 4, 0 },   /* -X */
+  { 3, 7, 6, 2 },   /* +Y */
+  { 4, 5, 1, 0 },   /* -Y */
+  { 6, 7, 5, 4 },   /* +Z */
+  { 1, 3, 2, 0 },   /* -Z */
 };
 
 //-------------------------------------------------------------------------------------------------

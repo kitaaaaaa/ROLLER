@@ -877,6 +877,9 @@ static void mecha_update_facing(tMechaWorld *pWorld, int iMechIdx,
      * fast to aim by hand. Further out the machine points where it is
      * pointed -- which is what makes holding a lock at range a thing the
      * player does rather than a thing that happens. */
+    if (pMech->iRecentreTicks > 0)
+      iMaxStep *= MECHA_RECENTRE_SCALE;
+
     if (!pDef->bWheeled
         && (mecha_target_range(pWorld, iMechIdx) <= MECHA_CLOSE_QUARTERS
             || pMech->iRecentreTicks > 0)) {
@@ -1567,6 +1570,7 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
   bool bBoosting = false;
   float fDirX = 0.0f;
   float fDirZ = 0.0f;
+  float fPreY = pMech->fY;
   float fStick = bCanAct ? mecha_stick_direction(pMech, pInput, &fDirX, &fDirZ)
                          : 0.0f;
 
@@ -1597,9 +1601,6 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
        * drops the mech; the landing is what pays for it. */
       pMech->byMove = MECHA_MOVE_CANCEL;
       pMech->iStateTicks = 0;
-      /* The whole point of dropping out of the air is to come down facing
-       * them again, so the drop brings the machine round on its own. */
-      pMech->iRecentreTicks = MECHA_RECENTRE_TICKS;
     } else if (pMech->byMove == MECHA_MOVE_DASH
                && pMech->iStateTicks < pDef->iDashTicks
                && mecha_boost_available(pMech)) {
@@ -1631,6 +1632,15 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
       pMech->fVelY = pDef->fJumpVelocity;
       pMech->byMove = MECHA_MOVE_JUMP;
       pMech->iStateTicks = 0;
+      /*
+       * Leaving the ground is what brings the machine round onto its
+       * lock, not coming down again. Waiting for the cancel meant the
+       * turn started at the bottom of the arc with nothing left to spend
+       * it on; starting it at the top means the machine is already facing
+       * the right way by the time it lands, which is the shape a jump
+       * cancel is supposed to have.
+       */
+      pMech->iRecentreTicks = MECHA_RECENTRE_TICKS;
       bAirborne = true;
       mecha_sim_spawn_effect(pWorld, MECHA_FX_DUST, pMech->fX, fGround,
                              pMech->fZ, pDef->fRadius * 2.0f,
@@ -1783,6 +1793,7 @@ integrate:
 
   pMech->fX += pMech->fVelX * MECHA_DT;
   pMech->fZ += pMech->fVelZ * MECHA_DT;
+  fPreY = pMech->fY;
   pMech->fY += pMech->fVelY * MECHA_DT;
 
   {
@@ -1796,8 +1807,23 @@ integrate:
     }
   }
 
+  /*
+   * Asked from where the feet were, not where they have got to.
+   *
+   * A platform answers a height query only to something near enough
+   * above it -- below the lip it is a wall, not a floor, which is what
+   * stops a machine underneath a roof popping up onto it. A jump cancel
+   * falls at a hundred and twenty metres a second, which is two metres a
+   * tick against a lip of one and a half, so a cancel from high over
+   * Tower Seven stepped straight past the roof in one tick, was told
+   * there was no floor, and fell to its death through solid ground.
+   * Taking the higher of where it was and where it is means the query
+   * sees the same surface the machine was standing over when the tick
+   * began, and the contact rules below land it.
+   */
   fGround = mecha_arena_ground_height(&pWorld->arena, pMech->fX, pMech->fZ,
-                                      pMech->fY);
+                                      fPreY > pMech->fY ? fPreY
+                                                        : pMech->fY);
 
   /*
    * Staying on a slope that is running away downhill.

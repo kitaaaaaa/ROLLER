@@ -154,6 +154,13 @@
  * actually keeping the enemy in front of you.
  */
 #define MECHA_CLOSE_QUARTERS   MECHA_M(34.0f)
+/*
+ * How much further out the chase camera lets go of a car and frames the
+ * enemy instead. A machine on wheels is small, fast and always pointing
+ * somewhere other than where it is going, so the range at which framing
+ * the fight beats framing the driver starts sooner for it.
+ */
+#define MECHA_CAM_CAR_RANGE    1.5f
 
 /*
  * How long a move that re-centres holds the machine on its lock.
@@ -251,7 +258,9 @@
  * against, and a machine going nowhere is not driving off anything. */
 #define MECHA_RAMP_STICK_SPEED  MECHA_MPS(3.0f)
 
-#define MECHA_STRIDE_METRES     MECHA_M(5.2f)
+/* Metres of ground per stride. Doubled to halve the cycle rate: the legs
+ * were turning over twice as fast as the machines read as moving. */
+#define MECHA_STRIDE_METRES     MECHA_M(10.4f)
 
 /*
  * How fast the machine brings its guns up and how slowly it puts them down,
@@ -410,6 +419,9 @@
 #define MECHA_LEG_WALK_SPEED  MECHA_MPS(1.2f)
 
 #define MECHA_RECENTRE_TICKS   MECHA_SEC(0.5f)
+/* And how much faster it comes round while that runs. A spin onto the
+ * lock that takes as long as an ordinary lock-follow is not a spin. */
+#define MECHA_RECENTRE_SCALE   4
 
 /* Mechs push each other apart rather than overlapping. */
 #define MECHA_PUSH_PER_TICK    MECHA_M(0.9f)

@@ -1218,6 +1218,28 @@ static uint32_t mecha_zizin_surface(int iPoly)
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * Panels the plan does not describe the way their own normals do.
+ *
+ * The body is hand-made and not symmetrical, so a panel and its mirror
+ * partner never have quite the same normal -- and where the two straddle
+ * the line between "lying flat" and "facing sideways", they end up taking
+ * opposite texture orientations while wearing the same tile. That reads as
+ * one side of the car being right and the other backwards.
+ *
+ * The rear quarter panel is the one place left where that happens after
+ * the dominant-axis rule: its left half comes out at 0.89 vertical against
+ * 0.42 lateral, its right half at 0.66 against 0.75, so they disagree.
+ * Naming it here is honest about what it is -- a quirk of the artwork, not
+ * a rule the geometry can be asked for.
+ */
+static bool mecha_zizin_side_panel(int iPoly)
+{
+  return iPoly == 35;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static void mecha_add_zizin_body(tMechaQuadList *pList,
                                  const tMechaPose *pPose, float fScale,
                                  float fSink, uint8_t byBody, uint8_t byTop)
@@ -1272,11 +1294,26 @@ static void mecha_add_zizin_body(tMechaQuadList *pList,
        */
       if (pList->iCount > 0) {
         tMechaQuad *pQuad = &pList->paQuads[pList->iCount - 1];
-        float fUp = pQuad->afNormal[1];
+        float fSide = pQuad->afNormal[0] < 0.0f ? -pQuad->afNormal[0]
+                                                : pQuad->afNormal[0];
+        float fUp = pQuad->afNormal[1] < 0.0f ? -pQuad->afNormal[1]
+                                              : pQuad->afNormal[1];
+        float fEnd = pQuad->afNormal[2] < 0.0f ? -pQuad->afNormal[2]
+                                               : pQuad->afNormal[2];
 
-        if (fUp < 0.0f)
-          fUp = -fUp;
-        if (fUp > MECHA_ZIZIN_ROOF_FACING)
+        /*
+         * Lying flat means the vertical is the biggest of the three, not
+         * that it has passed some threshold. A fixed cut split panels
+         * that are mirror images of one another wearing the same tile --
+         * the pillar at 0.47 up kept the flip while its partner at 0.67
+         * lost it, which is one side of the car reading correctly and the
+         * other backwards. The body is hand-made and not symmetrical, so
+         * two such panels never have quite the same normal; asking which
+         * axis wins rather than where a number falls puts them back on
+         * the same answer.
+         */
+        if (fUp > fSide && fUp > fEnd
+            && !mecha_zizin_side_panel(iPoly))
           pQuad->byFlags &= (uint8_t)~MECHA_QUAD_TEX_FLIP;
       }
       if ((uiTex & SURFACE_FLAG_APPLY_TEXTURE) != 0)

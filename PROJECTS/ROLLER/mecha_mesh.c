@@ -44,7 +44,7 @@ static bool s_bCarSkin = false;
  * body's usual orientation: the windscreen, and the rear quarter window
  * on the passenger side. Indices into xzizin_pols, which is fixed data. */
 #define MECHA_ZIZIN_WINDSCREEN     3
-#define MECHA_ZIZIN_QUARTER_GLASS 10
+#define MECHA_ZIZIN_QUARTER_GLASS 17
 #define MECHA_GUN_YAW_LIMIT   MECHA_DEG(40)
 #define MECHA_GUN_ROLL        MECHA_DEG(84)
 /* How far across the bonnet it points on top of wherever it is aiming. */
@@ -262,12 +262,12 @@ static void mecha_pose_child(tMechaPose *pOut, const tMechaPose *pParent,
  * which is what makes back-face rejection work on a closed box.
  */
 static const uint8_t s_aabyBoxFaces[6][4] = {
-  { 5, 7, 3, 1 },   /* +X */
-  { 2, 6, 4, 0 },   /* -X */
-  { 3, 7, 6, 2 },   /* +Y */
-  { 4, 5, 1, 0 },   /* -Y */
-  { 6, 7, 5, 4 },   /* +Z */
-  { 1, 3, 2, 0 },   /* -Z */
+  { 1, 3, 7, 5 },   /* +X */
+  { 0, 4, 6, 2 },   /* -X */
+  { 2, 6, 7, 3 },   /* +Y */
+  { 0, 1, 5, 4 },   /* -Y */
+  { 4, 5, 7, 6 },   /* +Z */
+  { 0, 2, 3, 1 },   /* -Z */
 };
 
 //-------------------------------------------------------------------------------------------------

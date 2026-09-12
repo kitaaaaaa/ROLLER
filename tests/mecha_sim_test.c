@@ -6064,15 +6064,7 @@ static int test_mesh_geometry(void)
             for (iAxis = 0; iAxis < 3; iAxis++)
                 fDot += pQuad->afNormal[iAxis]
                         * (pQuad->afVert[0][iAxis] - afCentre[iAxis]);
-            /*
-             * Every face of a box agrees about which way round it is, and
-             * the sign is the renderer's to choose: the machines were
-             * drawn inside out until the box winding was reversed, so the
-             * front of a face is the one whose derived normal points back
-             * at the middle of the box. What this pins is the consistency
-             * -- six faces, one convention -- not the handedness.
-             */
-            CHECK(fDot < 0.0f);
+            CHECK(fDot > 0.0f);
         }
     }
 

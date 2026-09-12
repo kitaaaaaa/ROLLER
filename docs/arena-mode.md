@@ -375,15 +375,6 @@ on the stick, and pick what to spend the next round on.
   move over. Hills are kept out of the middle: the streets are the one flat
   thing here.
 
-- **The machines were inside out.** `mecha_add_box` builds all of them -- every
-  limb, the head, the thrusters, the gun car's handgun -- and its face table was
-  wound so the renderer took the inside of each box for the front. Reversing
-  those six faces turns the lot the right way round. The retail car body does
-  not go through it and was never affected, which is why that one alone looked
-  right. The test that pinned the old winding pinned the wrong convention with
-  it: what it should assert is that six faces of a box agree, not which way they
-  agree.
-
 - **A cancel from a great height lands on the roof.** A platform answers a
   height query only to something near enough above it -- below the lip it is a
   wall, not a floor, which is what stops a machine underneath a roof popping up

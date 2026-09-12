@@ -1127,3 +1127,92 @@ and holding it at range now means actually keeping the enemy in front of you.
 A move that re-centres holds the machine on its lock for long enough to
 complete the turn and let a shot go, and no longer: the auto-turn coming back
 on permanently would undo the point of confining it.
+
+---
+
+## TYPE-01 — surface bits are the engine's own values, duplicated
+
+`SURFACE_FLAG_PIT`, `SURFACE_FLAG_SKIP_RENDER` and
+`SURFACE_FLAG_NON_MAGNETIC` out of `types.h`, which `mecha_types.h` cannot
+include because nothing in the simulation may reach into the engine.
+`mecha_render.c` includes both and asserts at compile time that they agree.
+
+## TYPE-02 — silhouette multipliers exist so archetypes read across the arena
+
+Everything the mesh builds is scaled off `fHeight` and `fRadius`, which made
+every machine the same shape at a different size — the archetypes existed
+only in the stat block. These let a siege platform read as one: heavy
+shoulders, thick limbs, an oversized gun in each hand, a head sunk into the
+chest, against an interceptor that is all narrow torso and thin legs. Zero
+means one, so a machine that never sets them still builds.
+
+## TYPE-03 — the three mass figures are absolute, not multiples of walk speed
+
+The race game's cars do not set their velocity, they drive it: a grip figure
+limits how fast sideways motion is corrected, whatever is left decays on its
+own, and steering authority falls off as speed rises. The same three ideas
+are what make a machine here feel like it has mass rather than a cursor.
+
+`fGrip` kills sideways velocity per second — high is crisp, low slides wide.
+`fDriveAccel` is how hard it pushes towards the speed asked for. `fBrake` is
+how fast it sheds speed with nothing asked of it.
+
+All three are in metres per second squared and deliberately **not** multiples
+of the machine's own walk speed. Scaling them that way normalises out the
+very thing they exist to express: every machine then takes the same time to
+gather itself, so the interceptor — being simply faster — slides the
+furthest, and the siege platform comes out the nimbler of the two.
+
+## TYPE-04 — what the attitude fields are, and where each comes from Whiplash
+
+All of it is cosmetic, all in the shared 14-bit circle, none read back.
+Whiplash keeps these in independent pieces and sums them at the last moment
+in `car.c`; the same split is kept because they genuinely do not interact.
+
+- **Input tilt.** Whiplash moves it *against* the steering
+  (`iRollDynamicOffset`, wound at `iRollResponseRate`, clamped at
+  `iMaxRollOffset`) so a car leans out of a corner. Virtual-On's robots lean
+  *into* the input. Two degrees either way: you would not name it if you saw
+  it, and you would notice if it went.
+- **Air pitch.** The nose follows the velocity vector with no ground under
+  it — Whiplash derives airborne `nPitch` from `atan2` of vertical against
+  horizontal speed, so a car launched off a crest points where it is going.
+- **Ground contour.** Pitch and roll of the slope actually stood on, sampled
+  across the footprint and eased rather than snapped. See [SIM-10].
+- **Landing wobble.** Two amplitudes decaying while a phase runs, giving a
+  damped cosine about both axes. Whiplash seeds them from the attitude held
+  at the moment of contact, which is why a flat landing barely registers and
+  one off a hillside rings.
+- **Body shake.** White noise on all three axes, resampled every tick, scaled
+  by how hard the machine is working — in the race game, road speed times
+  damage divided by the engine's `iStabilityFactor`.
+
+## TYPE-05 — the leg facing is the one piece of animation state the sim owns
+
+The torso holds the aim while the legs follow the line of travel, so a
+machine strafing across your guns is walking sideways rather than sliding
+with its shoulders square. The sim owns it because it is smoothed over time
+and the mesh is built fresh every frame.
+
+`fFightMix` is similar in spirit: how much of a fight the machine thinks it
+is in, held while it has a lock or is shooting. Nothing reads it back, so a
+machine animating out of a fighting stance has never stopped fighting.
+
+## MESHH-01 — the effect bank's frames, and what doubles as what
+
+Frames 8..12 are the sky's cloud puffs — `horizon.c` picks one of those five
+for every quad of its dome, and so does this mode. They double as the glow on
+a plasma bolt, because the bank has no bolt art of its own: at bolt size a
+soft blue puff reads as plasma. 0 and 21..23 are smoke, 1..3 the start
+lights, 4..7 flame, 13..20 the blast.
+
+## MESHH-02 — the quad buffer is caller-owned and fixed
+
+Nothing in the mode allocates, so a frame that would overflow stops adding
+geometry rather than growing or crashing. `iDropped` records how much was
+lost so a debug overlay can say so.
+
+The mesh layer never sees a texture either: it names a bank and a tile and
+the renderer resolves them, which is what keeps the file free of the engine.
+Anything unresolvable falls back to `byPalette`, so the same mesh works with
+or without the retail data.

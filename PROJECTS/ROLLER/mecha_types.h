@@ -2,20 +2,17 @@
 #define _ROLLER_MECHA_TYPES_H
 //-------------------------------------------------------------------------------------------------
 /*
- * State for ROLLER's arena mode: a 3D mecha duel fought on foot instead of a
- * lap race, built on the same software rasteriser, the same 14-bit heading
- * circle, and the same world scale as the track game.
+ * State for ROLLER's arena mode: a mecha duel on the track game's own
+ * rasteriser, 14-bit heading circle and world scale.
  *
- * Nothing in this header (or in mecha_sim.c, mecha_ai.c, mecha_arena.c and
- * mecha_defs.c behind it) includes SDL or touches a ROLLER global. The
+ * Nothing here, or in mecha_sim.c, mecha_ai.c, mecha_arena.c and
+ * mecha_defs.c behind it, includes SDL or touches a ROLLER global: the
  * simulation is a pure function of its own state plus one input struct per
- * mech per tick, which is what lets it run headless under the unit tests.
- * The engine-facing half lives in mecha_render.c and mecha_mode.c.
+ * machine per tick, which is what lets it run headless under the tests. The
+ * engine-facing half is mecha_render.c and mecha_mode.c.
  *
- * The mech roster, arena and artwork are original to this project. What is
- * borrowed from the arcade lineage is the shape of the mechanics -- twin
- * sticks, a boost gauge, weapons that behave differently depending on how
- * you are moving -- not anyone's characters or data.
+ * Roster, arenas and artwork are original to this project. What is borrowed
+ * from the arcade lineage is the shape of the mechanics, not anyone's data.
  */
 //-------------------------------------------------------------------------------------------------
 #include "mecha_math.h"
@@ -29,34 +26,21 @@
 #define MECHA_MAX_EFFECTS      96
 #define MECHA_MAX_OBSTACLES    24
 
-/*
- * Terrain is a grid of square cells with a height at every corner and a
- * surface word per cell. Coarse on purpose: the hills are meant to be
- * angular, the ground is flat-shaded, and a mech is twelve metres tall, so
- * anything finer would be detail nobody can stand on.
- */
-/*
- * The most the ground can be divided into, which is not how much any given
- * arena divides it: an arena carries its own count in iTerrainCells, and a
- * bigger one needs more of them or its hills come out as broad bumps with
- * no shape to them. This is only the size of the arrays.
- */
+/* Terrain: a grid of square cells, a height per corner and a surface word
+ * per cell. Coarse on purpose. [ARENA-04] */
+/* The array size, not any arena's own division -- each carries its own
+ * count in iTerrainCells, and a bigger arena needs more. */
 #define MECHA_TERRAIN_CELLS 24
 #define MECHA_TERRAIN_NODES (MECHA_TERRAIN_CELLS + 1)
 /* What an arena gets when it does not ask for anything else. */
 #define MECHA_TERRAIN_CELLS_DEFAULT 12
 
 /*
- * Surface bits, and they are the engine's own values -- SURFACE_FLAG_PIT,
- * SURFACE_FLAG_SKIP_RENDER and SURFACE_FLAG_NON_MAGNETIC out of types.h,
- * which this file cannot include because nothing in the simulation may
- * reach into the engine. mecha_render.c includes both and asserts at
- * compile time that they still agree.
+ * Surface bits, duplicated from the engine's own types.h because nothing in
+ * the simulation may include it; mecha_render.c asserts they agree.
+ * [TYPE-01]
  *
- * A pit is a surface, not a hole: the ground is still there and still
- * answers a height query, it is simply flagged as a pit and not drawn.
- * That is how the race game does it, and it is why a machine that walks
- * into one falls in rather than falling through the world.
+ * A pit is a surface and not a hole, exactly as in the race game. [SIM-14]
  */
 #define MECHA_SURF_SKIP_RENDER  0x00020000u
 #define MECHA_SURF_NON_MAGNETIC 0x00080000u
@@ -76,11 +60,9 @@
 
 //-------------------------------------------------------------------------------------------------
 /*
- * How the mech is moving when the trigger goes down. Every weapon has a
- * separate definition per stance, so the same trigger is a different attack
- * standing, guarding, dashing or airborne. That one rule is what gives the
- * genre its depth, and it is the reason weapons are a 3 x 4 table rather
- * than a flat list of three.
+ * How the machine is moving when the trigger goes down. Every weapon is
+ * defined per stance, which is why weapons are a 3 x 4 table rather than a
+ * flat list of three.
  */
 typedef enum
 {
@@ -139,12 +121,8 @@ typedef enum
   MECHA_PROJ_ARC    = 3,  /* lobbed, falls under its own gravity */
   MECHA_PROJ_MINE   = 4,  /* drops, arms, then detonates on proximity */
   MECHA_PROJ_MELEE  = 5,  /* short-lived hitbox carried in front of the mech */
-  /*
-   * What a bomb leaves behind: a standing sphere of fire that hurts anything
-   * walking into it and swallows shots crossing it. It does not travel and
-   * cannot be shot down; it is the one projectile that is only ever a
-   * hazard, never a target.
-   */
+  /* What a bomb leaves behind: a standing fire that hurts anything walking
+   * into it and swallows shots crossing it. Never a target. */
   MECHA_PROJ_SHELL  = 6
 } eMechaProjectileKind;
 
@@ -158,13 +136,8 @@ typedef enum
   MECHA_FX_DUST      = 3,
   MECHA_FX_THRUSTER  = 4,
   MECHA_FX_SPARK     = 5,
-  /*
-   * A thrown, falling, cooling particle. The race game draws its smoke and
-   * flames the same way -- a spray of camera-facing squares carrying their
-   * own velocity and a palette index, not a sprite sheet -- and the same
-   * trick is what turns a blast here from one expanding quad into something
-   * that reads as debris.
-   */
+  /* A thrown, falling, cooling particle, the way the race game draws smoke
+   * and flame: camera-facing squares with their own velocity. [MESH-29] */
   MECHA_FX_EMBER     = 6,
   /*
    * A puff off a damaged machine. Rises and spreads rather than falling
@@ -186,15 +159,9 @@ typedef enum
 //-------------------------------------------------------------------------------------------------
 
 /*
- * How good the computer pilot is.
- *
- * The pilot has perfect information -- it is reading the same world struct
- * the simulation ticks -- so the levels are not degrees of knowledge but
- * degrees of human limitation put back in: how long it takes to react to a
- * shot, how sure it has to be that a shot will hit before it spends boost
- * dodging, how straight it shoots, and how readily it pulls the trigger.
- * ACE is the pilot with no limitations at all, which is what the mode
- * shipped with and what turned out to be unplayable as a default.
+ * How good the computer pilot is. The levels are degrees of human limitation
+ * put back in, not degrees of knowledge: the pilot reads the same world the
+ * simulation ticks. ACE has none of them. [AI-02]
  */
 typedef enum
 {
@@ -249,36 +216,14 @@ typedef struct
   const char *szClass;
 
   /*
-   * Silhouette multipliers.
-   *
-   * Everything the mesh builds is scaled off fHeight and fRadius, which made
-   * every machine on the roster the same shape at a different size -- the
-   * archetypes existed only in the stat block. These let a siege platform
-   * read as one from across the arena: heavy shoulders, thick limbs, an
-   * oversized gun in each hand and a head sunk into the chest, against an
-   * interceptor that is all narrow torso and thin legs. Zero means one, so a
-   * machine that never sets them still builds.
+   * Silhouette multipliers, so an archetype reads from across the arena
+   * rather than living only in the stat block. Zero means one. [TYPE-02]
    */
   /*
-   * How the machine carries its own weight.
-   *
-   * The race game's cars do not set their velocity, they drive it: a grip
-   * figure limits how fast sideways motion can be corrected, whatever is
-   * left over decays on its own, and steering authority falls off as speed
-   * rises. The same three ideas are what make a machine here feel like it
-   * has mass rather than like a cursor.
-   *
-   * fGrip is how much sideways velocity is killed per second -- high is
-   * crisp, low slides wide out of a turn. fDriveAccel is how hard it can
-   * push itself towards the speed it is asking for. fBrake is how quickly
-   * it sheds speed with nothing asked of it.
-   *
-   * All three are absolute, in metres per second squared, and deliberately
-   * not multiples of the machine's own walk speed. Scaling them that way
-   * normalises out the very thing they exist to express: it makes every
-   * machine take the same time to gather itself, so the interceptor -- being
-   * simply faster -- slides the furthest, and the siege platform comes out
-   * the nimbler of the two.
+   * How the machine carries its own weight: grip kills sideways velocity,
+   * drive pushes towards the speed asked for, brake sheds it with nothing
+   * asked. Absolute, in m/s^2, deliberately not multiples of walk speed.
+   * [TYPE-03]
    */
   float fGrip;
   float fDriveAccel;
@@ -313,19 +258,10 @@ typedef struct
   int   iLandTicks;         /* touchdown recovery */
 
   /*
-   * Wheels instead of legs.
-   *
-   * A wheeled machine is driven, not walked: it has no strafe, no boost and
-   * no jump, its speed is a single signed number along its own nose, and it
-   * steers rather than turning on the spot. Everything else about it -- the
-   * lock, the weapon slots, the armour, the stagger -- works exactly as it
-   * does for anything else on the roster, which is the point: it is another
-   * machine in the fight and not a different game.
-   *
-   * fWalkSpeed is its top speed, fDriveAccel the throttle, fBrake the
-   * brakes and fGrip what it sheds freewheeling. fSteerFloor is the speed
-   * below which the wheels do nothing at all, which is the race game's own
-   * rule and the reason a car has to keep moving to point at anything.
+   * Wheels instead of legs: no strafe, no boost, no jump, one signed speed
+   * along the nose. Everything else -- lock, slots, armour, stagger -- works
+   * as it does for the rest of the roster. fSteerFloor is the race game's
+   * own rule. [SIM-06]
    */
   bool  bWheeled;
   float fSteerFloor;
@@ -372,16 +308,8 @@ typedef struct
  */
 typedef struct
 {
-  /*
-   * The tilt that answers the stick, and the one piece of this that both
-   * kinds of machine have. Whiplash moves it *against* the steering (its
-   * iRollDynamicOffset, wound up at iRollResponseRate and clamped at
-   * iMaxRollOffset) so a car leans out of a corner the way a body loads
-   * its outside springs. Virtual-On's robots do the opposite and lean
-   * into the input, which reads as the machine answering faster than it
-   * really is. Two degrees either way: you would not name it if you saw
-   * it, and you would notice if it went.
-   */
+  /* The tilt that answers the stick: a car leans out of the corner, a robot
+   * into it. [TYPE-04] */
   int   iRollSteer;
   /*
    * Squat and dive. Whiplash's iPitchDynamicOffset: the nose comes up on
@@ -389,44 +317,22 @@ typedef struct
    * iPitchDecayRate, and unwinds to level at the recovery rates.
    */
   int   iPitchDrive;
-  /*
-   * The nose follows the velocity vector while there is no ground under
-   * it -- Whiplash derives its airborne nPitch from atan2 of the vertical
-   * against the horizontal speed, so a car launched off a crest points
-   * where it is actually going rather than where it was pointed.
-   */
+  /* Airborne, the nose follows the velocity vector, as Whiplash's nPitch
+   * does. [TYPE-04] */
   int   iAirPitch;
-  /*
-   * The ground under the wheels.
-   *
-   * A car sitting flat while it drives up the side of a hill is the one
-   * thing that gives away that the hill is a height field and not a
-   * surface. These are the pitch and roll of the slope the machine is
-   * actually standing on, sampled across its own footprint and eased
-   * rather than snapped, so it noses up a climb, drops over the crest and
-   * leans along a traverse.
-   */
+  /* Pitch and roll of the slope actually stood on, sampled across the
+   * footprint and eased rather than snapped. [SIM-10] */
   int   iContourPitch;
   int   iContourRoll;
-  /*
-   * What is left of the last landing. The two amplitudes decay while the
-   * phase runs, and what comes out is a damped cosine about both axes at
-   * once: Whiplash seeds them from the attitude the car was holding at
-   * the moment of contact, which is why a flat landing barely registers
-   * and one off a hillside rings.
-   */
+  /* What is left of the last landing: a damped cosine about both axes,
+   * seeded from the attitude held at contact. [TYPE-04] */
   float fWobblePitchAmp;
   float fWobbleRollAmp;
   int   iWobblePhase;
   int   iPitchWobble;
   int   iRollWobble;
-  /*
-   * The body shake. White noise on all three axes, resampled every tick,
-   * scaled by how hard the machine is working -- which in the race game is
-   * road speed multiplied by how wrecked the car is, divided by the
-   * engine's iStabilityFactor. A healthy car at speed barely blurs; a
-   * wrecked one shakes itself apart.
-   */
+  /* The body shake: white noise on all three axes, scaled by how hard the
+   * machine is working. [TYPE-04] */
   int   iPitchShake;
   int   iRollShake;
   int   iYawShake;
@@ -528,87 +434,43 @@ typedef struct
    * computer pilot rolls it per shot and the player leaves it at zero. */
   int   iAimError;
 
-  /*
-   * The tick the machine went down on.
-   *
-   * A machine on the floor is not a target: whatever put it there lands,
-   * and nothing after that does until it is back on its feet. But a volley
-   * is one shot, and a volley is several projectiles -- so the grace is
-   * the tick rather than the hit, and every pellet of the buckshot that
-   * floored it still counts.
-   */
+  /* The tick the machine went down on: the grace is the tick rather than
+   * the hit, so a whole volley still counts. [SIM-04] */
   int   iDownTick;
 
-  /*
-   * Noise for the smoke and flames a damaged machine throws.
-   *
-   * Private, for exactly the reason the body shake's is private: nothing
-   * cosmetic may reach into the sequence a fight is decided from. This was
-   * first written off the world's own generator and it took three extra
-   * draws a tick out of it, which was enough to send a rooftop fight
-   * somewhere else entirely -- the particles were not wrong, the fight
-   * simply was not the same fight any more.
-   */
+  /* Noise for the damage particles. Private, because nothing cosmetic may
+   * reach into the sequence a fight is decided from. [SIM-02] */
   tMechaRng spray;
 
   int   iRoundsWon;
   float fDamageDealt;
 
   /*
-   * How the body sits, as against where the machine is.
-   *
-   * Whiplash keeps a car's drawn attitude in several independent pieces
-   * and adds them up at the last moment (car.c, where the render pose is
-   * composed): a dynamic offset that answers the controls, a damped
-   * oscillation left over from the last landing, and a per-frame shake.
-   * The same split is kept here because the pieces genuinely do not
-   * interact -- a car can be squatting under power, still ringing from a
-   * landing and rattling from damage all at once, and each is computed
-   * without reference to the others.
-   *
-   * All of it is cosmetic, all of it is in the shared 14-bit circle, and
-   * none of it is ever read back by the simulation.
+   * How the body sits, as against where the machine is: independent pieces
+   * summed at the last moment, the way car.c composes a render pose. All
+   * cosmetic, all in the 14-bit circle, never read back. [TYPE-04]
    */
   tMechaAttitude attitude;
 
   /* Rendering-only smoothing; the simulation never reads these back. */
   float fLeanRoll;
   float fStepPhase;
-  /*
-   * How much of a fight the machine thinks it is in, 0 to 1. Held while it
-   * has a lock or is shooting, and let go of otherwise. Everything above the
-   * hips reads it: the stance settles and blades, and the guns come up.
-   * Nothing in the simulation reads it back, so a machine animating its way
-   * out of a fighting stance is never a machine that has stopped fighting.
-   */
+  /* How much of a fight the machine thinks it is in. Everything above the
+   * hips reads it; the simulation never does. [TYPE-05] */
   float fCombat;
-  /*
-   * Where the feet are pointed, which is not where the machine is pointed.
-   * The torso holds the aim while the legs follow the line of travel, so a
-   * mech strafing across your guns is walking sideways rather than sliding
-   * with its shoulders square -- the one piece of animation state the sim
-   * has to own, because it is smoothed over time and the mesh is built
-   * fresh every frame.
-   */
+  /* Where the feet point, which is not where the machine points. The one
+   * piece of animation state the sim owns. [TYPE-05] */
   int   iLegYaw;
   bool  bLegsBackward;      /* stepping backwards: the cycle runs in reverse */
-  /*
-   * What is left of a boost after the burst itself. The machine keeps the
-   * speed it had and steers badly for the length of it, which is what makes
-   * a dash a thing you commit to rather than a thing you switch off, and it
-   * is the window in which hitting a wall throws you off it.
-   */
+  /* What is left of a boost after the burst: the speed carries and the
+   * steering is feeble. [SIM-08] */
   int   iCoastTicks;
   /* Where the ground was under it last tick. The difference is how fast the
    * ground is rising, which on a surface that does not hold a machine down
    * is what throws it off the top of a slope. */
   float fGroundY;
-  /*
-   * Whether the stick has been let go since this dash began. A dash can be
-   * steered mid-flight -- release the direction you left on, tap another,
-   * and the burst turns -- and the release is what separates that from
-   * simply holding a direction down.
-   */
+  /* Whether the stick has been let go since this dash began: the release is
+   * what makes the crossing step a choice. [SIM-08] */
   bool  bDashStickFree;
 } tMechaMech;
 
@@ -729,14 +591,9 @@ typedef struct
   float    fKillY;
 
   /*
-   * A tabletop: a raised hexagonal mesa in the middle of the arena, sloped
-   * so it can be walked up. Unlike the hills it is not written into the
-   * grid -- it is answered analytically by the height query, so its edges
-   * stay hexagonal instead of being rounded off to whatever the nearest
-   * grid corners happen to be. Zero height is no tabletop.
-   *
-   * Both radii are apothems: centre to the middle of a face, which is the
-   * measurement a hexagon's own distance metric returns.
+   * A raised hexagonal mesa, answered by the height query rather than
+   * written into the grid so its edges stay hexagonal. Zero height is none.
+   * Both radii are apothems. [ARENA-10]
    */
   float    fMesaTop;
   float    fMesaBase;
@@ -748,12 +605,8 @@ typedef struct
    */
   float    fSkirt;
 
-  /*
-   * Ground drawn past the boundary, and scenery to put on it. The ground
-   * out there is not walkable -- the boundary still stops a machine at the
-   * arena's own edge -- it is there so the edge is a place the fight stops
-   * rather than a place the world does. Zero reach draws none of it.
-   */
+  /* Ground drawn past the boundary, and scenery for it. Not walkable; zero
+   * reach draws none of it. [ARENA-07] */
   float    fOuterReach;
   int      iBillboards;
 
@@ -766,16 +619,9 @@ typedef struct
   int      iTerrainCells;
 
   /*
-   * How well the ground holds a wheel, as one of the race game's own
-   * fourteen surface grades.
-   *
-   * Whiplash stores a grip level per track chunk -- and separately for the
-   * centre and each shoulder -- indexing a table that runs from a hundred
-   * at the top down to twenty at the bottom. In practice every track it
-   * ships is laid at the maximum and one bonus track is not, which is the
-   * convention followed here: zero is the best surface there is, so an
-   * arena that says nothing about grip gets the best of it, and only an
-   * arena that wants to be slippery has to say so.
+   * How well the ground holds a wheel, as one of the race game's fourteen
+   * grades. Zero is the best, so an arena that says nothing gets the best of
+   * it and only a slippery one has to say so. [ARENA-13]
    */
   uint8_t  byGripLevel;
 } tMechaArena;

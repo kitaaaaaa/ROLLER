@@ -18,7 +18,12 @@
 #include "sound.h"
 
 #include <fcntl.h>
+#ifdef IS_WINDOWS
+#include <io.h>
+#define close _close
+#else
 #include <unistd.h>
+#endif
 
 #ifndef O_BINARY
 #define O_BINARY 0

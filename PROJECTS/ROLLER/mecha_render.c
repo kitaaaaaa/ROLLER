@@ -16,7 +16,12 @@
 #include "scene_render.h"
 
 #include <fcntl.h>
+#ifdef IS_WINDOWS
+#include <io.h>
+#define close _close
+#else
 #include <unistd.h>
+#endif
 
 /* The retail sources open in binary mode explicitly; POSIX has no such flag
  * because it never mangles the bytes. */

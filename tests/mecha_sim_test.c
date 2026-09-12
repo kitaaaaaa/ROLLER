@@ -3896,6 +3896,73 @@ static int test_a_high_cancel_lands_on_the_roof(void)
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * An empty gauge takes the thrust, not the legs: a machine with nothing
+ * left still jumps and still cancels out of the jump. What it loses is the
+ * hover and the dash.
+ */
+static int test_an_empty_gauge_still_jumps_and_cancels(void)
+{
+    tMechaWorld world;
+    tMechaInput aInputs[2];
+    int iLegs = -1;
+    float fPeak;
+    int i;
+
+    for (i = 0; i < mecha_def_count(); i++)
+        if (!mecha_def_get(i)->bWheeled) {
+            iLegs = i;
+            break;
+        }
+    CHECK(iLegs >= 0);
+    start_duel(&world, 0, iLegs, iLegs, 0x51EEDu, 1);
+    memset(aInputs, 0, sizeof(aInputs));
+
+    /* Flat empty and locked out, which is the state the cooldown puts a
+     * machine in the moment it spends the last of the gauge. */
+    world.aMechs[0].iBoost = 0;
+    world.aMechs[0].bBoostLocked = true;
+
+    aInputs[0].bJump = true;
+    mecha_sim_tick(&world, aInputs, 2);
+    printf("   empty gauge: jump leaves move=%d, boost=%d\n",
+           world.aMechs[0].byMove, world.aMechs[0].iBoost);
+    CHECK(world.aMechs[0].byMove == MECHA_MOVE_JUMP);
+    /* And it did not pay for a jump it had no gauge to pay with, which
+     * would have eaten the recovery it needs to unlock. */
+    CHECK(world.aMechs[0].iBoost == 0);
+
+    /* Up it goes, and holding jump buys nothing: there is no thrust. */
+    for (i = 0; i < 12; i++)
+        mecha_sim_tick(&world, aInputs, 2);
+    fPeak = world.aMechs[0].fY;
+    CHECK(fPeak > 0.0f);
+    CHECK(world.aMechs[0].iBoost == 0);
+
+    /* The cancel takes, which is the thing an empty machine could not reach
+     * at all while the takeoff was gated on the gauge. */
+    aInputs[0].bJump = false;
+    aInputs[0].bGuard = true;
+    mecha_sim_tick(&world, aInputs, 2);
+    printf("   empty gauge: guard in the air gives move=%d at %.1f m\n",
+           world.aMechs[0].byMove, world.aMechs[0].fY / MECHA_METRE);
+    CHECK(world.aMechs[0].byMove == MECHA_MOVE_CANCEL);
+
+    /* A dash, by contrast, still needs thrust and still gets none. */
+    memset(aInputs, 0, sizeof(aInputs));
+    start_duel(&world, 0, iLegs, iLegs, 0x51EEDu, 1);
+    world.aMechs[0].iBoost = 0;
+    world.aMechs[0].bBoostLocked = true;
+    aInputs[0].iMoveZ = 100;
+    aInputs[0].bDash = true;
+    for (i = 0; i < 4; i++)
+        mecha_sim_tick(&world, aInputs, 2);
+    CHECK(world.aMechs[0].byMove != MECHA_MOVE_DASH);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static int test_a_downed_machine_is_not_a_target(void)
 {
     tMechaWorld world;
@@ -6268,6 +6335,8 @@ int main(void)
           test_the_ground_grips_unless_told_otherwise },
         { "a high cancel lands on the roof",
           test_a_high_cancel_lands_on_the_roof },
+        { "an empty gauge still jumps and cancels",
+          test_an_empty_gauge_still_jumps_and_cancels },
         { "a downed machine is not a target",
           test_a_downed_machine_is_not_a_target },
         { "damaged machines smoke and burn",

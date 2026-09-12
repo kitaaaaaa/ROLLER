@@ -1627,8 +1627,16 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
     bool bJumpPressed = pInput->bJump && !pMech->bJumpHeld;
     bool bDashPressed = pInput->bDash && !pMech->bDashHeld;
 
-    if (bJumpPressed && mecha_boost_available(pMech)) {
-      mecha_spend_boost(pMech, pDef->iBoostJumpCost * MECHA_BOOST_SCALE);
+    if (bJumpPressed) {
+      /*
+       * Leaving the ground is the legs' work, so an empty gauge does not
+       * stop it -- what an empty machine loses is the thrust to hover with
+       * and to dash with, both of which are gated below. Charged only when
+       * there is something to charge, or a locked machine would spend its
+       * own recovery mashing jump. [SIM-01]
+       */
+      if (mecha_boost_available(pMech))
+        mecha_spend_boost(pMech, pDef->iBoostJumpCost * MECHA_BOOST_SCALE);
       pMech->fVelY = pDef->fJumpVelocity;
       pMech->byMove = MECHA_MOVE_JUMP;
       pMech->iStateTicks = 0;

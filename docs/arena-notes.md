@@ -661,3 +661,30 @@ it.
 Slots 20 and up are used. The engine's texture-count table only ever speaks
 for 0, 17, 18 and 19, so the rest are free for the arena to take, and the
 count is set alongside the upload.
+
+---
+
+## SIM-01 — an empty gauge takes the thrust, not the legs
+
+The gauge gates four things. Only three of them are thrust:
+
+| action | needs gauge |
+|---|---|
+| jump takeoff | no |
+| hover (holding jump) | yes |
+| dash, air dash | yes |
+| jump cancel | no |
+
+Leaving the ground is the legs' work, so an empty machine still jumps and
+still cancels out of the jump. What it loses is the thrust to hang in the
+air with and to dash with.
+
+The takeoff used to be gated on the gauge, which meant an empty machine
+could not get airborne at all — and so could not jump-cancel either, since
+the cancel needs a jump to cancel. The lockout cooldown on spending the last
+of the gauge is deliberate and stays; what it should cost is hover and dash,
+not the ability to leave the ground.
+
+The cost is charged only when there is gauge to charge. Otherwise a locked
+machine mashing jump would spend the recovery it needs in order to unlock,
+and never climb back out.

@@ -1,13 +1,18 @@
 # ROLLER-X
 
-An experimental build of https://github.com/FatalDecomp/ROLLER created with Claude
+An experimental build of https://github.com/FatalDecomp/ROLLER created with
+Claude
 
 ## Arena mode
-ROLLER-X ships an arena mode: a 3D mecha duel in the software
-rasteriser, reached with `--arena`. It is a clone of a certain mid-90s giant robot fighting game built on the engine's
-renderer and math rather than a track, and it needs no extra assets -- the
-machines, projectiles, arenas and the HUD font are all generated at runtime and all textures come from Whiplash's FATDATA. See
-[docs/arena-mode.md](./docs/arena-mode.md) for the controls and the layout.
+
+ROLLER-X ships an arena mode: a 3D mecha duel in the software rasteriser,
+reached with `--arena`. It is a clone of a certain mid-90s giant robot fighting
+game built on the engine's renderer and math rather than a track, and it needs
+no extra assets -- the machines, projectiles, arenas and the HUD font are all
+generated at runtime and all textures come from Whiplash's FATDATA. See
+[docs/arena-mode.md](./docs/arena-mode.md) for the controls and the layout. It
+opens on a briefing screen that lists the controls, sets up the match and has
+the way back out to the race game.
 
 ## 
 
@@ -129,12 +134,3 @@ developer workflow (blessing intentional pixel changes, troubleshooting, etc.)
 and
 [`docs/adr/0001-rendering-snapshot-tests.md`](docs/adr/0001-rendering-snapshot-tests.md)
 for the policy decisions.
-
-[ci-shd]: https://img.shields.io/github/actions/workflow/status/FatalDecomp/ROLLER/ci.yml?branch=master&style=for-the-badge&logo=github&label=CI&labelColor=black
-[ci-url]: https://github.com/FatalDecomp/ROLLER/blob/master/.github/workflows/ci.yml
-[dl-shd]: https://img.shields.io/github/v/release/FatalDecomp/ROLLER?include_prereleases&style=for-the-badge&logo=github&label=Download&labelColor=black&color=blue
-[dl-url]: https://github.com/FatalDecomp/ROLLER/releases/latest
-[lc-shd]: https://img.shields.io/github/license/FatalDecomp/ROLLER.svg?style=for-the-badge&labelColor=black
-[lc-url]: https://github.com/FatalDecomp/ROLLER/blob/master/LICENSE.md
-[web-shd]: https://img.shields.io/badge/Play-In%20Browser-e60026?style=for-the-badge&logo=webassembly&logoColor=white&labelColor=black
-[web-url]: https://play.fatal.racing/

@@ -44,6 +44,14 @@ int mecha_angle_wrap(int iAngle)
 
 //-------------------------------------------------------------------------------------------------
 
+int mecha_angle_signed(int iAngle)
+{
+  iAngle = mecha_angle_wrap(iAngle);
+  return iAngle > MECHA_ANGLE_HALF ? iAngle - MECHA_ANGLE_FULL : iAngle;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 int mecha_angle_delta(int iFrom, int iTo)
 {
   int iDelta = (iTo - iFrom) & MECHA_ANGLE_MASK;
@@ -149,6 +157,19 @@ float mecha_approachf(float fValue, float fTarget, float fMaxStep)
   if (fDelta < -fMaxStep)
     return fValue - fMaxStep;
   return fTarget;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+int mecha_stepi(int iValue, int iTarget, int iMaxStep)
+{
+  if (iMaxStep < 0)
+    iMaxStep = -iMaxStep;
+  if (iValue < iTarget)
+    return iValue + iMaxStep > iTarget ? iTarget : iValue + iMaxStep;
+  if (iValue > iTarget)
+    return iValue - iMaxStep < iTarget ? iTarget : iValue - iMaxStep;
+  return iValue;
 }
 
 //-------------------------------------------------------------------------------------------------

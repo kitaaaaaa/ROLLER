@@ -5,7 +5,10 @@
 #include "mecha_defs.h"
 
 #include <math.h>
+
 #include <string.h>
+
+static int mecha_car_throttle(const tMechaInput *pInput, bool bCanAct);
 
 //-------------------------------------------------------------------------------------------------
 
@@ -41,9 +44,10 @@ eMechaStance mecha_mech_stance(const tMechaMech *pMech)
     return MECHA_STANCE_STAND;
 
   switch (pMech->byMove) {
-  case MECHA_MOVE_CROUCH: return MECHA_STANCE_CROUCH;
+  case MECHA_MOVE_GUARD:  return MECHA_STANCE_GUARD;
   case MECHA_MOVE_DASH:   return MECHA_STANCE_DASH;
-  case MECHA_MOVE_JUMP:   return MECHA_STANCE_JUMP;
+  case MECHA_MOVE_JUMP:
+  case MECHA_MOVE_CANCEL: return MECHA_STANCE_JUMP;
   default:                return MECHA_STANCE_STAND;
   }
 }
@@ -63,6 +67,9 @@ static bool mecha_can_act(const tMechaMech *pMech)
   case MECHA_MOVE_DOWN:
   case MECHA_MOVE_RISE:
   case MECHA_MOVE_LAND:
+  /* The drop is committed once it starts, the same as the landing it ends
+   * in. Cancelling is a decision, not a free reposition. */
+  case MECHA_MOVE_CANCEL:
     return false;
   default:
     return true;
@@ -226,14 +233,17 @@ int mecha_sim_nearest_enemy(const tMechaWorld *pWorld, int iMechIdx)
 
 //-------------------------------------------------------------------------------------------------
 
-void mecha_sim_spawn_effect(tMechaWorld *pWorld, uint8_t byKind,
-                            float fX, float fY, float fZ,
-                            float fScale, uint8_t byPalette, int iLife)
+/* Defined with the weapon code further down, needed by the burst above it. */
+static void mecha_direction_from_angles(int iYaw, int iPitch,
+                                        float *pfX, float *pfY, float *pfZ);
+
+/* First free slot, or NULL when the table is full. */
+static tMechaEffect *mecha_alloc_effect(tMechaWorld *pWorld, uint8_t byKind,
+                                        float fX, float fY, float fZ,
+                                        float fScale, uint8_t byPalette,
+                                        int iLife)
 {
   int i;
-
-  if (!pWorld || iLife <= 0)
-    return;
 
   for (i = 0; i < MECHA_MAX_EFFECTS; i++) {
     tMechaEffect *pFx = &pWorld->aEffects[i];
@@ -249,11 +259,179 @@ void mecha_sim_spawn_effect(tMechaWorld *pWorld, uint8_t byKind,
     pFx->fZ = fZ;
     pFx->fScale = fScale;
     pFx->iLife = iLife;
-    return;
+    return pFx;
   }
+  return NULL;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * A burst of debris thrown out of a point.
+ *
+ * Directions come off the shared RNG so a replay throws the same sparks the
+ * same way. Speed is jittered per particle rather than fixed, because a ring
+ * of debris all travelling at one speed reads as a expanding shell, which is
+ * the exact thing the single billboard already looked like.
+ */
+static void mecha_spawn_burst(tMechaWorld *pWorld, float fX, float fY,
+                              float fZ, float fSpeed, float fScale,
+                              int iCount, int iLife)
+{
+  int i;
+
+  for (i = 0; i < iCount; i++) {
+    tMechaEffect *pFx;
+    int iYaw = mecha_rng_range(&pWorld->rng, MECHA_ANGLE_FULL);
+    /* Biased upwards: debris that only ever went sideways looked like a
+     * puddle spreading. */
+    int iPitch = mecha_rng_range(&pWorld->rng, MECHA_ANGLE_QUARTER)
+                 - MECHA_ANGLE_QUARTER / 5;
+    float fThis = fSpeed * (0.45f + 0.55f * mecha_rng_unit(&pWorld->rng));
+    float fDirX;
+    float fDirY;
+    float fDirZ;
+
+    pFx = mecha_alloc_effect(pWorld, MECHA_FX_EMBER, fX, fY, fZ,
+                             fScale * (0.6f + 0.8f * mecha_rng_unit(&pWorld->rng)),
+                             0, iLife);
+    if (!pFx)
+      return;
+    mecha_direction_from_angles(iYaw, iPitch, &fDirX, &fDirY, &fDirZ);
+    pFx->fVelX = fDirX * fThis;
+    pFx->fVelY = fDirY * fThis;
+    pFx->fVelZ = fDirZ * fThis;
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * Wearing the damage, in the shape of the race game's dospray(): the worse
+ * the machine, the more often a particle lands. Two tiers rather than one.
+ * Every draw comes off the machine's own RNG, never the world's. [SIM-02]
+ */
+static void mecha_emit_damage(tMechaWorld *pWorld, int iMechIdx)
+{
+  tMechaMech *pMech = &pWorld->aMechs[iMechIdx];
+  const tMechaMechDef *pDef = mecha_mech_def(pMech);
+  float fHealth;
+  float fX;
+  float fY;
+  float fZ;
+  int iYaw;
+
+  if (!mecha_mech_alive(pMech) || pDef->fArmour <= 0.0f)
+    return;
+  /* Staggered by machine so a pair of wrecks do not both throw on the
+   * same tick and then leave the table idle for four. */
+  if ((pWorld->iTick + iMechIdx) % MECHA_DAMAGE_INTERVAL != 0)
+    return;
+  fHealth = mecha_clampf(pMech->fArmour / pDef->fArmour, 0.0f, 1.0f);
+  if (fHealth >= MECHA_DAMAGE_SMOKE)
+    return;
+  /* The race game's own gate, which is a chance per frame rather than a
+   * timer: rand() * factor < k. Scaled here to a unit draw. */
+  if (fHealth > 0.0f
+      && mecha_rng_unit(&pMech->spray) * fHealth > MECHA_DAMAGE_RATE)
+    return;
+
+  /* Somewhere round the hull, not out of one hole. */
+  iYaw = mecha_rng_range(&pMech->spray, MECHA_ANGLE_FULL);
+  fX = pMech->fX + mecha_sin(iYaw) * pDef->fRadius * 0.55f;
+  fZ = pMech->fZ + mecha_cos(iYaw) * pDef->fRadius * 0.55f;
+  fY = pMech->fY + pDef->fHeight * MECHA_DAMAGE_HEIGHT;
+
+  {
+    tMechaEffect *pFx =
+      mecha_alloc_effect(pWorld, MECHA_FX_SMOKE, fX, fY, fZ,
+                         pDef->fRadius * (0.30f + 0.25f
+                                          * mecha_rng_unit(&pMech->spray)),
+                         0, MECHA_DAMAGE_SMOKE_LIFE);
+
+    if (pFx) {
+      /* Rising, and carried by whatever the machine is doing. */
+      pFx->fVelX = pMech->fVelX * 0.35f;
+      pFx->fVelY = MECHA_DAMAGE_RISE * (0.6f + 0.8f
+                                        * mecha_rng_unit(&pMech->spray));
+      pFx->fVelZ = pMech->fVelZ * 0.35f;
+    }
+  }
+
+  if (fHealth < MECHA_DAMAGE_FIRE) {
+    /* And alight. The ember is the race game's fire-into-smoke particle,
+     * which is what a machine burning from the inside looks like. */
+    tMechaEffect *pFx =
+      mecha_alloc_effect(pWorld, MECHA_FX_EMBER, fX,
+                         fY - pDef->fHeight * 0.12f, fZ,
+                         pDef->fRadius * (0.24f + 0.20f
+                                          * mecha_rng_unit(&pMech->spray)),
+                         0, MECHA_DAMAGE_FIRE_LIFE);
+
+    if (pFx) {
+      pFx->fVelX = pMech->fVelX * 0.5f;
+      pFx->fVelY = MECHA_DAMAGE_RISE * 0.5f;
+      pFx->fVelZ = pMech->fVelZ * 0.5f;
+    }
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+
+void mecha_sim_spawn_effect(tMechaWorld *pWorld, uint8_t byKind,
+                            float fX, float fY, float fZ,
+                            float fScale, uint8_t byPalette, int iLife)
+{
+  if (!pWorld || iLife <= 0)
+    return;
+
+  if (mecha_alloc_effect(pWorld, byKind, fX, fY, fZ, fScale, byPalette,
+                         iLife))
+    return;
   /* The effect table is cosmetic. When it is full the oldest survivors keep
    * playing and the new puff is simply dropped, which is invisible in
    * practice and keeps the simulation allocation-free. */
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * How much of a hit a guarding machine keeps out: melee only, and only in
+ * the stance. Returns 1.0 for everything else, so callers can multiply
+ * unconditionally. [SIM-03]
+ */
+static void mecha_guard_mitigation(const tMechaMech *pVictim, uint8_t byKind,
+                                   float *pfDamageScale,
+                                   float *pfStaggerScale)
+{
+  *pfDamageScale = 1.0f;
+  *pfStaggerScale = 1.0f;
+  if (!pVictim || byKind != MECHA_PROJ_MELEE)
+    return;
+  if (pVictim->byMove != MECHA_MOVE_GUARD)
+    return;
+  *pfDamageScale = MECHA_GUARD_MELEE_DAMAGE;
+  *pfStaggerScale = MECHA_GUARD_MELEE_STAGGER;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * Whether anything can land on this machine: destroyed, invulnerable through
+ * a rise, or already floored. The reprieve starts the tick after the
+ * knockdown, so one volley still resolves in full. [SIM-04]
+ */
+static bool mecha_mech_hittable(const tMechaWorld *pWorld, int iMechIdx)
+{
+  const tMechaMech *pMech;
+
+  if (!pWorld || iMechIdx < 0 || iMechIdx >= MECHA_MAX_MECHS)
+    return false;
+  pMech = &pWorld->aMechs[iMechIdx];
+  if (!mecha_mech_alive(pMech) || pMech->iInvulnTicks > 0)
+    return false;
+  return pMech->byMove != MECHA_MOVE_DOWN
+         || pWorld->iTick == pMech->iDownTick;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -269,7 +447,7 @@ void mecha_sim_damage(tMechaWorld *pWorld, int iVictimIdx, int iAttackerIdx,
   if (!pWorld || iVictimIdx < 0 || iVictimIdx >= MECHA_MAX_MECHS)
     return;
   pVictim = &pWorld->aMechs[iVictimIdx];
-  if (!mecha_mech_alive(pVictim) || pVictim->iInvulnTicks > 0)
+  if (!mecha_mech_hittable(pWorld, iVictimIdx))
     return;
 
   pDef = mecha_mech_def(pVictim);
@@ -286,6 +464,18 @@ void mecha_sim_damage(tMechaWorld *pWorld, int iVictimIdx, int iAttackerIdx,
   pVictim->fVelZ += fPushZ / fMass;
   pVictim->fStagger += fStagger / fMass;
 
+  /*
+   * And it shudders. The race game shakes a car by road speed, which a
+   * walking machine has no equivalent of; what it does have is the moment
+   * something hits it, so that is what feeds the same noise here. Against
+   * mass, like everything else on this line: the same shell rattles a
+   * light machine and barely disturbs a heavy one.
+   */
+  pVictim->attitude.fHitShake =
+    mecha_clampf(pVictim->attitude.fHitShake
+                   + fDamage * MECHA_SHAKE_HIT_PER_HP / fMass,
+                 0.0f, 1.0f);
+
   if (pVictim->fArmour <= 0.0f) {
     pVictim->fArmour = 0.0f;
     pVictim->byMove = MECHA_MOVE_DESTROYED;
@@ -293,16 +483,30 @@ void mecha_sim_damage(tMechaWorld *pWorld, int iVictimIdx, int iAttackerIdx,
     pVictim->iStunTicks = 0;
     pVictim->fVelX = 0.0f;
     pVictim->fVelZ = 0.0f;
+    /* A quarter of the mech's height, because the effect's scale is a
+     * billboard half-extent: the blast is that much again on every side, so
+     * this already paints a square about half as wide as the machine is
+     * tall. Passing a figure near the height itself -- as this did -- puts a
+     * flat opaque slab wider than the mech across the middle of the screen
+     * on the one frame the player most needs to see what happened. */
     mecha_sim_spawn_effect(pWorld, MECHA_FX_EXPLOSION, pVictim->fX,
                            pVictim->fY + pDef->fHeight * 0.5f, pVictim->fZ,
-                           pDef->fHeight * 0.7f, pDef->abyPalette[3],
-                           MECHA_SEC(1.2f));
+                           pDef->fHeight * 0.25f, pDef->abyPalette[3],
+                           MECHA_SEC(0.9f));
+    /* The flash alone was one quad appearing and vanishing. The debris is
+     * what makes a kill read as a machine coming apart. */
+    mecha_spawn_burst(pWorld, pVictim->fX,
+                      pVictim->fY + pDef->fHeight * 0.5f, pVictim->fZ,
+                      MECHA_MPS(34.0f), pDef->fRadius * 0.16f, 14,
+                      MECHA_SEC(1.5f));
     return;
   }
 
   if (pVictim->fStagger >= MECHA_STAGGER_DOWN) {
     pVictim->fStagger = 0.0f;
     pVictim->byMove = MECHA_MOVE_DOWN;
+    /* The rest of this tick can still land on it; nothing after can. */
+    pVictim->iDownTick = pWorld->iTick;
     pVictim->iStateTicks = 0;
     pVictim->iStunTicks = MECHA_DOWN_TICKS;
     pVictim->iRecovery = 0;
@@ -334,6 +538,8 @@ static void mecha_sim_explode(tMechaWorld *pWorld, int iOwnerIdx,
    * the blast, which reads as a wall rather than a burst. */
   mecha_sim_spawn_effect(pWorld, MECHA_FX_EXPLOSION, fX, fY, fZ,
                          fRadius * 0.5f, byPalette, MECHA_SEC(0.5f));
+  mecha_spawn_burst(pWorld, fX, fY, fZ, MECHA_MPS(22.0f), fRadius * 0.06f,
+                    7, MECHA_SEC(0.8f));
 
   for (i = 0; i < MECHA_MAX_MECHS; i++) {
     tMechaMech *pMech = &pWorld->aMechs[i];
@@ -412,6 +618,68 @@ static void mecha_update_target(tMechaWorld *pWorld, int iMechIdx,
     }
   }
   pMech->iTargetIdx = mecha_sim_nearest_enemy(pWorld, iMechIdx);
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * Whether the machine is actually tracking whoever the reticle is on.
+ * mecha_update_target picks who; this decides whether the lock is live.
+ * Reads byMove as movement left it last tick, deliberately. [SIM-05]
+ */
+static void mecha_update_lock(tMechaWorld *pWorld, int iMechIdx)
+{
+  tMechaMech *pMech = &pWorld->aMechs[iMechIdx];
+  const tMechaMech *pTarget;
+  int iBearing;
+  int iOff;
+
+  if (!mecha_mech_alive(pMech)
+      || pMech->iTargetIdx < 0 || pMech->iTargetIdx >= MECHA_MAX_MECHS) {
+    pMech->byLock = MECHA_LOCK_NONE;
+    pMech->iLockSlipTicks = 0;
+    return;
+  }
+  pTarget = &pWorld->aMechs[pMech->iTargetIdx];
+  if (!mecha_mech_alive(pTarget)) {
+    pMech->byLock = MECHA_LOCK_NONE;
+    pMech->iLockSlipTicks = 0;
+    return;
+  }
+
+  /* Off the ground or riding a boost, the lock comes on from any angle. */
+  if (pMech->byMove == MECHA_MOVE_DASH || pMech->byMove == MECHA_MOVE_JUMP
+      || pMech->byMove == MECHA_MOVE_CANCEL) {
+    pMech->byLock = MECHA_LOCK_HELD;
+    pMech->iLockSlipTicks = 0;
+    return;
+  }
+
+  iBearing = mecha_atan2_angle(pTarget->fX - pMech->fX,
+                               pTarget->fZ - pMech->fZ);
+  iOff = mecha_angle_delta(pMech->iFacing, iBearing);
+  if (iOff < 0)
+    iOff = -iOff;
+
+  if (pMech->byLock == MECHA_LOCK_NONE) {
+    /* Broken locks do not drift back on. Line the machine up, or boost. */
+    if (iOff <= MECHA_LOCK_REACQUIRE_CONE) {
+      pMech->byLock = MECHA_LOCK_HELD;
+      pMech->iLockSlipTicks = 0;
+    }
+    return;
+  }
+
+  if (iOff <= MECHA_LOCK_CONE) {
+    pMech->byLock = MECHA_LOCK_HELD;
+    pMech->iLockSlipTicks = 0;
+    return;
+  }
+
+  /* The grace period stops a lock dying to one frame of overshoot. */
+  pMech->iLockSlipTicks++;
+  pMech->byLock = pMech->iLockSlipTicks >= MECHA_LOCK_BREAK_TICKS
+                    ? MECHA_LOCK_NONE : MECHA_LOCK_SLIPPING;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -501,6 +769,7 @@ static float mecha_stick_direction(const tMechaMech *pMech,
   float fForwardZ;
   float fRightX;
   float fRightZ;
+  int   iRef;
 
   *pfDirX = 0.0f;
   *pfDirZ = 0.0f;
@@ -512,14 +781,40 @@ static float mecha_stick_direction(const tMechaMech *pMech,
     fMag = 1.0f;
   }
 
-  fForwardX = mecha_sin(pMech->iFacing);
-  fForwardZ = mecha_cos(pMech->iFacing);
+  /*
+   * Read against the heading the player last chose, not against the one the
+   * machine is being swung to. Firing off a boost turns the body onto its
+   * lock, and the stick is body-relative -- so a machine crossing in front
+   * of its enemy and pulling a trigger had "left" quietly become a
+   * different direction in the world and took its whole burst round with
+   * it. The body turns to aim; the travel is the player's. [SIM-21]
+   */
+  iRef = pMech->iRecentreTicks > 0 ? pMech->iStickYaw : pMech->iFacing;
+  fForwardX = mecha_sin(iRef);
+  fForwardZ = mecha_cos(iRef);
   fRightX = fForwardZ;
   fRightZ = -fForwardX;
 
   *pfDirX = fForwardX * fZ + fRightX * fX;
   *pfDirZ = fForwardZ * fZ + fRightZ * fX;
   return fMag;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/* Flat distance to whatever this mech has locked, or a very large number
+ * when it has nothing. */
+static float mecha_target_range(const tMechaWorld *pWorld, int iMechIdx)
+{
+  const tMechaMech *pMech = &pWorld->aMechs[iMechIdx];
+  const tMechaMech *pTarget;
+
+  if (pMech->iTargetIdx < 0 || pMech->iTargetIdx >= MECHA_MAX_MECHS)
+    return 1e9f;
+  pTarget = &pWorld->aMechs[pMech->iTargetIdx];
+  if (!mecha_mech_alive(pTarget))
+    return 1e9f;
+  return mecha_length2(pTarget->fX - pMech->fX, pTarget->fZ - pMech->fZ);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -532,31 +827,184 @@ static void mecha_update_facing(tMechaWorld *pWorld, int iMechIdx,
   int iMaxStep = (int)(pDef->fTurnRate * MECHA_DT);
   int iBearing;
   int iElevation;
+  bool bFreeTurn = pMech->iFreeTurnTicks > 0;
 
   if (iMaxStep < 1)
     iMaxStep = 1;
 
-  if (mecha_aim_at_target(pWorld, iMechIdx, &iBearing, &iElevation)) {
-    /* The lock does the aiming. This is the whole reason the mode plays with
-     * two sticks and no mouse: the mech keeps its shoulders square to the
-     * enemy while the sticks decide where the feet go. */
-    pMech->iFacing = mecha_angle_approach(pMech->iFacing, iBearing, iMaxStep);
+  /* The window a jump cancel's landing opens. It lifts the turn rate off
+   * both the lock and the sticks, and it works through the landing recovery
+   * that otherwise refuses input -- coming down facing the other way is the
+   * entire reason to have cancelled. */
+  if (bFreeTurn) {
+    iMaxStep *= MECHA_CANCEL_TURN_SCALE;
+    pMech->iFreeTurnTicks--;
+  }
+
+  if (pMech->byLock == MECHA_LOCK_HELD
+      && mecha_aim_at_target(pWorld, iMechIdx, &iBearing, &iElevation)) {
+    /* Elevation comes off the lock at any range. It tilts the guns rather
+     * than the machine, so it costs the player nothing. */
     pMech->iAimPitch = mecha_clampi(iElevation >= MECHA_ANGLE_HALF
                                       ? iElevation - MECHA_ANGLE_FULL
                                       : iElevation,
                                     -MECHA_AIM_PITCH_LIMIT,
                                     MECHA_AIM_PITCH_LIMIT);
+
+    /* The shoulders only follow at knife range, where an exchange is too
+     * fast to aim by hand. Further out the machine points where it is
+     * pointed -- which is what makes holding a lock at range a thing the
+     * player does rather than a thing that happens. */
+    if (pMech->iRecentreTicks > 0)
+      iMaxStep *= MECHA_RECENTRE_SCALE;
+
+    if (!pDef->bWheeled
+        && (mecha_target_range(pWorld, iMechIdx) <= MECHA_CLOSE_QUARTERS
+            || pMech->iRecentreTicks > 0)) {
+      /*
+       * And never on wheels, at any range. A car points where it is
+       * driving; that is the whole of its handling and the whole of its
+       * aiming, and an auto-turn would be the machine steering itself.
+       * Holding a lock in one means driving at somebody and keeping them
+       * in the middle of the screen.
+       */
+      pMech->iFacing = mecha_angle_approach(pMech->iFacing, iBearing,
+                                            iMaxStep);
+    }
   } else {
     pMech->iAimPitch = 0;
   }
 
-  /* Manual turn rides on top, for shaking a lock loose or for lining up a
-   * shot when nothing is locked at all. */
-  if (bCanAct && pInput->iTurn != 0) {
+  /*
+   * The recentre runs down whether or not there is a lock to follow -- a
+   * jump sets it and a machine with nothing locked would otherwise carry it
+   * for the rest of the round. While it runs, the heading the stick is read
+   * against is held where the player left it. [SIM-21]
+   */
+  if (pMech->iRecentreTicks > 0)
+    pMech->iRecentreTicks--;
+  else
+    pMech->iStickYaw = pMech->iFacing;
+
+  /* Manual turn rides on top, for shaking a lock loose or for lining one up
+   * again once it has gone. */
+  if (pDef->bWheeled) {
+    /*
+     * Steering, not turning: the race game's own lock, widest just off a
+     * standstill and gone entirely below its steering floor. Reads the stick
+     * as well as the turn axis, since a car has no strafe. [SIM-06]
+     */
+    float fSpeed = mecha_length2(pMech->fVelX, pMech->fVelZ);
+    float fAlong = pMech->fVelX * mecha_sin(pMech->iFacing)
+                   + pMech->fVelZ * mecha_cos(pMech->iFacing);
+    int iSteer = pInput->iTurn + pInput->iMoveX;
+    int iThrottle = mecha_car_throttle(pInput, bCanAct);
+
+    if (bCanAct && iSteer != 0 && fSpeed >= pDef->fSteerFloor
+        && pDef->fWalkSpeed > 0.0f) {
+      float fSlack = 1.0f - mecha_clampf(fSpeed / pDef->fWalkSpeed, 0.0f,
+                                         1.0f);
+      float fLock = 1.0f + MECHA_CAR_STEER_GAIN * fSlack;
+      int iStep = (int)(pDef->fTurnRate * MECHA_DT * fLock
+                        * (float)mecha_clampi(iSteer, -100, 100) / 100.0f);
+
+      /*
+       * Backwards the wheels point the other way -- but only in reverse, not
+       * merely sliding. Judged on the car's own reverse speed, because a
+       * drift swings the velocity past a quarter turn off the nose and a dot
+       * product alone calls that reversing. [SIM-06]
+       */
+      /*
+       * Backing up under power, which is all three of: the lever down, the
+       * car going backwards, and slow enough that it is reverse rather than
+       * a slide. Speed alone flipped the steering on any backwards drift --
+       * which is most of a handbrake turn -- so the wheels swapped hands
+       * halfway through and the car fought itself. The throttle alone is no
+       * better: braking and reversing are the same lever, and a brake at
+       * speed is not reverse. [SIM-06]
+       */
+      if (iThrottle < 0 && fAlong < 0.0f
+          && fSpeed <= pDef->fWalkSpeed * MECHA_CAR_REVERSE)
+        iStep = -iStep;
+      pMech->iFacing = mecha_angle_wrap(pMech->iFacing + iStep);
+    }
+  } else if ((bCanAct || bFreeTurn) && pInput->iTurn != 0) {
     int iManual = (int)(pDef->fTurnRate * MECHA_DT
                         * (float)pInput->iTurn / 100.0f);
+
+    if (bFreeTurn)
+      iManual *= MECHA_CANCEL_TURN_SCALE;
     pMech->iFacing = mecha_angle_wrap(pMech->iFacing + iManual);
   }
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * Hitting something solid. The push the arena applied to get the machine out
+ * is the surface normal, which is all a bounce needs. Walking pace leans;
+ * a boost comes off it and ends the burst. [SIM-07]
+ */
+static void mecha_wall_impact(tMechaWorld *pWorld, int iMechIdx,
+                              float fPushX, float fPushZ, bool bAirborne)
+{
+  tMechaMech *pMech = &pWorld->aMechs[iMechIdx];
+  const tMechaMechDef *pDef = mecha_mech_def(pMech);
+  float fLength = mecha_length2(fPushX, fPushZ);
+  float fInto;
+  float fSpeed;
+  bool bFast;
+
+  if (fLength < 1e-3f)
+    return;
+  fPushX /= fLength;
+  fPushZ /= fLength;
+
+  /* Positive means the machine is already on its way out of the wall, which
+   * happens on the tick after a bounce. Nothing to do. */
+  fInto = pMech->fVelX * fPushX + pMech->fVelZ * fPushZ;
+  if (fInto >= 0.0f)
+    return;
+
+  fSpeed = mecha_length2(pMech->fVelX, pMech->fVelZ);
+  bFast = (pMech->byMove == MECHA_MOVE_DASH || pMech->iCoastTicks > 0)
+          && fSpeed >= MECHA_BOUNCE_MIN_SPEED;
+
+  /*
+   * A car in the air comes off whatever it hits. Whiplash reflects the
+   * approach speed, charges damage for it and turns the roll the other way
+   * (control.c), so a car that clips a wall mid-flight arrives somewhere
+   * else spinning the other way rather than stopping dead against it.
+   * [SIM-19]
+   */
+  if (bAirborne && pDef->bWheeled) {
+    bFast = fSpeed >= MECHA_BOUNCE_MIN_SPEED;
+    pMech->attitude.iRollSpin = -pMech->attitude.iRollSpin;
+    if (-fInto > MECHA_BOUNCE_MIN_SPEED)
+      mecha_sim_damage(pWorld, iMechIdx, -1,
+                       -fInto * MECHA_AIR_BOUNCE_DAMAGE, 0.0f, 0.0f, 0.0f);
+  }
+
+  pMech->fVelX -= (bFast ? 1.0f + MECHA_BOUNCE_RESTITUTION : 1.0f)
+                  * fInto * fPushX;
+  pMech->fVelZ -= (bFast ? 1.0f + MECHA_BOUNCE_RESTITUTION : 1.0f)
+                  * fInto * fPushZ;
+  if (!bFast)
+    return;
+
+  if (pMech->byMove == MECHA_MOVE_DASH) {
+    pMech->byMove = bAirborne ? MECHA_MOVE_JUMP : MECHA_MOVE_STAND;
+    pMech->iStateTicks = 0;
+  }
+  /* Off the wall with the clock reset, so the ricochet carries as far as the
+   * burst that caused it would have. */
+  pMech->iCoastTicks = MECHA_DASH_COAST_TICKS;
+  mecha_sim_spawn_effect(pWorld, MECHA_FX_SPARK,
+                         pMech->fX + fPushX * pDef->fRadius,
+                         pMech->fY + pDef->fHeight * 0.45f,
+                         pMech->fZ + fPushZ * pDef->fRadius,
+                         pDef->fRadius * 0.4f, pDef->abyPalette[3],
+                         MECHA_SEC(0.2f));
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -576,6 +1024,501 @@ static void mecha_start_dash(tMechaMech *pMech, const tMechaInput *pInput)
   }
   pMech->byMove = MECHA_MOVE_DASH;
   pMech->iStateTicks = 0;
+  pMech->iCoastTicks = 0;
+  /* Whatever the stick was doing when the burst started does not count as a
+   * steering input: it has to be let go first. */
+  pMech->bDashStickFree = false;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * Steering a burst you are already committed to: boost again against it for
+ * the cancel, or release and tap a new direction for the crossing step.
+ * [SIM-08]
+ */
+static void mecha_steer_dash(tMechaMech *pMech, const tMechaInput *pInput,
+                             float fStick, float fDirX, float fDirZ,
+                             bool bDashPressed)
+{
+  float fDot;
+
+  if (fStick < MECHA_DASH_STICK_FREE) {
+    pMech->bDashStickFree = true;
+    return;
+  }
+
+  fDot = fDirX * pMech->fDashDirX + fDirZ * pMech->fDashDirZ;
+  if (bDashPressed && fDot < MECHA_DASH_CANCEL_DOT) {
+    mecha_start_dash(pMech, pInput);
+    return;
+  }
+  if (pMech->bDashStickFree && fStick > MECHA_DASH_STICK_TAP) {
+    pMech->fDashDirX = fDirX;
+    pMech->fDashDirZ = fDirZ;
+    /*
+     * And the burst starts again the new way rather than limping out the
+     * remainder of the old one. A crossing step is a dash that changed its
+     * mind, not the tail of one -- what stops it going on forever is the
+     * gauge, which is still draining the whole time.
+     */
+    pMech->iStateTicks = 0;
+    /* One turn per release, so leaning on the stick does not steer the
+     * burst round in a circle. */
+    pMech->bDashStickFree = false;
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * Drives the machine towards a velocity rather than assigning one, splitting
+ * what it has into along and across. The sideways part is the skid and grip
+ * is how fast it stops being one. [SIM-09]
+ *
+ * The direction must be unit length, or zero for "nothing asked for".
+ */
+static void mecha_drive(tMechaMech *pMech, const tMechaMechDef *pDef,
+                        float fDirX, float fDirZ, float fSpeed,
+                        float fAccelScale, float fGripScale)
+{
+  float fGrip = pDef->fGrip > 0.0f ? pDef->fGrip : MECHA_MPS(90.0f);
+  float fAccel = pDef->fDriveAccel > 0.0f ? pDef->fDriveAccel
+                                                : MECHA_MPS(70.0f);
+  float fAlong;
+  float fPerpX;
+  float fPerpZ;
+
+  fGrip *= fGripScale * MECHA_DT;
+  fAccel *= fAccelScale * MECHA_DT;
+
+  if (fDirX == 0.0f && fDirZ == 0.0f) {
+    pMech->fVelX = mecha_approachf(pMech->fVelX, 0.0f, fGrip);
+    pMech->fVelZ = mecha_approachf(pMech->fVelZ, 0.0f, fGrip);
+    return;
+  }
+
+  fAlong = pMech->fVelX * fDirX + pMech->fVelZ * fDirZ;
+  fPerpX = pMech->fVelX - fDirX * fAlong;
+  fPerpZ = pMech->fVelZ - fDirZ * fAlong;
+
+  fAlong = mecha_approachf(fAlong, fSpeed, fAccel);
+  fPerpX = mecha_approachf(fPerpX, 0.0f, fGrip);
+  fPerpZ = mecha_approachf(fPerpZ, 0.0f, fGrip);
+
+  pMech->fVelX = fDirX * fAlong + fPerpX;
+  pMech->fVelZ = fDirZ * fAlong + fPerpZ;
+}
+
+/*
+ * The states nobody drives: floored, getting up, reeling from a hit, or
+ * still absorbing a landing. Each runs on its own clock and none of them
+ * takes input, so both the legged machines and the wheeled one hand them
+ * the same few ticks of bookkeeping before deciding anything else. Returns
+ * true when the machine is in one of them and the caller should keep its
+ * hands off.
+ */
+static bool mecha_advance_recovery(tMechaMech *pMech,
+                                   const tMechaMechDef *pDef, bool bAirborne)
+{
+  if (!mecha_mech_alive(pMech)) {
+    pMech->fVelX = 0.0f;
+    pMech->fVelZ = 0.0f;
+    return true;
+  }
+  if (pMech->byMove == MECHA_MOVE_DOWN) {
+    if (pMech->iStunTicks <= 0) {
+      pMech->byMove = MECHA_MOVE_RISE;
+      pMech->iStateTicks = 0;
+      pMech->iStunTicks = MECHA_RISE_TICKS;
+      pMech->iInvulnTicks = MECHA_RISE_INVULN;
+    }
+    return true;
+  }
+  if (pMech->byMove == MECHA_MOVE_RISE) {
+    if (pMech->iStunTicks <= 0) {
+      pMech->byMove = MECHA_MOVE_STAND;
+      pMech->iStateTicks = 0;
+    }
+    return true;
+  }
+  if (pMech->byMove == MECHA_MOVE_STAGGER) {
+    if (pMech->iStunTicks <= 0) {
+      pMech->byMove = bAirborne ? MECHA_MOVE_JUMP : MECHA_MOVE_STAND;
+      pMech->iStateTicks = 0;
+    }
+    return true;
+  }
+  if (pMech->byMove == MECHA_MOVE_LAND) {
+    if (pMech->iStateTicks >= pDef->iLandTicks) {
+      pMech->byMove = MECHA_MOVE_STAND;
+      pMech->iStateTicks = 0;
+    }
+    return true;
+  }
+  return false;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * Which pedal is down. Boost is the accelerator and guard is the brake,
+ * which is what the two buttons are for on a machine with no gauge to spend
+ * and nothing to guard with. The stick answers as well, because a car
+ * nobody can drive with the same keys they walk everything else with is a
+ * car nobody drives.
+ */
+static int mecha_car_throttle(const tMechaInput *pInput, bool bCanAct)
+{
+  if (!bCanAct)
+    return 0;
+  if (pInput->bDash || pInput->iMoveZ > 40)
+    return 1;
+  if (pInput->bGuard || pInput->iMoveZ < -40)
+    return -1;
+  return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * Driving. One number for the motion, pointing along the nose: no strafe, no
+ * boost, no jump, but gravity still applies. The steering is the race
+ * game's, in shape and in both of its rules. [SIM-06]
+ */
+static void mecha_update_wheels(tMechaWorld *pWorld, int iMechIdx,
+                                const tMechaInput *pInput, bool bCanAct)
+{
+  tMechaMech *pMech = &pWorld->aMechs[iMechIdx];
+  const tMechaMechDef *pDef = mecha_mech_def(pMech);
+  float fGround = mecha_arena_ground_height(&pWorld->arena, pMech->fX,
+                                            pMech->fZ, pMech->fY);
+  bool bAirborne = pMech->fY > fGround + MECHA_GROUND_EPS;
+  float fNoseX = mecha_sin(pMech->iFacing);
+  float fNoseZ = mecha_cos(pMech->iFacing);
+  float fAlong = pMech->fVelX * fNoseX + pMech->fVelZ * fNoseZ;
+  float fTop = pDef->fWalkSpeed;
+  float fTarget = 0.0f;
+  float fScale = 1.0f;
+  int iThrottle = 0;
+
+  pMech->iStateTicks++;
+  if (mecha_advance_recovery(pMech, pDef, bAirborne))
+    return;
+
+  iThrottle = mecha_car_throttle(pInput, bCanAct);
+
+  if (iThrottle > 0) {
+    pMech->byMove = MECHA_MOVE_DASH;
+    fTarget = fTop;
+  } else if (iThrottle < 0) {
+    /* Brakes first, reverse afterwards: standing on it while rolling
+     * forwards stops the car, and only once it has stopped does it back
+     * up, at a fraction of the speed it goes forwards. */
+    pMech->byMove = MECHA_MOVE_GUARD;
+    fTarget = fAlong > 0.0f ? 0.0f : -fTop * MECHA_CAR_REVERSE;
+    fScale = pDef->fDriveAccel > 0.0f ? pDef->fBrake / pDef->fDriveAccel
+                                      : 1.0f;
+  } else {
+    /* Freewheeling: it slows, but nothing like as fast as it stops. */
+    pMech->byMove = fAlong * fAlong > MECHA_CAR_ROLLING * MECHA_CAR_ROLLING
+                      ? MECHA_MOVE_WALK : MECHA_MOVE_STAND;
+    fTarget = 0.0f;
+    fScale = MECHA_CAR_DRAG;
+  }
+
+  /*
+   * In the air a car is a thrown object: the wheels have nothing to push
+   * against and nothing to grip with, so it keeps what it had.
+   */
+  if (bAirborne)
+    pMech->byMove = MECHA_MOVE_JUMP;
+  else
+    mecha_drive(pMech, pDef, fNoseX, fNoseZ, fTarget, fScale,
+                mecha_arena_grip(&pWorld->arena, pMech->fX, pMech->fZ));
+
+  pMech->iCoastTicks = 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * One axis of body shake: white noise, redrawn every tick.
+ *
+ * Whiplash writes this as (ROLLERrand() - 0x4000) * work / iStabilityFactor,
+ * where the rand is a full 15-bit draw, so the noise is symmetric about
+ * level and unfiltered -- a fresh number every frame rather than anything
+ * that wanders. That is what makes it read as vibration and not as sway.
+ */
+static int mecha_shake_axis(tMechaRng *pRng, float fWork)
+{
+  return (int)((mecha_rng_unit(pRng) * 2.0f - 1.0f) * MECHA_SHAKE_GAIN
+               * fWork);
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * Whiplash's decay factors are per tick at 36 Hz. Applying one of them
+ * sixty times a second instead of thirty-six would damp the wobble out
+ * nearly twice as fast, so each is raised to the ratio of the two rates --
+ * which is what makes a second of ringing here a second of ringing there.
+ */
+static float mecha_whip_decay(float fPerTick36)
+{
+  return powf(fPerTick36, MECHA_WHIP_HZ / (float)MECHA_TICK_HZ);
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * How the body sits. Everything here is drawn and nothing is simulated: no
+ * angle below is read back by movement, collision or the firing solution,
+ * which is what lets them all run at once. [SIM-10]
+ */
+static void mecha_update_attitude(tMechaWorld *pWorld, int iMechIdx,
+                                  const tMechaInput *pInput, bool bCanAct)
+{
+  tMechaMech *pMech = &pWorld->aMechs[iMechIdx];
+  const tMechaMechDef *pDef = mecha_mech_def(pMech);
+  tMechaAttitude *pAtt = &pMech->attitude;
+  float fGround = mecha_arena_ground_height(&pWorld->arena, pMech->fX,
+                                            pMech->fZ, pMech->fY);
+  bool bAirborne = pMech->fY > fGround + MECHA_GROUND_EPS;
+  float fSpeed = mecha_length2(pMech->fVelX, pMech->fVelZ);
+  float fTop = pDef->fWalkSpeed > 1.0f ? pDef->fWalkSpeed : 1.0f;
+
+  /* --- the tilt that answers the stick ----------------------------------
+   * A car leans out of the corner, a robot into it. A couple of degrees
+   * either way. [SIM-10] */
+  {
+    int iSign = pDef->bWheeled ? MECHA_TILT_CAR_SIGN : MECHA_TILT_MECH_SIGN;
+    int iCeiling = pDef->bWheeled ? MECHA_TILT_LIMIT : MECHA_TILT_MECH_LIMIT;
+    int iSteer = 0;
+
+    if (bCanAct && !bAirborne && mecha_mech_alive(pMech)) {
+      if (pDef->bWheeled) {
+        /*
+         * The wheels do nothing below the steering floor, so neither does
+         * the body: a car rolling at a walking pace does not load a
+         * spring. Whiplash zeroes its own steering input the same way, and
+         * for the same reason, before it ever reaches the roll.
+         */
+        if (fSpeed >= pDef->fSteerFloor)
+          iSteer = pInput->iTurn + pInput->iMoveX;
+      } else {
+        /*
+         * Input, not travel. There is already a lean that follows the
+         * velocity, and it is not this: this one is on the stick, so it
+         * arrives before the machine does.
+         */
+        iSteer = pInput->iMoveX;
+      }
+      iSteer = mecha_clampi(iSteer, -100, 100);
+    }
+
+    if (iSteer != 0) {
+      /* Whiplash's steering is a digital left or right and its tilt has one
+       * size to match. A stick that can be half over should get half the
+       * lean, so the limit is scaled and the winding rate is not: full
+       * deflection then behaves exactly as the original does. */
+      int iLimit = iCeiling * (iSteer < 0 ? -iSteer : iSteer) / 100;
+      int iWant = iSteer > 0 ? iSign * iLimit : -iSign * iLimit;
+
+      pAtt->iRollSteer = mecha_stepi(pAtt->iRollSteer, iWant,
+                                          MECHA_TILT_RATE);
+    } else {
+      pAtt->iRollSteer = mecha_stepi(pAtt->iRollSteer, 0,
+                                          MECHA_TILT_CENTRE);
+    }
+  }
+
+  /* --- squat and dive, which only a car has ----------------------------- */
+  if (pDef->bWheeled && !bAirborne) {
+    int iThrottle = mecha_mech_alive(pMech)
+                      ? mecha_car_throttle(pInput, bCanAct) : 0;
+
+    if (iThrottle > 0)
+      pAtt->iPitchDrive = mecha_clampi(pAtt->iPitchDrive + MECHA_SQUAT_RATE,
+                                       -MECHA_SQUAT_LIMIT,
+                                       MECHA_SQUAT_LIMIT);
+    else if (iThrottle < 0)
+      pAtt->iPitchDrive = mecha_clampi(pAtt->iPitchDrive - MECHA_SQUAT_RATE,
+                                       -MECHA_SQUAT_LIMIT,
+                                       MECHA_SQUAT_LIMIT);
+    else
+      pAtt->iPitchDrive = mecha_stepi(pAtt->iPitchDrive, 0,
+                                           MECHA_SQUAT_RECOVER);
+  } else {
+    pAtt->iPitchDrive = mecha_stepi(pAtt->iPitchDrive, 0,
+                                         MECHA_SQUAT_RECOVER);
+  }
+
+  /* --- the nose in the air ----------------------------------------------
+   *
+   * A car that has left the road points where it is going rather than
+   * where it was pointed, which Whiplash gets from the arctangent of the
+   * climb against the run. Walkers are excluded: a mech in the air is
+   * jumping, and a jumping mech that pitches nose-down on the way back
+   * looks like a mech that has been shot.
+   */
+  if (pDef->bWheeled && bAirborne) {
+    pAtt->iAirPitch =
+      mecha_clampi(mecha_angle_signed(mecha_atan2_angle(-pMech->fVelY,
+                                                        fSpeed)),
+                   -MECHA_AIR_PITCH_LIMIT, MECHA_AIR_PITCH_LIMIT);
+  } else {
+    /*
+     * Back on the ground it goes straight to level, and does not unwind:
+     * the landing has already copied it into the wobble, which is what
+     * carries the attitude from here. Leaving it to decay would have the
+     * two of them describing the same motion at once.
+     */
+    pAtt->iAirPitch = 0;
+  }
+
+  /* A car off a cambered launch keeps rolling until it lands. [SIM-18] */
+  if (pDef->bWheeled && bAirborne)
+    pAtt->iAirRoll = mecha_angle_wrap(pAtt->iAirRoll + pAtt->iRollSpin);
+
+  /* --- the shape of the ground it is standing on -------------------------
+   * The machine asks what the ground does across its own footprint and sits
+   * on the answer. Wheels only, and terrain only. [SIM-10] */
+  if (pDef->bWheeled && !bAirborne) {
+    float fHere = mecha_arena_terrain_height(&pWorld->arena, pMech->fX,
+                                             pMech->fZ);
+    int iWantPitch = 0;
+    int iWantRoll = 0;
+
+    if (pMech->fY - fHere < MECHA_CONTOUR_CONTACT
+        && fHere - pMech->fY < MECHA_CONTOUR_CONTACT) {
+      float fNoseX = mecha_sin(pMech->iFacing);
+      float fNoseZ = mecha_cos(pMech->iFacing);
+      float fLong = pDef->fRadius * MECHA_CONTOUR_WHEELBASE;
+      float fWide = pDef->fRadius * MECHA_CONTOUR_TRACK;
+      float fFront = mecha_arena_terrain_height(&pWorld->arena,
+                                                pMech->fX + fNoseX * fLong,
+                                                pMech->fZ + fNoseZ * fLong);
+      float fBack = mecha_arena_terrain_height(&pWorld->arena,
+                                               pMech->fX - fNoseX * fLong,
+                                               pMech->fZ - fNoseZ * fLong);
+      /* The machine's right is the nose turned a quarter clockwise. */
+      float fRight = mecha_arena_terrain_height(&pWorld->arena,
+                                                pMech->fX + fNoseZ * fWide,
+                                                pMech->fZ - fNoseX * fWide);
+      float fLeft = mecha_arena_terrain_height(&pWorld->arena,
+                                               pMech->fX - fNoseZ * fWide,
+                                               pMech->fZ + fNoseX * fWide);
+
+      /* Positive pose pitch puts the nose down, so climbing is negative;
+       * positive roll lifts the right side, so ground higher on the right
+       * is a positive roll. Both signs were settled by measurement, not
+       * by reading the rotation matrix. */
+      iWantPitch = -mecha_angle_signed(mecha_atan2_angle(fFront - fBack,
+                                                         2.0f * fLong));
+      iWantRoll = mecha_angle_signed(mecha_atan2_angle(fRight - fLeft,
+                                                       2.0f * fWide));
+      iWantPitch = mecha_clampi(iWantPitch, -MECHA_CONTOUR_LIMIT,
+                                MECHA_CONTOUR_LIMIT);
+      iWantRoll = mecha_clampi(iWantRoll, -MECHA_CONTOUR_LIMIT,
+                               MECHA_CONTOUR_LIMIT);
+    }
+    pAtt->iContourPitch = mecha_stepi(pAtt->iContourPitch, iWantPitch,
+                                      (int)(MECHA_CONTOUR_RATE * MECHA_DT));
+    pAtt->iContourRoll = mecha_stepi(pAtt->iContourRoll, iWantRoll,
+                                     (int)(MECHA_CONTOUR_RATE * MECHA_DT));
+
+    /*
+     * What the camber underneath would spin the car at if it left the
+     * ground now. Kept up to date while the wheels are down rather than
+     * worked out at the moment of launch, so the value that carries into
+     * the air is the one from the surface actually left. [SIM-18]
+     */
+    pAtt->iRollSpin = pDef->fWalkSpeed > 0.0f
+      ? (int)((float)iWantRoll
+              * (mecha_length2(pMech->fVelX, pMech->fVelZ) / pDef->fWalkSpeed)
+              * MECHA_CAMBER_SPIN_GAIN)
+      : 0;
+    pAtt->iAirRoll = 0;
+  } else {
+    /* In the air there is no ground to follow; the nose follows the fall
+     * instead, and the two must not both be describing the attitude. */
+    pAtt->iContourPitch = mecha_stepi(pAtt->iContourPitch, 0,
+                                      (int)(MECHA_CONTOUR_RATE * MECHA_DT));
+    pAtt->iContourRoll = mecha_stepi(pAtt->iContourRoll, 0,
+                                     (int)(MECHA_CONTOUR_RATE * MECHA_DT));
+  }
+
+  /* --- what is left of the last landing --------------------------------- */
+  {
+    float fAmp = pAtt->fWobblePitchAmp < 0.0f ? -pAtt->fWobblePitchAmp
+                                              : pAtt->fWobblePitchAmp;
+    float fRollAmp = pAtt->fWobbleRollAmp < 0.0f ? -pAtt->fWobbleRollAmp
+                                                 : pAtt->fWobbleRollAmp;
+
+    if (fAmp < MECHA_WOBBLE_FLOOR && fRollAmp < MECHA_WOBBLE_FLOOR) {
+      pAtt->fWobblePitchAmp = 0.0f;
+      pAtt->fWobbleRollAmp = 0.0f;
+      pAtt->iWobblePhase = 0;
+      pAtt->iPitchWobble = 0;
+      pAtt->iRollWobble = 0;
+    } else {
+      /*
+       * The larger the wobble the faster it dies, which is why the two
+       * decay rates are named max and min the way round they are: 0.95 is
+       * the "max" and it is the smaller number. Blended by amplitude
+       * measured in quarter-circles, exactly as the original blends it.
+       */
+      float fBlend = fAmp * (MECHA_WOBBLE_DECAY_MAX - MECHA_WOBBLE_DECAY_MIN)
+                     * MECHA_WOBBLE_BLEND + MECHA_WOBBLE_DECAY_MIN;
+      float fCos;
+
+      pAtt->fWobblePitchAmp *= mecha_whip_decay(fBlend);
+      pAtt->fWobbleRollAmp *= mecha_whip_decay(MECHA_WOBBLE_ROLL_DECAY);
+      pAtt->iWobblePhase = (pAtt->iWobblePhase + 1) % MECHA_ANGLE_FULL;
+      fCos = mecha_cos(mecha_angle_wrap(MECHA_WOBBLE_FREQ
+                                        * pAtt->iWobblePhase));
+      pAtt->iPitchWobble = (int)(pAtt->fWobblePitchAmp * fCos);
+      pAtt->iRollWobble = (int)(pAtt->fWobbleRollAmp * fCos);
+    }
+  }
+
+  /* --- the shake --------------------------------------------------------- */
+  {
+    float fHealth = pDef->fArmour > 0.0f
+                      ? mecha_clampf(pMech->fArmour / pDef->fArmour, 0.0f,
+                                     1.0f)
+                      : 1.0f;
+    float fHurt = 1.0f + (MECHA_SHAKE_DAMAGE_MAX - 1.0f) * (1.0f - fHealth);
+    float fWork;
+
+    if (pDef->bWheeled) {
+      /*
+       * Road speed times damage, which is the race game's own product and
+       * the reason it works: a healthy car at speed barely blurs, a
+       * wrecked one at speed shakes itself apart, and a wreck standing
+       * still sits perfectly quiet.
+       */
+      fWork = (fSpeed / fTop) * fHurt;
+    } else {
+      /*
+       * A walker has nothing equivalent to road speed, so what shakes it
+       * is being hit. The impulse is set where the damage lands and bled
+       * off here, which puts the shudder on the blow rather than on the
+       * walking.
+       */
+      pAtt->fHitShake = mecha_approachf(pAtt->fHitShake, 0.0f,
+                                        MECHA_SHAKE_HIT_DECAY * MECHA_DT);
+      fWork = pAtt->fHitShake * fHurt;
+    }
+    if (!mecha_mech_alive(pMech))
+      fWork = 0.0f;
+    pAtt->iPitchShake = mecha_shake_axis(&pAtt->shake, fWork);
+    pAtt->iRollShake = mecha_shake_axis(&pAtt->shake, fWork);
+    pAtt->iYawShake = mecha_shake_axis(&pAtt->shake, fWork);
+  }
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -591,40 +1534,55 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
   bool bBoosting = false;
   float fDirX = 0.0f;
   float fDirZ = 0.0f;
+  float fPreY = pMech->fY;
   float fStick = bCanAct ? mecha_stick_direction(pMech, pInput, &fDirX, &fDirZ)
                          : 0.0f;
+
+  if (pDef->bWheeled) {
+    /*
+     * Everything from here to the integration below is legs: states a
+     * walker moves between, a stick that can push it sideways, a gauge it
+     * spends. A wheeled machine has none of it and gets its own few lines
+     * instead -- but it shares every line after that, because falling,
+     * hitting a wall, standing on the ground and going off the edge of the
+     * world are the same problems whatever a machine runs on.
+     */
+    mecha_update_wheels(pWorld, iMechIdx, pInput, bCanAct);
+    goto integrate;
+  }
 
   pMech->iStateTicks++;
 
   /* --- state selection ------------------------------------------------- */
 
-  if (!mecha_mech_alive(pMech)) {
-    pMech->fVelX = 0.0f;
-    pMech->fVelZ = 0.0f;
-  } else if (pMech->byMove == MECHA_MOVE_DOWN) {
-    if (pMech->iStunTicks <= 0) {
-      pMech->byMove = MECHA_MOVE_RISE;
-      pMech->iStateTicks = 0;
-      pMech->iStunTicks = MECHA_RISE_TICKS;
-      pMech->iInvulnTicks = MECHA_RISE_INVULN;
-    }
-  } else if (pMech->byMove == MECHA_MOVE_RISE) {
-    if (pMech->iStunTicks <= 0) {
-      pMech->byMove = MECHA_MOVE_STAND;
-      pMech->iStateTicks = 0;
-    }
-  } else if (pMech->byMove == MECHA_MOVE_STAGGER) {
-    if (pMech->iStunTicks <= 0) {
-      pMech->byMove = bAirborne ? MECHA_MOVE_JUMP : MECHA_MOVE_STAND;
-      pMech->iStateTicks = 0;
-    }
-  } else if (pMech->byMove == MECHA_MOVE_LAND) {
-    if (pMech->iStateTicks >= pDef->iLandTicks) {
-      pMech->byMove = MECHA_MOVE_STAND;
-      pMech->iStateTicks = 0;
-    }
+  if (mecha_advance_recovery(pMech, pDef, bAirborne)) {
+    /* Floored, getting up, reeling or landing: none of those are steered,
+     * and every one of them runs on its own clock. */
   } else if (bAirborne) {
-    if (pMech->byMove != MECHA_MOVE_JUMP) {
+    if (pMech->byMove == MECHA_MOVE_JUMP && bCanAct
+        && pInput->bGuard && !pMech->bGuardHeld) {
+      /* The cancel. Guard in the air throws the rest of the arc away and
+       * drops the mech; the landing is what pays for it. */
+      pMech->byMove = MECHA_MOVE_CANCEL;
+      pMech->iStateTicks = 0;
+    } else if (pMech->byMove == MECHA_MOVE_DASH
+               && pMech->iStateTicks < pDef->iDashTicks
+               && mecha_boost_available(pMech)) {
+      /* An air dash runs the same clock as one on the ground, and can be
+       * steered and cancelled the same way. */
+      mecha_steer_dash(pMech, pInput, fStick, fDirX, fDirZ,
+                       bCanAct && pInput->bDash && !pMech->bDashHeld);
+    } else if (bCanAct && pMech->byMove != MECHA_MOVE_CANCEL
+               && pInput->bDash && !pMech->bDashHeld
+               && mecha_boost_available(pMech)) {
+      /* Dashing in the air: a flat burst that holds its height, which is
+       * what makes an arc something the other player has to read rather
+       * than something they can simply wait out. */
+      mecha_start_dash(pMech, pInput);
+      pMech->fVelY = 0.0f;
+    } else if (pMech->byMove != MECHA_MOVE_JUMP
+               && pMech->byMove != MECHA_MOVE_CANCEL
+               && pMech->byMove != MECHA_MOVE_DASH) {
       /* Walked off a ledge. */
       pMech->byMove = MECHA_MOVE_JUMP;
       pMech->iStateTicks = 0;
@@ -633,25 +1591,45 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
     bool bJumpPressed = pInput->bJump && !pMech->bJumpHeld;
     bool bDashPressed = pInput->bDash && !pMech->bDashHeld;
 
-    if (bJumpPressed && mecha_boost_available(pMech)) {
-      mecha_spend_boost(pMech, pDef->iBoostJumpCost * MECHA_BOOST_SCALE);
+    if (bJumpPressed) {
+      /*
+       * Leaving the ground is the legs' work, so an empty gauge does not
+       * stop it -- what an empty machine loses is the thrust to hover with
+       * and to dash with, both of which are gated below. Charged only when
+       * there is something to charge, or a locked machine would spend its
+       * own recovery mashing jump. [SIM-01]
+       */
+      if (mecha_boost_available(pMech))
+        mecha_spend_boost(pMech, pDef->iBoostJumpCost * MECHA_BOOST_SCALE);
       pMech->fVelY = pDef->fJumpVelocity;
       pMech->byMove = MECHA_MOVE_JUMP;
       pMech->iStateTicks = 0;
+      /*
+       * Leaving the ground is what brings the machine round onto its
+       * lock, not coming down again. Waiting for the cancel meant the
+       * turn started at the bottom of the arc with nothing left to spend
+       * it on; starting it at the top means the machine is already facing
+       * the right way by the time it lands, which is the shape a jump
+       * cancel is supposed to have.
+       */
+      pMech->iRecentreTicks = MECHA_RECENTRE_TICKS;
       bAirborne = true;
       mecha_sim_spawn_effect(pWorld, MECHA_FX_DUST, pMech->fX, fGround,
                              pMech->fZ, pDef->fRadius * 2.0f,
                              pDef->abyPalette[2], MECHA_SEC(0.4f));
     } else if (pMech->byMove == MECHA_MOVE_DASH
-               && pInput->bDash
                && pMech->iStateTicks < pDef->iDashTicks
                && mecha_boost_available(pMech)) {
-      /* Holding the button keeps the burst going until either the timer or
-       * the gauge runs out. */
+      /*
+       * Committed. The button starts the burst and does not hold it up:
+       * once it is running, only the clock, an empty gauge, a jump or a
+       * wall ends it. What the stick can still do is steer it.
+       */
+      mecha_steer_dash(pMech, pInput, fStick, fDirX, fDirZ, bDashPressed);
     } else if (bDashPressed && mecha_boost_available(pMech)) {
       mecha_start_dash(pMech, pInput);
-    } else if (pInput->bCrouch) {
-      pMech->byMove = MECHA_MOVE_CROUCH;
+    } else if (pInput->bGuard) {
+      pMech->byMove = MECHA_MOVE_GUARD;
     } else if (fStick > 0.0f) {
       pMech->byMove = MECHA_MOVE_WALK;
     } else {
@@ -701,72 +1679,257 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
       mecha_spend_boost(pMech, pDef->iBoostJumpDrain);
       bBoosting = true;
     }
-  } else if (pMech->byMove == MECHA_MOVE_CROUCH) {
+  } else if (pMech->byMove == MECHA_MOVE_CANCEL) {
+    /* Straight down, with the carried speed killed off fast. The drop is
+     * meant to put the mech on the ground where it already is, not to be a
+     * dive that covers distance. */
+    pMech->fVelX = mecha_approachf(pMech->fVelX, 0.0f,
+                                   pDef->fAirSpeed * 6.0f * MECHA_DT);
+    pMech->fVelZ = mecha_approachf(pMech->fVelZ, 0.0f,
+                                   pDef->fAirSpeed * 6.0f * MECHA_DT);
+    pMech->fVelY = -MECHA_CANCEL_FALL_SPEED;
+  } else if (pMech->byMove == MECHA_MOVE_GUARD) {
     pMech->fVelX = 0.0f;
     pMech->fVelZ = 0.0f;
+  } else if (pMech->iCoastTicks > 0
+             && (pMech->byMove == MECHA_MOVE_WALK
+                 || pMech->byMove == MECHA_MOVE_STAND)) {
+    /*
+     * Out the far side of a burst. The same drive the walk uses, with the
+     * authority turned down at both ends: the machine bleeds off the speed
+     * it was carrying slowly and slides while it does it, so a boost ends
+     * where it was going rather than where the stick is pointing.
+     */
+    mecha_drive(pMech, pDef, fDirX, fDirZ, pDef->fWalkSpeed * fStick,
+                MECHA_COAST_ACCEL_SCALE, MECHA_COAST_GRIP_SCALE);
   } else if (pMech->byMove == MECHA_MOVE_WALK) {
-    pMech->fVelX = fDirX * pDef->fWalkSpeed;
-    pMech->fVelZ = fDirZ * pDef->fWalkSpeed;
+    mecha_drive(pMech, pDef, fDirX, fDirZ, pDef->fWalkSpeed * fStick,
+                1.0f, 1.0f);
   } else {
-    pMech->fVelX = mecha_approachf(pMech->fVelX, 0.0f,
-                                   pDef->fWalkSpeed * 4.0f * MECHA_DT);
-    pMech->fVelZ = mecha_approachf(pMech->fVelZ, 0.0f,
-                                   pDef->fWalkSpeed * 4.0f * MECHA_DT);
+    /* Nothing asked for: everything on the clock is skid, and the machine
+     * leans on its brakes rather than its grip. */
+    float fGrip = pDef->fGrip > 0.0f ? pDef->fGrip : MECHA_MPS(90.0f);
+    float fBrake = pDef->fBrake > 0.0f ? pDef->fBrake : MECHA_MPS(60.0f);
+
+    mecha_drive(pMech, pDef, 0.0f, 0.0f, 0.0f, 1.0f, fBrake / fGrip);
   }
 
-  /* Ending a dash: the burst decides when, not the player. */
+  /* Ending a dash: the burst decides when, not the player. The speed it
+   * built is not thrown away with it -- that is what the coast is. */
   if (pMech->byMove == MECHA_MOVE_DASH
       && (pMech->iStateTicks >= pDef->iDashTicks
           || !mecha_boost_available(pMech))) {
-    pMech->byMove = MECHA_MOVE_STAND;
+    pMech->byMove = bAirborne ? MECHA_MOVE_JUMP : MECHA_MOVE_STAND;
     pMech->iStateTicks = 0;
+    pMech->iCoastTicks = MECHA_DASH_COAST_TICKS;
   }
 
   /* --- boost recovery --------------------------------------------------- */
 
   if (pMech->byMove != MECHA_MOVE_DASH && !bBoosting) {
-    if (pMech->byMove == MECHA_MOVE_CROUCH)
-      mecha_regain_boost(pMech, pDef->iBoostCrouchRegen);
+    if (pMech->byMove == MECHA_MOVE_GUARD)
+      mecha_regain_boost(pMech, pDef->iBoostGuardRegen);
     else if (pMech->byMove != MECHA_MOVE_JUMP)
       mecha_regain_boost(pMech, pDef->iBoostRegen);
   }
 
   /* --- integration ------------------------------------------------------ */
 
-  if (bAirborne || pMech->byMove == MECHA_MOVE_JUMP) {
+integrate:
+  if (pMech->byMove == MECHA_MOVE_DASH && !pDef->bWheeled
+      && pMech->fVelY <= 0.0f) {
+    /*
+     * A burst is flat, in the air as much as on the ground: gravity waits
+     * until it is over. Only while the machine is level or sinking, mind --
+     * a boost that has just been thrown off the top of a slope is carrying
+     * real upward speed, and holding that would turn a ramp into a ceiling.
+     * Rising, it arcs like anything else.
+     */
+    pMech->fVelY = 0.0f;
+  } else if (bAirborne || pMech->byMove == MECHA_MOVE_JUMP
+             || pMech->byMove == MECHA_MOVE_CANCEL) {
     float fGravity = MECHA_GRAVITY;
 
     if (bBoosting)
       fGravity *= 0.18f;
     pMech->fVelY -= fGravity * MECHA_DT;
-  } else {
+  } else if (pMech->fVelY <= 0.0f) {
+    /*
+     * Standing on something, so nothing to fall. Upward speed is left
+     * alone: a machine that has just come off the lip of a ramp is still
+     * in contact on the tick it happens, and this is where the launch
+     * would otherwise be thrown away for the second time.
+     */
     pMech->fVelY = 0.0f;
   }
 
   pMech->fX += pMech->fVelX * MECHA_DT;
   pMech->fZ += pMech->fVelZ * MECHA_DT;
+  fPreY = pMech->fY;
   pMech->fY += pMech->fVelY * MECHA_DT;
 
-  mecha_arena_resolve_cylinder(&pWorld->arena, pDef->fRadius, pMech->fY,
-                               pDef->fHeight, &pMech->fX, &pMech->fZ);
+  {
+    float fPreX = pMech->fX;
+    float fPreZ = pMech->fZ;
 
-  fGround = mecha_arena_ground_height(&pWorld->arena, pMech->fX, pMech->fZ,
-                                      pMech->fY);
-  if (pMech->fY <= fGround) {
-    bool bWasFalling = pMech->fVelY < 0.0f;
-
-    pMech->fY = fGround;
-    pMech->fVelY = 0.0f;
-    if (pMech->byMove == MECHA_MOVE_JUMP && bWasFalling) {
-      pMech->byMove = MECHA_MOVE_LAND;
-      pMech->iStateTicks = 0;
-      mecha_sim_spawn_effect(pWorld, MECHA_FX_DUST, pMech->fX, fGround,
-                             pMech->fZ, pDef->fRadius * 2.4f,
-                             pDef->abyPalette[2], MECHA_SEC(0.45f));
+    if (mecha_arena_resolve_cylinder(&pWorld->arena, pDef->fRadius, pMech->fY,
+                                     pDef->fHeight, &pMech->fX, &pMech->fZ)) {
+      mecha_wall_impact(pWorld, iMechIdx, pMech->fX - fPreX,
+                        pMech->fZ - fPreZ, bAirborne);
     }
   }
 
+  /*
+   * Asked from the higher of where the feet were and where they have got to,
+   * so a fast fall cannot step past a platform's lip in one tick and be told
+   * there is no floor. [SIM-11]
+   */
+  fGround = mecha_arena_ground_height(&pWorld->arena, pMech->fX, pMech->fZ,
+                                      fPreY > pMech->fY ? fPreY
+                                                        : pMech->fY);
+
+  /*
+   * Staying on a slope running away downhill, instead of falling down it in
+   * invisible steps. Three conditions keep this from gluing a machine to the
+   * world: already in contact, not climbing, and sloped rather than ended.
+   * [SIM-12]
+   */
+  if (pMech->fY > fGround && !bAirborne && pMech->fVelY <= 0.0f) {
+    float fDrop = (pMech->fGroundY - fGround) / MECHA_DT;
+    float fSpeed = mecha_length2(pMech->fVelX, pMech->fVelZ);
+    uint32_t uiHere = mecha_arena_surface(&pWorld->arena, pMech->fX,
+                                          pMech->fZ);
+
+    if ((uiHere & MECHA_SURF_NON_MAGNETIC) != 0 && fDrop > 0.0f
+        && fSpeed > MECHA_RAMP_STICK_SPEED
+        && fDrop <= fSpeed * MECHA_RAMP_STICK_GRADE)
+      pMech->fY = fGround;
+  }
+
+  /*
+   * A car that has been rolling in the air lands on whatever face it has
+   * come round to. Judged on the tick the wheels touch, not off byMove: the
+   * wheeled path has already put the car back to STAND by the time the
+   * shared landing below runs. The race game's own bound -- roll inside a
+   * quarter turn of level is an ordinary touchdown, anything else zeroes
+   * the steering and stuns (control.c). [SIM-18]
+   */
+  if (pDef->bWheeled && pMech->attitude.bWasAirborne && pMech->fY <= fGround) {
+    int iAirRoll = mecha_angle_signed(pMech->attitude.iAirRoll);
+
+    if (iAirRoll > MECHA_CAMBER_UPRIGHT || iAirRoll < -MECHA_CAMBER_UPRIGHT) {
+      pMech->byMove = MECHA_MOVE_DOWN;
+      pMech->iDownTick = pWorld->iTick;
+      pMech->iStateTicks = 0;
+      pMech->iStunTicks = MECHA_DOWN_TICKS;
+      pMech->iRecovery = 0;
+      /* On its roof and still going: a car that lands upside down slides
+       * on what it arrived with rather than stopping dead. [SIM-18] */
+      mecha_sim_spawn_effect(pWorld, MECHA_FX_DUST, pMech->fX, fGround,
+                             pMech->fZ, pDef->fRadius * 1.6f,
+                             pDef->abyPalette[2], MECHA_SEC(0.45f));
+    }
+    pMech->attitude.iAirRoll = 0;
+    pMech->attitude.iRollSpin = 0;
+  }
+  pMech->attitude.bWasAirborne = pMech->fY > fGround;
+
+  if (pMech->fY <= fGround) {
+    bool bWasFalling = pMech->fVelY < 0.0f;
+    /* How hard it arrived. Taken now because the contact rules below are
+     * about to zero the vertical speed, and the landing wobble is sized
+     * from the drop. */
+    float fImpactVelY = pMech->fVelY;
+    /*
+     * Off a ramp, the way the race game does it: on a surface that does not
+     * hold you, the rate the ground rose under you is a real upward
+     * velocity, and you keep it when the slope runs out. [SIM-13]
+     */
+    float fClimb = (fGround - pMech->fGroundY) / MECHA_DT;
+    uint32_t uiSurface = mecha_arena_surface(&pWorld->arena, pMech->fX,
+                                             pMech->fZ);
+
+    pMech->fY = fGround;
+    if ((uiSurface & MECHA_SURF_NON_MAGNETIC) == 0) {
+      pMech->fVelY = 0.0f;                  /* held down, as a track is */
+    } else if (fClimb > MECHA_RAMP_LAUNCH_CLIMB) {
+      pMech->fVelY = fClimb;                /* the slope is pushing it up */
+    } else if (pMech->fVelY <= 0.0f) {
+      pMech->fVelY = 0.0f;                  /* landing, or level ground */
+    }
+    /*
+     * The fourth case is the one that matters and it does nothing at all:
+     * still in contact, the ground no longer rising, and carrying upward
+     * speed from the slope it has just come off. Zeroing that -- which is
+     * what the first version of this did -- throws the launch away on the
+     * exact tick it should happen, at the lip, and the machine walks onto
+     * the flat top as though the ramp had been a staircase.
+     */
+    if (fImpactVelY < -MECHA_WOBBLE_MIN_DROP
+        && pMech->attitude.iAirPitch != 0) {
+      /*
+       * The landing wobble, seeded the way Whiplash seeds it: the attitude
+       * the machine was holding at the moment of contact becomes the
+       * amplitude of a damped oscillation about the same two axes, and the
+       * phase is restarted so the ring begins at full deflection. A flat
+       * landing was barely pitched and barely rings; one off the side of a
+       * hill was pitched a long way and rings for a second.
+       */
+      pMech->attitude.fWobblePitchAmp =
+        (float)mecha_clampi(pMech->attitude.iAirPitch, -MECHA_WOBBLE_LIMIT,
+                            MECHA_WOBBLE_LIMIT);
+      pMech->attitude.fWobbleRollAmp =
+        (float)mecha_clampi(pMech->attitude.iRollSteer, -MECHA_WOBBLE_LIMIT,
+                            MECHA_WOBBLE_LIMIT);
+      pMech->attitude.iWobblePhase = 0;
+      pMech->attitude.iAirPitch = 0;
+    }
+    if ((pMech->byMove == MECHA_MOVE_JUMP
+         || pMech->byMove == MECHA_MOVE_CANCEL) && bWasFalling) {
+      bool bCancelled = pMech->byMove == MECHA_MOVE_CANCEL;
+
+      {
+      pMech->byMove = MECHA_MOVE_LAND;
+      /* A cancelled touchdown is the short one. Rather than carry a second
+       * recovery length on every machine, start its clock partway through
+       * the one they already have. */
+      pMech->iStateTicks = bCancelled
+        ? mecha_clampi(pDef->iLandTicks - MECHA_CANCEL_LAND_TICKS,
+                       0, pDef->iLandTicks)
+        : 0;
+      if (bCancelled)
+        pMech->iFreeTurnTicks = MECHA_CANCEL_TURN_TICKS;
+      mecha_sim_spawn_effect(pWorld, MECHA_FX_DUST, pMech->fX, fGround,
+                             pMech->fZ,
+                             pDef->fRadius * (bCancelled ? 3.0f : 2.4f),
+                             pDef->abyPalette[2], MECHA_SEC(0.45f));
+      }
+    }
+  }
+
+  /* Two ways to be gone that are not damage: a pit, which is a surface like
+   * any other, and the kill plane. [SIM-14] */
+  if (mecha_mech_alive(pMech)) {
+    uint32_t uiSurface = mecha_arena_surface(&pWorld->arena, pMech->fX,
+                                            pMech->fZ);
+    bool bInPit = (uiSurface & MECHA_SURF_PIT) != 0
+                  && pMech->fY <= fGround + MECHA_GROUND_EPS;
+
+    if (bInPit || pMech->fY < pWorld->arena.fKillY) {
+      mecha_sim_spawn_effect(pWorld, MECHA_FX_DUST, pMech->fX, pMech->fY,
+                             pMech->fZ, pDef->fRadius * 2.0f,
+                             pDef->abyPalette[2], MECHA_SEC(0.5f));
+      /* Everything it had. Nobody is credited: the arena did this. */
+      mecha_sim_damage(pWorld, iMechIdx, -1, pMech->fArmour + 1.0f,
+                       MECHA_STAGGER_DOWN, 0.0f, 0.0f);
+    }
+  }
+  pMech->fGroundY = fGround;
+
   /* --- cosmetic smoothing ---------------------------------------------- */
+
+  mecha_update_attitude(pWorld, iMechIdx, pInput, bCanAct);
+  mecha_emit_damage(pWorld, iMechIdx);
 
   {
     float fSpeed = mecha_length2(pMech->fVelX, pMech->fVelZ);
@@ -778,9 +1941,74 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
       fLean = (float)MECHA_DEG(3);
     pMech->fLeanRoll = mecha_approachf(pMech->fLeanRoll, fLean,
                                        (float)MECHA_DEG(40) * MECHA_DT);
-    pMech->fStepPhase += fSpeed * MECHA_DT / (2.0f * MECHA_METRE);
+
+    /*
+     * Guns up, guns down. Bringing a weapon to bear is a snap and putting it
+     * away is not, so the two rates are nothing like each other: a machine
+     * that has just been shot at must not spend half a second raising its
+     * arms, and a machine that has merely lost sight of someone must not
+     * drop them the instant the lock breaks or the whole roster twitches.
+     */
+    {
+      bool bReady = pMech->byLock == MECHA_LOCK_HELD || pMech->iRecovery > 0;
+
+      pMech->fCombat = mecha_approachf(
+          pMech->fCombat, bReady ? 1.0f : 0.0f,
+          (bReady ? MECHA_COMBAT_RAISE : MECHA_COMBAT_LOWER) * MECHA_DT);
+    }
+    /*
+     * Metres per stride, and it is deliberately long. The machines cover
+     * ground faster than they used to and a cycle tied tightly to distance
+     * turned that into a sprint of little steps; a longer stride reads as
+     * something heavy moving quickly rather than as something small moving
+     * frantically.
+     */
+    pMech->fStepPhase += fSpeed * MECHA_DT / MECHA_STRIDE_METRES;
     if (pMech->fStepPhase > 1000.0f)
       pMech->fStepPhase -= 1000.0f;
+
+    /*
+     * The feet follow the line of travel, not the direction of it: a machine
+     * backing away from you is walking backwards, not turning round, so a
+     * heading more than a quarter turn off the shoulders is folded back and
+     * the step cycle runs in reverse instead. What is left is clamped, since
+     * a mech whose feet point further off its shoulders than that is not
+     * strafing, it is tangled.
+     */
+    if (pMech->byMove == MECHA_MOVE_DASH) {
+      /*
+       * A boost is not a strafe. The machine is being driven bodily in one
+       * direction, so the legs square up to it however far round that is --
+       * no fold, no clamp -- and the shoulders go on holding the aim, which
+       * is the whole shape of the thing: running one way, shooting another.
+       */
+      int iTravel = mecha_atan2_angle(pMech->fDashDirX, pMech->fDashDirZ);
+
+      pMech->bLegsBackward = false;
+      pMech->iLegYaw = mecha_angle_approach(pMech->iLegYaw, iTravel,
+                                            (int)(MECHA_LEG_DASH_RATE
+                                                  * MECHA_DT));
+    } else if (fSpeed > MECHA_LEG_WALK_SPEED) {
+      int iTravel = mecha_atan2_angle(pMech->fVelX, pMech->fVelZ);
+      int iOffset = mecha_angle_delta(pMech->iFacing, iTravel);
+
+      pMech->bLegsBackward = iOffset > MECHA_ANGLE_QUARTER
+                          || iOffset < -MECHA_ANGLE_QUARTER;
+      if (pMech->bLegsBackward)
+        iOffset = iOffset > 0 ? iOffset - MECHA_ANGLE_HALF
+                              : iOffset + MECHA_ANGLE_HALF;
+      iOffset = mecha_clampi(iOffset, -MECHA_LEG_YAW_LIMIT,
+                             MECHA_LEG_YAW_LIMIT);
+      iTravel = mecha_angle_wrap(pMech->iFacing + iOffset);
+      pMech->iLegYaw = mecha_angle_approach(pMech->iLegYaw, iTravel,
+                                            (int)(MECHA_LEG_YAW_RATE
+                                                  * MECHA_DT));
+    } else {
+      pMech->bLegsBackward = false;
+      pMech->iLegYaw = mecha_angle_approach(pMech->iLegYaw, pMech->iFacing,
+                                            (int)(MECHA_LEG_YAW_RATE
+                                                  * MECHA_DT));
+    }
   }
 
   /* --- timers ----------------------------------------------------------- */
@@ -789,11 +2017,14 @@ static void mecha_update_movement(tMechaWorld *pWorld, int iMechIdx,
     pMech->iStunTicks--;
   if (pMech->iInvulnTicks > 0)
     pMech->iInvulnTicks--;
+  if (pMech->iCoastTicks > 0)
+    pMech->iCoastTicks--;
   pMech->fStagger = mecha_approachf(pMech->fStagger, 0.0f,
                                     MECHA_STAGGER_DECAY * MECHA_DT);
 
   pMech->bJumpHeld = pInput->bJump;
   pMech->bDashHeld = pInput->bDash;
+  pMech->bGuardHeld = pInput->bGuard;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -885,6 +2116,29 @@ static void mecha_fire_weapon(tMechaWorld *pWorld, int iMechIdx, int iSlot)
     pMech->aiAmmo[iSlot] = 0;
     pMech->aiReload[iSlot] = pWeapon->iReloadTicks;
   }
+  /*
+   * One gun, three triggers, one magazine: three loads for the same gun, so
+   * every round spent is spent out of all of them and they reload together.
+   * [SIM-15]
+   */
+  if (pDef->bWheeled) {
+    int iOther;
+
+    for (iOther = 0; iOther < MECHA_WEAPON_SLOTS; iOther++) {
+      if (iOther == iSlot)
+        continue;
+      pMech->aiAmmo[iOther] = pMech->aiAmmo[iSlot];
+      if (pMech->aiReload[iOther] < pMech->aiReload[iSlot])
+        pMech->aiReload[iOther] = pMech->aiReload[iSlot];
+    }
+  }
+  /* And it shoves the machine. A gun the size of the car it is bolted to
+   * does not go off quietly, and the kick is the other half of what makes
+   * a long reload bearable: it buys distance. */
+  if (pDef->fRecoilPush > 0.0f) {
+    pMech->fVelX -= fFwdX * pDef->fRecoilPush;
+    pMech->fVelZ -= fFwdZ * pDef->fRecoilPush;
+  }
   pMech->iRecovery = pWeapon->iRecoveryTicks;
   pMech->iLastFiredSlot = iSlot;
   pMech->iLastFiredStance = (int)eStance;
@@ -897,7 +2151,15 @@ static void mecha_fire_weapon(tMechaWorld *pWorld, int iMechIdx, int iSlot)
            + fFwdZ * pDef->fRadius * 0.7f;
   fOriginY = pMech->fY + pDef->fHeight * pWeapon->fMuzzleHeight;
 
-  if (pMech->iTargetIdx >= 0 && pMech->iTargetIdx < MECHA_MAX_MECHS
+  /*
+   * Only a live lock aims the shot. With the lock broken the reticle is
+   * still on someone, but the weapon knows nothing about them: it fires
+   * straight down the barrel at whatever heading the mech is holding, with
+   * no lead and no guidance. That is the whole point of the lock being
+   * breakable -- losing it has to cost accuracy, not just the reticle.
+   */
+  if (pMech->byLock == MECHA_LOCK_HELD
+      && pMech->iTargetIdx >= 0 && pMech->iTargetIdx < MECHA_MAX_MECHS
       && mecha_mech_alive(&pWorld->aMechs[pMech->iTargetIdx]))
     pTarget = &pWorld->aMechs[pMech->iTargetIdx];
 
@@ -959,12 +2221,26 @@ static void mecha_fire_weapon(tMechaWorld *pWorld, int iMechIdx, int iSlot)
                          fOriginZ, pDef->fRadius * 0.5f, pWeapon->byPalette,
                          MECHA_SEC(0.12f));
 
+  /*
+   * Firing off a boost or out of the air brings the machine back onto its
+   * lock. Firing while walking or standing does not, deliberately: those
+   * are the states where the player is already free to point the thing,
+   * and taking the heading away every time a trigger came down would be
+   * the auto-turn back again wearing a different hat.
+   */
+  if (pMech->byMove == MECHA_MOVE_DASH || pMech->byMove == MECHA_MOVE_JUMP
+      || pMech->byMove == MECHA_MOVE_CANCEL)
+    pMech->iRecentreTicks = MECHA_RECENTRE_TICKS;
+
+  /* Whatever the solution came out as, the pilot still has to hit with it.
+   * Applied after the aim and before the spread so a wide burst is scattered
+   * about the mistake rather than about the target. */
+  iBaseYaw = mecha_angle_wrap(iBaseYaw + pMech->iAimError);
+
   for (iShot = 0; iShot < (int)pWeapon->byCount; iShot++) {
     tMechaProjectile *pShot = mecha_alloc_projectile(pWorld);
-    /* Spread fans symmetrically about the aim: with one shot the offset is
-     * zero, with two it straddles, with three the middle one runs true. */
-    int iOffset = (2 * iShot - ((int)pWeapon->byCount - 1))
-                  * pWeapon->iSpreadAngle / 2;
+    int iYawOff = 0;
+    int iPitchOff = 0;
     float fDirX;
     float fDirY;
     float fDirZ;
@@ -972,8 +2248,26 @@ static void mecha_fire_weapon(tMechaWorld *pWorld, int iMechIdx, int iSlot)
     if (!pShot)
       break;
 
-    mecha_direction_from_angles(mecha_angle_wrap(iBaseYaw + iOffset),
-                                iBasePitch, &fDirX, &fDirY, &fDirZ);
+    /*
+     * A cone, packed, rather than a row of shots side by side. A spread laid
+     * out along one axis is a fan: it misses above and below whatever it is
+     * pointed at and covers ground either side that nothing is standing on.
+     * Shots go on a sunflower spiral instead -- a golden angle apart, at a
+     * radius growing as the square root of the index -- which fills the
+     * circle evenly and puts the first one down the middle. [SIM-20]
+     */
+    if (pWeapon->byCount > 1 && pWeapon->iSpreadAngle > 0) {
+      float fStep = (float)iShot / (float)(pWeapon->byCount - 1);
+      float fRadius = (float)pWeapon->iSpreadAngle * 0.5f * sqrtf(fStep);
+      float fTheta = (float)iShot * MECHA_SPREAD_GOLDEN;
+
+      iYawOff = (int)(fRadius * cosf(fTheta));
+      iPitchOff = (int)(fRadius * sinf(fTheta));
+    }
+
+    mecha_direction_from_angles(mecha_angle_wrap(iBaseYaw + iYawOff),
+                                mecha_angle_wrap(iBasePitch + iPitchOff),
+                                &fDirX, &fDirY, &fDirZ);
 
     memset(pShot, 0, sizeof(*pShot));
     pShot->bActive = true;
@@ -993,7 +2287,9 @@ static void mecha_fire_weapon(tMechaWorld *pWorld, int iMechIdx, int iSlot)
     pShot->fArcGravity = pWeapon->fArcGravity;
     pShot->iLife = pWeapon->iLifeTicks;
     pShot->iHomingRate = pWeapon->iHomingRate;
-    pShot->iTarget = pMech->iTargetIdx;
+    /* A missile launched off a broken lock has nothing to home on. It is
+     * still a missile; it just flies where it was pointed. */
+    pShot->iTarget = pTarget ? pMech->iTargetIdx : -1;
     pShot->iArmTicks = pWeapon->byKind == MECHA_PROJ_MINE
                        ? MECHA_MINE_ARM_TICKS : 0;
   }
@@ -1011,6 +2307,8 @@ static void mecha_update_weapons(tMechaWorld *pWorld, int iMechIdx,
 
   if (pMech->iRecovery > 0)
     pMech->iRecovery--;
+  if (pMech->iRamCooldown > 0)
+    pMech->iRamCooldown--;
 
   for (iSlot = 0; iSlot < MECHA_WEAPON_SLOTS; iSlot++) {
     if (pMech->aiReload[iSlot] > 0) {
@@ -1107,6 +2405,108 @@ static bool mecha_segment_hits_cylinder(float fX0, float fY0, float fZ0,
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * The fireball a blast leaves standing. The explosion itself has already
+ * paid out its damage to everyone within reach, so those are marked as
+ * burned before the shell has drawn a breath: what is left for it to do is
+ * catch whoever walks in afterwards, and stop anything shot through it.
+ */
+static void mecha_spawn_shell(tMechaWorld *pWorld,
+                              const tMechaProjectile *pSource)
+{
+  tMechaProjectile *pShell = mecha_alloc_projectile(pWorld);
+  int i;
+
+  if (!pShell)
+    return;
+
+  memset(pShell, 0, sizeof(*pShell));
+  pShell->bActive = true;
+  pShell->byKind = MECHA_PROJ_SHELL;
+  pShell->byOwner = pSource->byOwner;
+  pShell->byPalette = pSource->byPalette;
+  pShell->fX = pSource->fX;
+  pShell->fY = pSource->fY;
+  pShell->fZ = pSource->fZ;
+  pShell->fPrevX = pSource->fX;
+  pShell->fPrevY = pSource->fY;
+  pShell->fPrevZ = pSource->fZ;
+  pShell->fBlastRadius = pSource->fBlastRadius;
+  pShell->fRadius = pSource->fBlastRadius * MECHA_SHELL_OPEN;
+  pShell->fDamage = pSource->fDamage;
+  pShell->fStagger = pSource->fStagger;
+  pShell->iLife = MECHA_SHELL_TICKS;
+  pShell->iTarget = -1;
+
+  for (i = 0; i < MECHA_MAX_MECHS; i++) {
+    const tMechaMech *pMech = &pWorld->aMechs[i];
+    const tMechaMechDef *pDef;
+    float fDist;
+
+    if (!pMech->bActive)
+      continue;
+    if (i == (int)pShell->byOwner || !mecha_mech_alive(pMech)) {
+      pShell->byHitMask |= (uint8_t)(1u << i);
+      continue;
+    }
+    pDef = mecha_mech_def(pMech);
+    fDist = mecha_length3(pMech->fX - pShell->fX,
+                          (pMech->fY + pDef->fHeight * 0.5f) - pShell->fY,
+                          pMech->fZ - pShell->fZ) - pDef->fRadius;
+    if (fDist < pShell->fBlastRadius)
+      pShell->byHitMask |= (uint8_t)(1u << i);
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/* Opens the fireball a little further and burns anyone new inside it. */
+static void mecha_update_shell(tMechaWorld *pWorld, tMechaProjectile *pShell)
+{
+  float fOpen;
+  int i;
+
+  pShell->iAge++;
+  if (--pShell->iLife <= 0) {
+    pShell->bActive = false;
+    return;
+  }
+
+  fOpen = (float)pShell->iAge / (float)MECHA_SHELL_TICKS;
+  if (fOpen > 1.0f)
+    fOpen = 1.0f;
+  pShell->fRadius = pShell->fBlastRadius
+                    * (MECHA_SHELL_OPEN + (1.0f - MECHA_SHELL_OPEN) * fOpen);
+
+  for (i = 0; i < MECHA_MAX_MECHS; i++) {
+    tMechaMech *pMech = &pWorld->aMechs[i];
+    const tMechaMechDef *pDef;
+    float fDist;
+
+    if ((pShell->byHitMask & (uint8_t)(1u << i)) != 0)
+      continue;
+    if (!mecha_mech_hittable(pWorld, i))
+      continue;
+    pDef = mecha_mech_def(pMech);
+    fDist = mecha_length3(pMech->fX - pShell->fX,
+                          (pMech->fY + pDef->fHeight * 0.5f) - pShell->fY,
+                          pMech->fZ - pShell->fZ) - pDef->fRadius;
+    if (fDist >= pShell->fRadius)
+      continue;
+
+    pShell->byHitMask |= (uint8_t)(1u << i);
+    mecha_sim_damage(pWorld, i, (int)pShell->byOwner,
+                     pShell->fDamage * MECHA_SHELL_TOUCH,
+                     pShell->fStagger * MECHA_SHELL_TOUCH, 0.0f, 0.0f);
+    mecha_sim_spawn_effect(pWorld, MECHA_FX_IMPACT, pMech->fX,
+                           pMech->fY + pDef->fHeight * 0.5f, pMech->fZ,
+                           pDef->fRadius, pShell->byPalette,
+                           MECHA_SEC(0.2f));
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static void mecha_projectile_detonate(tMechaWorld *pWorld,
                                       tMechaProjectile *pShot,
                                       int iDirectVictim)
@@ -1115,6 +2515,7 @@ static void mecha_projectile_detonate(tMechaWorld *pWorld,
     mecha_sim_explode(pWorld, (int)pShot->byOwner, pShot->fX, pShot->fY,
                       pShot->fZ, pShot->fBlastRadius, pShot->fDamage,
                       pShot->fStagger, pShot->byPalette);
+    mecha_spawn_shell(pWorld, pShot);
   } else if (iDirectVictim >= 0) {
     float fLen = mecha_length3(pShot->fVelX, pShot->fVelY, pShot->fVelZ);
     float fPushX = 0.0f;
@@ -1126,8 +2527,17 @@ static void mecha_projectile_detonate(tMechaWorld *pWorld,
       fPushX = pShot->fVelX / fLen * fPush;
       fPushZ = pShot->fVelZ / fLen * fPush;
     }
-    mecha_sim_damage(pWorld, iDirectVictim, (int)pShot->byOwner,
-                     pShot->fDamage, pShot->fStagger, fPushX, fPushZ);
+    {
+      float fDamageScale;
+      float fStaggerScale;
+
+      mecha_guard_mitigation(&pWorld->aMechs[iDirectVictim], pShot->byKind,
+                             &fDamageScale, &fStaggerScale);
+      mecha_sim_damage(pWorld, iDirectVictim, (int)pShot->byOwner,
+                       pShot->fDamage * fDamageScale,
+                       pShot->fStagger * fStaggerScale,
+                       fPushX * fDamageScale, fPushZ * fDamageScale);
+    }
     mecha_sim_spawn_effect(pWorld, MECHA_FX_IMPACT, pShot->fX, pShot->fY,
                            pShot->fZ, pShot->fRadius * 3.0f, pShot->byPalette,
                            MECHA_SEC(0.25f));
@@ -1197,6 +2607,86 @@ static void mecha_home_projectile(tMechaWorld *pWorld,
 
 //-------------------------------------------------------------------------------------------------
 
+/* Shots that meet in the air settle it between themselves. A mine sitting
+ * on the floor and a swing carried in front of a machine are neither of
+ * them things in flight, so neither takes part. */
+static bool mecha_shot_trades(const tMechaProjectile *pShot)
+{
+  return pShot->byKind != MECHA_PROJ_MINE
+      && pShot->byKind != MECHA_PROJ_MELEE;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * Fire against fire: within a sixth of each other two shots trade, otherwise
+ * the heavier carries on. Anything carrying a blast goes off where it was
+ * stopped rather than blinking out. [SIM-16]
+ */
+static void mecha_trade_projectiles(tMechaWorld *pWorld)
+{
+  int i;
+  int j;
+
+  for (i = 0; i < MECHA_MAX_PROJECTILES; i++) {
+    tMechaProjectile *pA = &pWorld->aProjectiles[i];
+
+    if (!pA->bActive || !mecha_shot_trades(pA))
+      continue;
+
+    for (j = i + 1; j < MECHA_MAX_PROJECTILES; j++) {
+      tMechaProjectile *pB = &pWorld->aProjectiles[j];
+      bool bShellA = pA->byKind == MECHA_PROJ_SHELL;
+      bool bShellB = pB->byKind == MECHA_PROJ_SHELL;
+      float fReach;
+      float fGap;
+      float fHigher;
+
+      if (!pB->bActive || !mecha_shot_trades(pB))
+        continue;
+      /* A fireball is everybody's problem; two shots from the same machine
+       * are nobody's. */
+      if (!bShellA && !bShellB && pA->byOwner == pB->byOwner)
+        continue;
+      if (bShellA && bShellB)
+        continue;
+
+      fReach = pA->fRadius + pB->fRadius;
+      if (mecha_length3(pA->fX - pB->fX, pA->fY - pB->fY, pA->fZ - pB->fZ)
+          > fReach)
+        continue;
+
+      if (bShellA) {
+        mecha_projectile_detonate(pWorld, pB, -1);
+        continue;
+      }
+      if (bShellB) {
+        mecha_projectile_detonate(pWorld, pA, -1);
+        break;
+      }
+
+      fHigher = pA->fDamage > pB->fDamage ? pA->fDamage : pB->fDamage;
+      fGap = pA->fDamage - pB->fDamage;
+      if (fGap < 0.0f)
+        fGap = -fGap;
+
+      if (fGap <= fHigher * MECHA_SHOT_TRADE_MARGIN) {
+        mecha_projectile_detonate(pWorld, pB, -1);
+        mecha_projectile_detonate(pWorld, pA, -1);
+        break;
+      }
+      if (pA->fDamage > pB->fDamage) {
+        mecha_projectile_detonate(pWorld, pB, -1);
+        continue;
+      }
+      mecha_projectile_detonate(pWorld, pA, -1);
+      break;
+    }
+  }
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static void mecha_update_projectiles(tMechaWorld *pWorld)
 {
   int i;
@@ -1213,6 +2703,11 @@ static void mecha_update_projectiles(tMechaWorld *pWorld)
     if (!pShot->bActive)
       continue;
 
+    if (pShot->byKind == MECHA_PROJ_SHELL) {
+      mecha_update_shell(pWorld, pShot);
+      continue;
+    }
+
     bMine = pShot->byKind == MECHA_PROJ_MINE;
 
     pShot->fPrevX = pShot->fX;
@@ -1221,6 +2716,7 @@ static void mecha_update_projectiles(tMechaWorld *pWorld)
 
     if (pShot->iArmTicks > 0)
       pShot->iArmTicks--;
+    pShot->iAge++;
 
     if (pShot->byKind == MECHA_PROJ_HOMING)
       mecha_home_projectile(pWorld, pShot);
@@ -1262,9 +2758,12 @@ static void mecha_update_projectiles(tMechaWorld *pWorld)
       const tMechaMechDef *pMechDef;
       float fT;
 
-      if (iMech == (int)pShot->byOwner || !mecha_mech_alive(pMech))
+      if (iMech == (int)pShot->byOwner)
         continue;
-      if (pMech->iInvulnTicks > 0)
+      /* Shots pass through anything that cannot be hit rather than
+       * detonating on it, so a machine on the floor does not soak fire
+       * meant for whoever is standing behind it. */
+      if (!mecha_mech_hittable(pWorld, iMech))
         continue;
 
       pMechDef = mecha_def_get((int)pMech->byDefIdx);
@@ -1357,11 +2856,57 @@ static void mecha_update_effects(tMechaWorld *pWorld)
       pFx->bActive = false;
       continue;
     }
+    /* Debris falls; every other effect drifts wherever it was sent. */
+    if (pFx->byKind == MECHA_FX_EMBER)
+      pFx->fVelY -= MECHA_GRAVITY * MECHA_DT;
     pFx->fX += pFx->fVelX * MECHA_DT;
     pFx->fY += pFx->fVelY * MECHA_DT;
     pFx->fZ += pFx->fVelZ * MECHA_DT;
   }
 }
+
+/*
+ * One machine running into another. fClosing is how fast the gap between
+ * them is shutting, and the direction is from the rammer towards the rammed.
+ * Nothing happens unless the rammer is on wheels, is doing it fast enough to
+ * be worth anything, and is actually driving into them rather than being
+ * shunted by them: a car that has just been knocked into somebody has not
+ * run them over.
+ */
+static void mecha_try_ram(tMechaWorld *pWorld, int iRammer, int iVictim,
+                          const tMechaMechDef *pDef, float fClosing,
+                          float fDirX, float fDirZ)
+{
+  tMechaMech *pRammer = &pWorld->aMechs[iRammer];
+  float fNoseX;
+  float fNoseZ;
+  float fOver;
+
+  if (!pDef->bWheeled || pDef->fRamDamage <= 0.0f
+      || pRammer->iRamCooldown > 0)
+    return;
+  if (fClosing <= pDef->fRamSpeed)
+    return;
+
+  /* Driving into them: the closing has to be happening down the nose, not
+   * sideways and not backwards. */
+  fNoseX = mecha_sin(pRammer->iFacing);
+  fNoseZ = mecha_cos(pRammer->iFacing);
+  if (fNoseX * fDirX + fNoseZ * fDirZ < MECHA_CAR_RAM_DOT)
+    return;
+
+  fOver = (fClosing - pDef->fRamSpeed) / MECHA_METRE;
+  pRammer->iRamCooldown = MECHA_CAR_RAM_TICKS;
+  mecha_sim_damage(pWorld, iVictim, iRammer, fOver * pDef->fRamDamage,
+                   fOver * pDef->fRamDamage * MECHA_CAR_RAM_STAGGER,
+                   fDirX, fDirZ);
+  mecha_sim_spawn_effect(pWorld, MECHA_FX_DUST, pRammer->fX,
+                         pRammer->fY + pDef->fHeight * 0.5f, pRammer->fZ,
+                         pDef->fRadius * 1.6f, pDef->abyPalette[3],
+                         MECHA_SEC(0.35f));
+}
+
+//-------------------------------------------------------------------------------------------------
 
 //-------------------------------------------------------------------------------------------------
 
@@ -1427,6 +2972,25 @@ static void mecha_resolve_overlaps(tMechaWorld *pWorld)
                                    pDefA->fHeight, &pA->fX, &pA->fZ);
       mecha_arena_resolve_cylinder(&pWorld->arena, pDefB->fRadius, pB->fY,
                                    pDefB->fHeight, &pB->fX, &pB->fZ);
+
+      /*
+       * A machine on wheels can run somebody over -- the only thing it has
+       * at close quarters. Charged on the closing speed, not its own.
+       * [SIM-17]
+       */
+      if (pA->byTeam != pB->byTeam) {
+        /* How fast the gap is shutting: the relative velocity resolved
+         * along the line between them, positive when they are coming
+         * together. Symmetric, so both of them get the same number. */
+        float fCloseX = pA->fVelX - pB->fVelX;
+        float fCloseZ = pA->fVelZ - pB->fVelZ;
+        float fClosing = (fCloseX * fDx + fCloseZ * fDz) / fDist;
+
+        mecha_try_ram(pWorld, i, j, pDefA, fClosing, fDx / fDist,
+                      fDz / fDist);
+        mecha_try_ram(pWorld, j, i, pDefB, fClosing, -fDx / fDist,
+                      -fDz / fDist);
+      }
     }
   }
 }
@@ -1450,6 +3014,11 @@ static void mecha_reset_mech_for_round(tMechaWorld *pWorld, int iMechIdx,
   pMech->fX = fX;
   pMech->fZ = fZ;
   pMech->fY = mecha_arena_ground_height(&pWorld->arena, fX, fZ, 0.0f);
+  /* Where the ground is, as far as the ramp rule is concerned. Leaving this
+   * at zero on a hill would read as the ground having risen the whole height
+   * of the hill in one tick, and fire the machine into the air on the first
+   * frame of the round. */
+  pMech->fGroundY = pMech->fY;
   pMech->fVelX = 0.0f;
   pMech->fVelY = 0.0f;
   pMech->fVelZ = 0.0f;
@@ -1462,17 +3031,26 @@ static void mecha_reset_mech_for_round(tMechaWorld *pWorld, int iMechIdx,
   pMech->bBoostLocked = false;
   pMech->fDashDirX = 0.0f;
   pMech->fDashDirZ = 0.0f;
+  pMech->iCoastTicks = 0;
+  pMech->bDashStickFree = false;
 
   pMech->fArmour = pDef->fArmour;
   pMech->fStagger = 0.0f;
   pMech->iStunTicks = 0;
   pMech->iInvulnTicks = 0;
   pMech->iRecovery = 0;
+  /* No tick is tick -1, so nothing is inside its knockdown grace. */
+  pMech->iDownTick = -1;
   pMech->iLungeTicks = 0;
   pMech->fLungeSpeed = 0.0f;
   pMech->iLastFiredSlot = -1;
   pMech->iLastFiredStance = MECHA_STANCE_STAND;
   pMech->iTargetIdx = -1;
+  pMech->byLock = MECHA_LOCK_NONE;
+  pMech->iLockSlipTicks = 0;
+  pMech->iFreeTurnTicks = 0;
+  pMech->iRecentreTicks = 0;
+  pMech->iStickYaw = pMech->iFacing;
 
   for (i = 0; i < MECHA_WEAPON_SLOTS; i++) {
     /* Magazines are per slot, not per stance: the standing loadout is what a
@@ -1484,10 +3062,22 @@ static void mecha_reset_mech_for_round(tMechaWorld *pWorld, int iMechIdx,
   }
   pMech->bJumpHeld = false;
   pMech->bDashHeld = false;
+  pMech->bGuardHeld = false;
   pMech->bCycleHeld = false;
 
   pMech->fLeanRoll = 0.0f;
+  pMech->fCombat = 0.0f;
   pMech->fStepPhase = 0.0f;
+  pMech->iLegYaw = pMech->iFacing;
+  pMech->bLegsBackward = false;
+
+  memset(&pMech->attitude, 0, sizeof(pMech->attitude));
+  /* Its own stream, and a different one per machine, so four identical
+   * cars in a row do not rattle in unison. */
+  mecha_rng_seed(&pMech->attitude.shake,
+                 0x9E3779B9u * (uint32_t)(iMechIdx + 1) + 0x51ED270Bu);
+  mecha_rng_seed(&pMech->spray,
+                 0x85EBCA6Bu * (uint32_t)(iMechIdx + 1) + 0xC2B2AE35u);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1510,6 +3100,7 @@ static void mecha_reset_round(tMechaWorld *pWorld)
   pWorld->match.iRoundTicks = pWorld->match.iRoundTimeLimit;
   pWorld->match.iWinnerIdx = -1;
 }
+
 
 //-------------------------------------------------------------------------------------------------
 
@@ -1613,7 +3204,7 @@ static void mecha_check_round_end(tMechaWorld *pWorld)
     return;
   }
 
-  if (pWorld->match.iRoundTicks <= 0) {
+  if (pWorld->match.iRoundTimeLimit > 0 && pWorld->match.iRoundTicks <= 0) {
     /* Time up: the team with the most armour left takes it. */
     float fBestArmour = -1.0f;
     int iBestTeam = -1;
@@ -1658,8 +3249,18 @@ static void mecha_advance_phase(tMechaWorld *pWorld)
     break;
 
   case MECHA_PHASE_FIGHT:
-    if (pMatch->iRoundTicks > 0)
-      pMatch->iRoundTicks--;
+    /*
+     * Down to zero on a clock, up from it on a deathmatch. The count still
+     * runs either way because things other than the end of the round read
+     * it -- the FIGHT banner wants to know how long ago the round started,
+     * and on a deathmatch a clock frozen at zero could never tell it.
+     */
+    if (pMatch->iRoundTimeLimit > 0) {
+      if (pMatch->iRoundTicks > 0)
+        pMatch->iRoundTicks--;
+    } else {
+      pMatch->iRoundTicks++;
+    }
     break;
 
   case MECHA_PHASE_ROUND_OVER:
@@ -1697,12 +3298,66 @@ void mecha_sim_init(tMechaWorld *pWorld, int iArenaIdx, uint32_t uiSeed,
   pWorld->uiSeed = uiSeed;
 
   pWorld->match.iRoundsToWin = iRoundsToWin > 0 ? iRoundsToWin : 1;
-  pWorld->match.iRoundTimeLimit = MECHA_SEC(90.0f);
+  pWorld->match.iRoundTimeLimit = MECHA_SEC((float)MECHA_ROUND_SECONDS);
   pWorld->match.iRoundTicks = pWorld->match.iRoundTimeLimit;
   pWorld->match.iRound = 1;
   pWorld->match.byPhase = MECHA_PHASE_READY;
   pWorld->match.iPhaseTicks = MECHA_READY_TICKS;
   pWorld->match.iWinnerIdx = -1;
+
+  /* Not the top of the ladder. ACE is the pilot with no reaction time and no
+   * aim error, and a first-time player has no answer to it. */
+  pWorld->byAiSkill = MECHA_AI_VETERAN;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+void mecha_sim_set_ai_skill(tMechaWorld *pWorld, int iSkill)
+{
+  if (!pWorld)
+    return;
+  if (iSkill < 0)
+    iSkill = 0;
+  if (iSkill >= MECHA_AI_SKILL_COUNT)
+    iSkill = MECHA_AI_SKILL_COUNT - 1;
+  pWorld->byAiSkill = (uint8_t)iSkill;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+void mecha_sim_set_round_seconds(tMechaWorld *pWorld, int iSeconds)
+{
+  if (!pWorld)
+    return;
+  /*
+   * Zero is a deathmatch: the clock is switched off rather than set very
+   * high, because a round decided on armour when the clock runs out is a
+   * different game from one that only ends when somebody falls over, and a
+   * very long clock is still the first of those.
+   */
+  pWorld->match.iRoundTimeLimit = iSeconds > 0
+                                      ? MECHA_SEC((float)iSeconds) : 0;
+  pWorld->match.iRoundTicks = pWorld->match.iRoundTimeLimit;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+void mecha_sim_set_ai_hold_fire(tMechaWorld *pWorld, bool bHold)
+{
+  if (pWorld)
+    pWorld->bAiHoldFire = bHold;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+const char *mecha_sim_ai_skill_name(int iSkill)
+{
+  switch (iSkill) {
+  case MECHA_AI_ROOKIE:  return "ROOKIE";
+  case MECHA_AI_VETERAN: return "VETERAN";
+  case MECHA_AI_ACE:     return "ACE";
+  default:               return "?";
+  }
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1728,6 +3383,11 @@ int mecha_sim_add_mech(tMechaWorld *pWorld, int iDefIdx,
     pMech->byController = byController;
     pMech->byTeam = byTeam;
     pMech->iTargetIdx = -1;
+  pMech->byLock = MECHA_LOCK_NONE;
+  pMech->iLockSlipTicks = 0;
+  pMech->iFreeTurnTicks = 0;
+  pMech->iRecentreTicks = 0;
+  pMech->iStickYaw = pMech->iFacing;
     pMech->iLastFiredSlot = -1;
     pMech->fArmour = mecha_def_get(pMech->byDefIdx)->fArmour;
     pWorld->iMechCount++;
@@ -1794,6 +3454,7 @@ void mecha_sim_tick(tMechaWorld *pWorld, const tMechaInput *paInputs,
 
     mecha_update_target(pWorld, i, input.bCycleTarget && !pMech->bCycleHeld);
     pMech->bCycleHeld = input.bCycleTarget;
+    mecha_update_lock(pWorld, i);
 
     mecha_update_facing(pWorld, i, &input, bCanAct);
     mecha_update_movement(pWorld, i, &input, bCanAct);
@@ -1801,6 +3462,9 @@ void mecha_sim_tick(tMechaWorld *pWorld, const tMechaInput *paInputs,
   }
 
   mecha_update_projectiles(pWorld);
+  /* After they have moved, so two shots closing head on meet where they
+   * actually met rather than a tick either side of it. */
+  mecha_trade_projectiles(pWorld);
   mecha_update_effects(pWorld);
   mecha_resolve_overlaps(pWorld);
 

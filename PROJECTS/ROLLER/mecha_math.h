@@ -46,11 +46,20 @@ float mecha_cos(int iAngle);
 /* Heading of the vector (fX, fZ) on the same circle, with 0 along +Z. */
 int mecha_atan2_angle(float fX, float fZ);
 
+/* The same angle measured as a signed offset from zero, in [-8192, 8191].
+ * An angle used as a small tilt rather than as a heading has to be signed:
+ * wrapping a two-degree nose-down to 16293 is exactly the wrong answer. */
+int mecha_angle_signed(int iAngle);
+
 //-------------------------------------------------------------------------------------------------
 
 float mecha_clampf(float fValue, float fLow, float fHigh);
 int mecha_clampi(int iValue, int iLow, int iHigh);
 float mecha_approachf(float fValue, float fTarget, float fMaxStep);
+/* The same, in whole units and without the circle: for angles held as small
+ * signed offsets from level, where wrapping -6 round to 16378 is exactly
+ * the wrong answer. */
+int mecha_stepi(int iValue, int iTarget, int iMaxStep);
 
 /* Length of (fX, fZ) on the ground plane. */
 float mecha_length2(float fX, float fZ);

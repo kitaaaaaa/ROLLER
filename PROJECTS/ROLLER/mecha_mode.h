@@ -20,11 +20,19 @@
 void mecha_mode_configure(int iPlayerDef, int iOpponentDef, int iArenaIdx,
                           int iRoundsToWin);
 
+/* Which rung of the computer pilot's ladder the next match is fought on, as
+ * an eMechaAiSkill. Out-of-range values clamp. The briefing screen changes
+ * this too, so a command-line choice is a starting point rather than a
+ * setting the player is stuck with. */
+void mecha_mode_set_ai_skill(int iSkill);
+
 /* Names for a launcher or a select screen; both wrap like the setter. */
 const char *mecha_mode_mech_name(int iDefIdx);
 const char *mecha_mode_arena_name(int iArenaIdx);
+const char *mecha_mode_skill_name(int iSkill);
 int mecha_mode_mech_count(void);
 int mecha_mode_arena_count(void);
+int mecha_mode_skill_count(void);
 
 //-------------------------------------------------------------------------------------------------
 /* Frontend state callbacks. */
@@ -33,6 +41,10 @@ void mecha_mode_enter(void);
 void mecha_mode_update(void);
 void mecha_mode_draw(void);
 void mecha_mode_exit(void);
+
+/* Headless acceptance scene: into the arena, out of it, and on to the
+ * menus. See snapshot_scenes.c. */
+void snapshot_render_arena_exit(void);
 
 //-------------------------------------------------------------------------------------------------
 #endif

@@ -620,6 +620,7 @@ static void print_usage(FILE *f, const char *argv0)
   cli_fprintf(f, " --arena-foe N           arena mode: opponent machine index\n");
   cli_fprintf(f, " --arena-map N           arena mode: arena index\n");
   cli_fprintf(f, " --arena-rounds N        arena mode: rounds needed to win (1-9)\n");
+  cli_fprintf(f, " --arena-skill N         arena mode: opponent skill, 0 rookie to 2 ace\n");
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -635,6 +636,7 @@ static int s_iArenaPlayerMech = 0;
 static int s_iArenaOpponentMech = 2;
 static int s_iArenaMap = 0;
 static int s_iArenaRounds = 2;
+static int s_iArenaSkill = -1;   /* -1 leaves the mode on its own default */
 
 //-------------------------------------------------------------------------------------------------
 
@@ -2982,7 +2984,8 @@ int main(int argc, const char **argv, const char **envp)
     } else if (strcmp(argv[i], "--arena-mech") == 0
                || strcmp(argv[i], "--arena-foe") == 0
                || strcmp(argv[i], "--arena-map") == 0
-               || strcmp(argv[i], "--arena-rounds") == 0) {
+               || strcmp(argv[i], "--arena-rounds") == 0
+               || strcmp(argv[i], "--arena-skill") == 0) {
       if (i + 1 < argc) {
         int iValue = atoi(argv[i + 1]);
 
@@ -2997,6 +3000,13 @@ int main(int argc, const char **argv, const char **envp)
           s_iArenaOpponentMech = iValue;
         } else if (strcmp(argv[i], "--arena-map") == 0) {
           s_iArenaMap = iValue;
+        } else if (strcmp(argv[i], "--arena-skill") == 0) {
+          if (iValue >= mecha_mode_skill_count()) {
+            cli_fprintf(stderr, "ERROR: '--arena-skill' expects 0-%d\n",
+                        mecha_mode_skill_count() - 1);
+            return 1;
+          }
+          s_iArenaSkill = iValue;
         } else {
           if (iValue < 1 || iValue > 9) {
             cli_fprintf(stderr, "ERROR: '--arena-rounds' expects 1-9\n");
@@ -3310,6 +3320,8 @@ int main(int argc, const char **argv, const char **envp)
   if (s_bArenaMode) {
     mecha_mode_configure(s_iArenaPlayerMech, s_iArenaOpponentMech,
                          s_iArenaMap, s_iArenaRounds);
+    if (s_iArenaSkill >= 0)
+      mecha_mode_set_ai_skill(s_iArenaSkill);
     frontend_run_game_loop(eFRONTEND_STATE_ARENA);
   } else {
     frontend_run_game_loop(g_bSnapshotMode ? eFRONTEND_STATE_RACING : eFRONTEND_STATE_COPYRIGHT);

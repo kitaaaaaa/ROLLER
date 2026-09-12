@@ -64,6 +64,27 @@ static int mecha_key(int iScancode)
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * Live keyboard state, straight from SDL, for the keys the engine's own
+ * buffer never sees held down.
+ *
+ * SHIFT is the one that matters here. The event pump deliberately withholds
+ * a SHIFT key-down -- it stashes it and returns, so it can tell SHIFT+TAB
+ * from a bare SHIFT that should skip the intro -- and only replays it on
+ * release. So keys[WHIP_SCANCODE_LSHIFT] is never set while the key is
+ * actually down, which is exactly the state a held dash button has to be
+ * read in. Reading SDL directly gets the real thing without changing what
+ * the pump does for the rest of the game.
+ */
+static int mecha_raw_key(SDL_Scancode eScancode)
+{
+  const bool *pbState = SDL_GetKeyboardState(NULL);
+
+  return (pbState && pbState[eScancode]) ? 1 : 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 void mecha_input_poll(tMechaInput *pInput)
 {
   SDL_Gamepad *pPad;
@@ -83,9 +104,11 @@ void mecha_input_poll(tMechaInput *pInput)
   iMoveZ += 100 * (mecha_key(WHIP_SCANCODE_W) - mecha_key(WHIP_SCANCODE_S));
   iTurn  += 100 * (mecha_key(WHIP_SCANCODE_E) - mecha_key(WHIP_SCANCODE_Q));
 
-  pInput->bDash        = mecha_key(WHIP_SCANCODE_LSHIFT) != 0;
+  pInput->bDash        = mecha_key(WHIP_SCANCODE_LSHIFT) != 0
+                      || mecha_raw_key(SDL_SCANCODE_LSHIFT) != 0
+                      || mecha_raw_key(SDL_SCANCODE_RSHIFT) != 0;
   pInput->bJump        = mecha_key(WHIP_SCANCODE_SPACE) != 0;
-  pInput->bCrouch      = mecha_key(WHIP_SCANCODE_LCTRL) != 0
+  pInput->bGuard      = mecha_key(WHIP_SCANCODE_LCTRL) != 0
                       || mecha_key(WHIP_SCANCODE_C) != 0;
   pInput->bFireLeft    = mecha_key(WHIP_SCANCODE_J) != 0;
   pInput->bFireCenter  = mecha_key(WHIP_SCANCODE_K) != 0;
@@ -120,7 +143,7 @@ void mecha_input_poll(tMechaInput *pInput)
         || SDL_GetGamepadButton(pPad, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER))
       pInput->bDash = true;
     if (SDL_GetGamepadButton(pPad, SDL_GAMEPAD_BUTTON_WEST))
-      pInput->bCrouch = true;
+      pInput->bGuard = true;
     if (SDL_GetGamepadButton(pPad, SDL_GAMEPAD_BUTTON_NORTH)
         || SDL_GetGamepadButton(pPad, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER))
       pInput->bCycleTarget = true;
@@ -148,4 +171,47 @@ void mecha_input_poll(tMechaInput *pInput)
 bool mecha_input_quit_pressed(void)
 {
   return mecha_key(WHIP_SCANCODE_ESCAPE) != 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+void mecha_input_poll_menu(tMechaMenuInput *pMenu)
+{
+  SDL_Gamepad *pPad;
+
+  if (!pMenu)
+    return;
+  SDL_memset(pMenu, 0, sizeof(*pMenu));
+
+  pMenu->bUp      = mecha_key(WHIP_SCANCODE_UP) || mecha_key(WHIP_SCANCODE_W);
+  pMenu->bDown    = mecha_key(WHIP_SCANCODE_DOWN) || mecha_key(WHIP_SCANCODE_S);
+  pMenu->bLeft    = mecha_key(WHIP_SCANCODE_LEFT) || mecha_key(WHIP_SCANCODE_A);
+  pMenu->bRight   = mecha_key(WHIP_SCANCODE_RIGHT) || mecha_key(WHIP_SCANCODE_D);
+  pMenu->bConfirm = mecha_key(WHIP_SCANCODE_RETURN)
+                 || mecha_key(WHIP_SCANCODE_SPACE);
+  pMenu->bBack    = mecha_key(WHIP_SCANCODE_ESCAPE) != 0;
+
+  pPad = mecha_first_gamepad();
+  if (pPad) {
+    /* The stick counts as well as the pad, at a deflection well past the
+     * dead zone so a resting stick never walks the selection. */
+    int iPadX = mecha_axis_to_percent(
+        SDL_GetGamepadAxis(pPad, SDL_GAMEPAD_AXIS_LEFTX));
+    int iPadY = mecha_axis_to_percent(
+        SDL_GetGamepadAxis(pPad, SDL_GAMEPAD_AXIS_LEFTY));
+
+    if (SDL_GetGamepadButton(pPad, SDL_GAMEPAD_BUTTON_DPAD_UP) || iPadY < -55)
+      pMenu->bUp = true;
+    if (SDL_GetGamepadButton(pPad, SDL_GAMEPAD_BUTTON_DPAD_DOWN) || iPadY > 55)
+      pMenu->bDown = true;
+    if (SDL_GetGamepadButton(pPad, SDL_GAMEPAD_BUTTON_DPAD_LEFT) || iPadX < -55)
+      pMenu->bLeft = true;
+    if (SDL_GetGamepadButton(pPad, SDL_GAMEPAD_BUTTON_DPAD_RIGHT) || iPadX > 55)
+      pMenu->bRight = true;
+    if (SDL_GetGamepadButton(pPad, SDL_GAMEPAD_BUTTON_SOUTH)
+        || SDL_GetGamepadButton(pPad, SDL_GAMEPAD_BUTTON_START))
+      pMenu->bConfirm = true;
+    if (SDL_GetGamepadButton(pPad, SDL_GAMEPAD_BUTTON_EAST))
+      pMenu->bBack = true;
+  }
 }

@@ -251,6 +251,43 @@ void noclip_camera_update(void)
   s_fNoclipZ += fMoveZ * fStep;
 }
 
+/*
+ * Put the free camera somewhere and take it back again. The arena mode
+ * drives the same movement code the track's free camera does but draws
+ * through its own renderer, so it needs the state rather than the globals
+ * noclip_camera_apply() publishes. Everything here is in the track frame,
+ * where Z is up; the caller maps.
+ */
+void noclip_camera_place(float fX, float fY, float fZ, int iYaw, int iPitch)
+{
+  s_fNoclipX = fX;
+  s_fNoclipY = fY;
+  s_fNoclipZ = fZ;
+  s_iNoclipYaw = noclip_angle14(iYaw);
+  s_iNoclipPitch = noclip_clamp_pitch(iPitch);
+  s_iNoclipViewDist = VIEWDIST;
+  s_ullNoclipLastUpdateNs = 0;
+  s_bNoclipInitialized = true;
+  noclip_sync_mouse_mode();
+}
+
+void noclip_camera_get(float *pfX, float *pfY, float *pfZ,
+                       int *piYaw, int *piPitch)
+{
+  if (pfX)
+    *pfX = s_fNoclipX;
+  if (pfY)
+    *pfY = s_fNoclipY;
+  if (pfZ)
+    *pfZ = s_fNoclipZ;
+  if (piYaw)
+    *piYaw = s_iNoclipYaw;
+  if (piPitch)
+    *piPitch = s_iNoclipPitch;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 void noclip_camera_apply(void)
 {
   if (!g_bNoclip) {

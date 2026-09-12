@@ -1929,7 +1929,11 @@ void UpdateSDL()
         continue;
       }
 #if !defined(IS_WASM)
-      if (e.key.scancode == SDL_SCANCODE_TAB && (e.key.mod & SDL_KMOD_SHIFT)) {
+      /* The arena owns TAB -- it is the target cycle -- and it draws through
+       * the software rasteriser, so neither renderer toggle belongs in a
+       * match. [MODE-06] */
+      if (e.key.scancode == SDL_SCANCODE_TAB && (e.key.mod & SDL_KMOD_SHIFT)
+          && eFrontendCurrentState != eFRONTEND_STATE_ARENA) {
         s_pendingShiftDown.type = 0; /* consumed by SHIFT+TAB */
         if (g_pGameRenderer) {
           bool newSplit = !game_render_is_split_screen(g_pGameRenderer);
@@ -2025,7 +2029,8 @@ void UpdateSDL()
     if (e.type == SDL_EVENT_KEY_DOWN) {
 
 #if !defined(IS_WASM)
-      if (e.key.scancode == SDL_SCANCODE_TAB) {
+      if (e.key.scancode == SDL_SCANCODE_TAB
+          && eFrontendCurrentState != eFRONTEND_STATE_ARENA) {
         MenuRenderer *pTabRenderer = GetMenuRenderer();
         if (pTabRenderer) {
           int bGPU = !(menu_render_get_pending_mode(pTabRenderer) == MENU_RENDER_GPU);

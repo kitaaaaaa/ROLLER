@@ -135,6 +135,9 @@ static bool s_bActive;
 static eMechaScreen s_eScreen;
 static int s_iBriefSelection;
 static const char *s_szLastResult;
+/* Where a spectated match's result line is built; s_szLastResult only
+ * borrows it. */
+static char s_szSpectateResult[40];
 static bool s_bLastResultWin;
 /* Counts down from MECHA_RESULT_HOLD_NS once the match is decided. */
 static uint64 s_ullResultHoldNs;
@@ -430,6 +433,8 @@ static void mecha_mode_free_camera_update(void)
 
 static void mecha_mode_start_match(void)
 {
+  int iSeat;
+
   mecha_sim_init(&s_World, s_iArenaIdx, (uint32)SDL_GetTicksNS() | 1u,
                  s_iRoundsToWin);
   mecha_sim_set_ai_skill(&s_World, s_iAiSkill);
@@ -440,13 +445,14 @@ static void mecha_mode_start_match(void)
   /*
    * Everyone on their own team, so a free-for-all is genuinely free: the
    * simulation only ever asks whether two machines share a team, and no two
-   * of these do. The player takes a slot like anybody else unless they are
-   * spectating, in which case the arena fills with machines that have
-   * nothing to do with them. [MODE-04]
+   * of these do. A spectator's chosen machine still takes the field with a
+   * computer pilot in it: leaving the seat empty would put a single machine
+   * in a duel, and a round with one team in it can never end. [MODE-04]
    */
-  s_iPlayerIdx = s_bSpectate
-    ? -1
-    : mecha_sim_add_mech(&s_World, s_iPlayerDef, MECHA_CONTROL_HUMAN, 0);
+  iSeat = mecha_sim_add_mech(&s_World, s_iPlayerDef,
+                             s_bSpectate ? MECHA_CONTROL_AI
+                                         : MECHA_CONTROL_HUMAN, 0);
+  s_iPlayerIdx = s_bSpectate ? -1 : iSeat;
   if (s_iGameMode == MECHA_GAME_SURVIVAL) {
     int iSlot;
 
@@ -458,8 +464,8 @@ static void mecha_mode_start_match(void)
   } else {
     mecha_sim_add_mech(&s_World, s_iOpponentDef, MECHA_CONTROL_AI, 1);
   }
-  if (s_iPlayerIdx >= 0)
-    s_World.aMechs[s_iPlayerIdx].byScheme = (uint8_t)s_iScheme;
+  if (iSeat >= 0)
+    s_World.aMechs[iSeat].byScheme = (uint8_t)s_iScheme;
   mecha_sim_begin_match(&s_World);
 
   mecha_camera_reset(&s_Camera);
@@ -803,12 +809,22 @@ void mecha_mode_update(void)
   if (s_World.match.byPhase == MECHA_PHASE_MATCH_OVER) {
     s_ullResultHoldNs += ullElapsed;
     if (s_ullResultHoldNs >= MECHA_RESULT_HOLD_NS) {
-      bool bWin = s_World.match.iWinnerIdx == s_iPlayerIdx;
+      int iWinner = s_World.match.iWinnerIdx;
+      bool bWin = iWinner >= 0 && iWinner == s_iPlayerIdx;
 
-      mecha_mode_return_to_briefing(
-          s_World.match.iWinnerIdx < 0 ? "LAST MATCH:  DRAW"
-            : bWin ? "LAST MATCH:  VICTORY" : "LAST MATCH:  DEFEAT",
-          bWin);
+      if (iWinner < 0) {
+        mecha_mode_return_to_briefing("LAST MATCH:  DRAW", false);
+      } else if (s_iPlayerIdx < 0) {
+        /* Nothing was won or lost from the free camera, so the briefing
+         * names whoever took it instead. */
+        snprintf(s_szSpectateResult, sizeof(s_szSpectateResult),
+                 "LAST MATCH:  %s",
+                 mecha_mode_mech_name((int)s_World.aMechs[iWinner].byDefIdx));
+        mecha_mode_return_to_briefing(s_szSpectateResult, false);
+      } else {
+        mecha_mode_return_to_briefing(bWin ? "LAST MATCH:  VICTORY"
+                                           : "LAST MATCH:  DEFEAT", bWin);
+      }
     }
   }
 }
@@ -835,9 +851,10 @@ void mecha_mode_draw(void)
     return;
   }
 
-  if (s_iPlayerIdx < 0)
-    return;
-
+  /* A spectator has no machine, and the frame is drawn with no view mech at
+   * all: the scene is the same, the HUD is somebody else's business. Not
+   * drawing it at all leaves the last briefing frame on screen, which reads
+   * as a hung game. [MODE-07] */
   game_render_begin_frame(g_pGameRenderer);
   mecha_render_frame(g_pGameRenderer, &s_World, &s_Camera, s_iPlayerIdx,
                      scrbuf, XMAX, YMAX, s_aQuads, MECHA_QUAD_CAPACITY);

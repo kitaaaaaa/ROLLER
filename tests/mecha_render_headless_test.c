@@ -1001,6 +1001,57 @@ int main(int argc, char **argv)
         }
     }
 
+    /*
+     * --- a full arena, cycling targets, and nobody to follow --------------
+     *
+     * Survival fills every slot, so this is the crowded case: sixteen
+     * machines, the reticle stepping through all of them, and then the same
+     * world drawn the way a spectator sees it -- no view mech at all.
+     * [TEST-09]
+     */
+    {
+        static tMechaInput aInputs[MECHA_MAX_MECHS];
+        int iSlot;
+        int iTick;
+        int aiSurvival[256];
+
+        mecha_sim_init(&s_World, 0, 0x5A1Eu, 2);
+        iPlayer = mecha_sim_add_mech(&s_World, 0, MECHA_CONTROL_HUMAN, 0);
+        CHECK(iPlayer == 0);
+        for (iSlot = 0; iSlot < MECHA_MAX_MECHS; iSlot++)
+            if (mecha_sim_add_mech(&s_World, (1 + iSlot) % mecha_def_count(),
+                                   MECHA_CONTROL_AI, (uint8)(iSlot + 1)) < 0)
+                break;
+        CHECK(s_World.iMechCount == MECHA_MAX_MECHS);
+        mecha_sim_begin_match(&s_World);
+        mecha_camera_reset(&s_Camera);
+        memset(aInputs, 0, sizeof(aInputs));
+        run_to_fight(aInputs);
+
+        /* Tab held on alternate ticks is one target change every other tick,
+         * which walks the lock right round the arena several times over. */
+        for (iTick = 0; iTick < MECHA_TICK_HZ * 8; iTick++) {
+            aInputs[iPlayer].bCycleTarget = (iTick & 1) == 0;
+            mecha_sim_tick(&s_World, aInputs, MECHA_MAX_MECHS);
+            render_now(pRenderer, iPlayer);
+        }
+        histogram(s_aFrame, aiSurvival);
+        CHECK(distinct_colours(aiSurvival) >= 4);
+        dump_frame(szOutDir, "arena_survival.png");
+
+        /* Spectating: the same world with no machine of the player's own.
+         * The scene still has to be drawn -- a frame that never arrives is
+         * indistinguishable from a hung game. [TEST-10] */
+        memset(s_aFrame, MECHA_TEST_SENTINEL, sizeof(s_aFrame));
+        mecha_render_frame(pRenderer, &s_World, &s_Camera, -1,
+                           s_aFrame, FRAME_W, FRAME_H,
+                           s_aQuads, MECHA_QUAD_CAPACITY);
+        histogram(s_aFrame, aiSurvival);
+        CHECK(aiSurvival[MECHA_TEST_SENTINEL] == 0);
+        CHECK(distinct_colours(aiSurvival) >= 4);
+        dump_frame(szOutDir, "arena_spectate.png");
+    }
+
     game_render_destroy(pRenderer);
     printf("mecha render: headless software frames rasterised\n");
     return 0;

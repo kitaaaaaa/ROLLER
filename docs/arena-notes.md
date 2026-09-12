@@ -1570,3 +1570,42 @@ rather than the mode reading `worldx`.
 
 The camera grabs the mouse while it runs, so leaving a match releases it and
 resets `g_bNoclip`, or the briefing has no pointer.
+
+## MODE-06 — the arena has to claim TAB back off the engine
+
+`roller.c`'s event loop binds TAB to the renderer toggle and SHIFT+TAB to split
+screen, both of which call `game_render_set_mode` and save the input config. The
+arena uses TAB for the target cycle, and `mecha_mode_enter` forces
+`GAME_RENDER_SOFTWARE` because every arena frame is rasterised through
+`screen_pointer`, `winx/winy/winw/winh` and `scrbuf` — the globals
+`mecha_render_frame` writes before it draws. Pressing TAB in a match therefore
+swapped the renderer out from under the mode mid-frame and took the game down
+with it.
+
+Both handlers now skip while `eFrontendCurrentState` is `eFRONTEND_STATE_ARENA`,
+which is the shape roller.c already uses for state-specific behaviour (the
+background FPS cap tests `eFRONTEND_STATE_PAUSE_OVERLAY` the same way). The
+event still reaches `InputHandleEvent` first, so `mecha_key(WHIP_SCANCODE_TAB)`
+sees it.
+
+Why it looked like a survival-only bug: with two machines in the arena the
+target cycle is a no-op, so a duel gives nobody any reason to press TAB.
+Survival is simply the first mode where the key gets used.
+
+## MODE-07 — a spectator still needs frames drawn
+
+`mecha_mode_draw` returned early when there was no player mech, so a spectated
+match presented nothing at all: no `game_render_begin_frame`, no `end_frame`,
+and the last briefing frame left on screen. The simulation was running the whole
+time, which is what made it read as a lock-up rather than a blank screen.
+
+`mecha_render_frame` already takes a negative view mech: the scene ignores it
+outright and `mecha_render_hud` returns before touching `aMechs`, so the world
+draws and the HUD simply is not there. Nothing else was needed.
+
+The other half of the same bug was the seat itself. Spectating used to leave the
+player's slot empty, so a spectated duel had one machine in it — and
+`mecha_check_round_end` only ends a round when more than one team was present,
+so that match could never finish. The seat is now filled with the player's
+chosen machine under a computer pilot, which is also what makes the COLOURS row
+still mean something from the free camera.

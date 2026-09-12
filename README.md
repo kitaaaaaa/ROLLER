@@ -1,41 +1,17 @@
-# ROLLER
+# ROLLER-X
 
-[![CI][ci-shd]][ci-url] [![LC][lc-shd]][lc-url] [![Download][dl-shd]][dl-url]
-[![Play in your browser][web-shd]][web-url]
-
-https://fatal.racing/
-
-![Roller logo](./images/whiplash.gif)
-
-This project aims to implement all the functionality of the 1995 game
-Whiplash/Fatal Racing in a way that builds and runs on modern PCs. Where
-necessary, DOS-specific functions are substituted with SDL and Windows/Unix
-equivalents. For instruction-matching decomp, see
-https://github.com/FatalDecomp/ROLLER-matching
-
-[![On track!](https://img.youtube.com/vi/JvoiQTRjt88/maxresdefault.jpg)](https://www.youtube.com/watch?v=JvoiQTRjt88)
-
-## Play
-
-**[Play ROLLER in your browser][web-url]** with the bundled freeware demo, or
-import an image of a legally owned retail disc for the full game. No install is
-required.
-
-Native installations require assets from a retail copy of the game. Download the
-latest native version from the
-[releases](https://github.com/FatalDecomp/ROLLER/releases) page and extract it
-wherever you want. On initial launch, select a CD image (CUE/BIN or ISO) to
-extract the assets. Press the \` key to access additional settings.
+An experimental build of https://github.com/FatalDecomp/ROLLER created with Claude
 
 ## Arena mode
-
-ROLLER also ships an arena mode: a 3D mecha duel on the same software
-rasteriser, reached with `--arena`. It is an original game built on the engine's
+ROLLER-X ships an arena mode: a 3D mecha duel in the software
+rasteriser, reached with `--arena`. It is a clone of a certain mid-90s giant robot fighting game built on the engine's
 renderer and math rather than a track, and it needs no extra assets -- the
-machines, the arenas and the HUD font are all generated at runtime. See
+machines, projectiles, arenas and the HUD font are all generated at runtime and all textures come from Whiplash's FATDATA. See
 [docs/arena-mode.md](./docs/arena-mode.md) for the controls and the layout. It
 opens on a briefing screen that lists the controls, sets up the match and has
 the way back out to the race game.
+
+## 
 
 ```bash
 zig build run -- --arena

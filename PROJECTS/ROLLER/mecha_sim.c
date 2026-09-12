@@ -3063,7 +3063,14 @@ static void mecha_reset_mech_for_round(tMechaWorld *pWorld, int iMechIdx,
 
   pMech->fX = fX;
   pMech->fZ = fZ;
-  pMech->fY = mecha_arena_ground_height(&pWorld->arena, fX, fZ, 0.0f);
+  /*
+   * The ground a spawn stands on is the ground itself, asked for directly.
+   * Asking mecha_arena_ground_height with the feet at zero reads an open
+   * arena's raised ground as somewhere the machine is standing underneath,
+   * which answers void -- and a machine placed in the void at the start of a
+   * round falls out of the world before it has moved. [SIM-24]
+   */
+  pMech->fY = mecha_arena_terrain_height(&pWorld->arena, fX, fZ);
   /* Where the ground is, as far as the ramp rule is concerned. Leaving this
    * at zero on a hill would read as the ground having risen the whole height
    * of the hill in one tick, and fire the machine into the air on the first

@@ -6392,6 +6392,308 @@ static int test_both_triggers_make_the_centre_shot(void)
 
 //-------------------------------------------------------------------------------------------------
 
+/* A clear shot from one machine to the other, arena geometry only. */
+static bool line_between(const tMechaWorld *pWorld, int iA, int iB)
+{
+    const tMechaMechDef *pDef = mecha_def_get((int)pWorld->aMechs[iA].byDefIdx);
+
+    return !mecha_arena_trace_segment(
+        &pWorld->arena,
+        pWorld->aMechs[iA].fX, pWorld->aMechs[iA].fY + pDef->fHeight * 0.7f,
+        pWorld->aMechs[iA].fZ,
+        pWorld->aMechs[iB].fX, mecha_mech_centre_height(pWorld, iB),
+        pWorld->aMechs[iB].fZ, NULL, NULL, NULL);
+}
+
+/*
+ * Cover is a thing to get round, not a thing to get stuck on. Both pilots
+ * are put behind the tallest building in the city with the enemy directly
+ * on the far side of it, which is the shape of both faults: a car drives
+ * into it and parks, a walker stands against it and gives up. [TEST-12]
+ */
+static int test_pilots_get_round_what_is_in_the_way(void)
+{
+    static const struct { const char *szWho; bool bWheeled; } aCase[2] = {
+        { "car", true }, { "walker", false },
+    };
+    int iCase;
+
+    for (iCase = 0; iCase < 2; iCase++) {
+        tMechaWorld world;
+        tMechaInput aInputs[2];
+        int iDef = -1;
+        int iTick;
+        int iFound = -1;
+        int i;
+
+        for (i = 0; i < mecha_def_count(); i++)
+            if (mecha_def_get(i)->bWheeled == aCase[iCase].bWheeled) {
+                iDef = i;
+                break;
+            }
+        CHECK(iDef >= 0);
+
+        /* MERIDIAN CROSSING's middle block: 62 m across and a hundred tall,
+         * far too big to climb and far too wide to see past. */
+        start_duel(&world, 5, iDef, iDef, 0x30C0u + (uint32_t)iCase, 1);
+        memset(aInputs, 0, sizeof(aInputs));
+        world.aMechs[0].byController = MECHA_CONTROL_AI;
+        world.aMechs[0].fX = 0.0f;
+        world.aMechs[0].fZ = -MECHA_M(52.0f);
+        world.aMechs[0].iFacing = 0;              /* nose into the building */
+        world.aMechs[0].iStickYaw = 0;
+        world.aMechs[1].fX = 0.0f;
+        world.aMechs[1].fZ = MECHA_M(52.0f);
+        world.aMechs[1].iInvulnTicks = MECHA_TICK_HZ * 60;
+        CHECK(!line_between(&world, 0, 1));
+
+        for (iTick = 0; iTick < MECHA_TICK_HZ * 14; iTick++) {
+            mecha_sim_tick(&world, aInputs, 2);
+            if (line_between(&world, 0, 1)) {
+                iFound = iTick;
+                break;
+            }
+        }
+        printf("   %-6s came round the block after %.1f s (%.0f m across)\n",
+               aCase[iCase].szWho,
+               iFound < 0 ? 99.0f : (float)iFound / (float)MECHA_TICK_HZ,
+               fabsf(world.aMechs[0].fX) / MECHA_METRE);
+        CHECK(iFound >= 0);
+    }
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * Watari-dash: a burst already under way, turned. The machine wants to see
+ * the stick let go before it will take a new direction, so the pilot has to
+ * let go -- and that is the whole trick. [TEST-13]
+ */
+static int test_the_pilot_turns_a_dash_it_is_already_in(void)
+{
+    tMechaWorld world;
+    tMechaInput aInputs[2];
+    int iLegs = -1;
+    int i;
+
+    for (i = 0; i < mecha_def_count(); i++)
+        if (!mecha_def_get(i)->bWheeled) {
+            iLegs = i;
+            break;
+        }
+    CHECK(iLegs >= 0);
+
+    start_duel(&world, 0, iLegs, iLegs, 0x7A71u, 1);
+    memset(aInputs, 0, sizeof(aInputs));
+    world.aMechs[0].byController = MECHA_CONTROL_AI;
+
+    /* Mid-burst towards +Z, with the enemy behind it. Nothing about this is
+     * unreachable in a fight -- it is what rounding a corner leaves you
+     * with -- but setting it up directly is what makes the test read. */
+    world.aMechs[0].fX = 0.0f;
+    world.aMechs[0].fZ = 0.0f;
+    world.aMechs[0].iFacing = 0;
+    world.aMechs[0].iStickYaw = 0;
+    world.aMechs[0].byMove = MECHA_MOVE_DASH;
+    world.aMechs[0].iStateTicks = 2;
+    world.aMechs[0].fDashDirX = 0.0f;
+    world.aMechs[0].fDashDirZ = 1.0f;
+    world.aMechs[0].bDashStickFree = false;
+    world.aMechs[1].fX = 0.0f;
+    world.aMechs[1].fZ = -MECHA_M(40.0f);
+    world.aMechs[1].iInvulnTicks = MECHA_TICK_HZ * 60;
+
+    /* One tick to let the stick go... */
+    mecha_sim_tick(&world, aInputs, 2);
+    CHECK(world.aMechs[0].bDashStickFree);
+
+    /*
+     * ...and the next few to put it down somewhere else. Which way it
+     * chooses is the pilot's business -- at this range a long-armed machine
+     * would rather open the distance than close it -- so what is asserted is
+     * that the burst turned a long way off what it launched with and is
+     * still the same burst.
+     */
+    for (i = 0; i < 6 && world.aMechs[0].fDashDirZ > 0.7f; i++)
+        mecha_sim_tick(&world, aInputs, 2);
+    printf("   the burst turned from +Z to (%.2f, %.2f)\n",
+           world.aMechs[0].fDashDirX, world.aMechs[0].fDashDirZ);
+    /* The dot against the launch direction, which was +Z exactly. */
+    CHECK(world.aMechs[0].fDashDirZ < 0.7f);
+    CHECK(world.aMechs[0].byMove == MECHA_MOVE_DASH);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * The causeway map: two inclined lanes between two keeps with a hole down
+ * the middle of the run, and a fall that is a fall rather than a deletion.
+ * [TEST-14]
+ */
+static int test_the_causeway_map_is_a_causeway(void)
+{
+    tMechaArena arena;
+    int iIdx = mecha_arena_count() - 1;
+    const float fHigh = MECHA_M(40.0f);   /* feet well above any of it */
+    float fX;
+    float fZ;
+    int iSlot;
+
+    mecha_arena_init(&arena, iIdx);
+    CHECK(strcmp(arena.szName, "FACING WORLDS") == 0);
+    CHECK(arena.byShape == MECHA_ARENA_OPEN);
+
+    /* Both lanes run the length of the map, and both of them slope: the
+     * bases stand above the middle, so leaving one is downhill. */
+    {
+        float fMid = mecha_arena_ground_height(&arena, 0.0f, MECHA_M(26.0f),
+                                               fHigh);
+        float fEnd = mecha_arena_ground_height(&arena, MECHA_M(150.0f),
+                                               MECHA_M(26.0f), fHigh);
+
+        CHECK(fEnd > fMid + MECHA_M(8.0f));
+        for (fX = -MECHA_M(140.0f); fX <= MECHA_M(140.0f); fX += MECHA_M(10.0f)) {
+            CHECK(mecha_arena_ground_height(&arena, fX, MECHA_M(26.0f), fHigh)
+                  > -MECHA_M(1.0f));
+            CHECK(mecha_arena_ground_height(&arena, fX, -MECHA_M(26.0f), fHigh)
+                  > -MECHA_M(1.0f));
+        }
+    }
+
+    /*
+     * And there is nothing down the middle of the run between them. Not a
+     * pit flag -- a pit kills a machine standing on it, which is being
+     * deleted rather than falling -- but ground far below the kill plane, so
+     * a machine that goes in falls. [ARENA-15]
+     */
+    for (fX = -MECHA_M(90.0f); fX <= MECHA_M(90.0f); fX += MECHA_M(10.0f)) {
+        CHECK(mecha_arena_ground_height(&arena, fX, 0.0f, fHigh) < arena.fKillY);
+        CHECK((mecha_arena_surface(&arena, fX, 0.0f) & MECHA_SURF_PIT) == 0);
+    }
+    /* Nor anything off the outer sides of either lane. */
+    for (fZ = MECHA_M(60.0f); fZ <= MECHA_M(190.0f); fZ += MECHA_M(10.0f)) {
+        CHECK(mecha_arena_ground_height(&arena, 0.0f, fZ, fHigh) < arena.fKillY);
+        CHECK(mecha_arena_ground_height(&arena, 0.0f, -fZ, fHigh) < arena.fKillY);
+    }
+
+    /*
+     * The keeps are hollow: floor in the courtyard, a doorway through the
+     * wall facing the causeway, and solid wall everywhere else.
+     */
+    {
+        const float fKeep = MECHA_M(150.0f);
+        const float fEye = MECHA_M(23.0f);   /* head height on a raised base */
+
+        CHECK(mecha_arena_ground_height(&arena, -fKeep, 0.0f, fHigh)
+              > MECHA_M(10.0f));
+        CHECK(mecha_arena_ground_height(&arena, fKeep, 0.0f, fHigh)
+              > MECHA_M(10.0f));
+        CHECK(!mecha_arena_trace_segment(&arena, -MECHA_M(110.0f), fEye, 0.0f,
+                                         -fKeep, fEye, 0.0f, NULL, NULL, NULL));
+        CHECK(!mecha_arena_trace_segment(&arena, MECHA_M(110.0f), fEye, 0.0f,
+                                         fKeep, fEye, 0.0f, NULL, NULL, NULL));
+        CHECK(mecha_arena_trace_segment(&arena, -fKeep, fEye, MECHA_M(60.0f),
+                                        -fKeep, fEye, 0.0f, NULL, NULL, NULL));
+        CHECK(mecha_arena_trace_segment(&arena, fKeep, fEye, -MECHA_M(60.0f),
+                                        fKeep, fEye, 0.0f, NULL, NULL, NULL));
+    }
+
+    /* Nobody starts over the hole, however many are playing. [ARENA-14] */
+    for (iSlot = 0; iSlot < MECHA_MAX_MECHS; iSlot++) {
+        int iFacing;
+
+        mecha_arena_spawn_point(&arena, iSlot, MECHA_MAX_MECHS, &fX, &fZ,
+                                &iFacing);
+        CHECK(mecha_arena_ground_height(&arena, fX, fZ, fHigh) > -MECHA_M(1.0f));
+    }
+
+    /* A duel opens at opposite ends, on opposite lanes. */
+    {
+        float fX0;
+        float fZ0;
+        float fX1;
+        float fZ1;
+        int iFacing;
+
+        mecha_arena_spawn_point(&arena, 0, 2, &fX0, &fZ0, &iFacing);
+        mecha_arena_spawn_point(&arena, 1, 2, &fX1, &fZ1, &iFacing);
+        printf("   duel starts %.0f m apart, at (%.0f, %.0f) and (%.0f, %.0f)\n",
+               mecha_length2(fX1 - fX0, fZ1 - fZ0) / MECHA_METRE,
+               fX0 / MECHA_METRE, fZ0 / MECHA_METRE,
+               fX1 / MECHA_METRE, fZ1 / MECHA_METRE);
+        CHECK(mecha_length2(fX1 - fX0, fZ1 - fZ0) > MECHA_M(200.0f));
+        CHECK(fZ0 * fZ1 < 0.0f);
+    }
+
+    /*
+     * A machine that goes over the edge falls, and keeps falling, and is
+     * only then gone. This is the whole difference from a pit. [ARENA-15]
+     */
+    {
+        tMechaWorld world;
+        tMechaInput aInputs[2];
+        float fWas;
+        int iTick;
+        int iFalling = 0;
+
+        start_duel(&world, iIdx, 0, 0, 0x5A1Du, 1);
+        memset(aInputs, 0, sizeof(aInputs));
+        world.aMechs[0].fX = 0.0f;
+        world.aMechs[0].fZ = 0.0f;                /* straight over the hole */
+        world.aMechs[0].fY = MECHA_M(2.0f);
+        world.aMechs[0].fVelY = 0.0f;
+        fWas = world.aMechs[0].fY;
+        for (iTick = 0; iTick < MECHA_TICK_HZ * 3; iTick++) {
+            mecha_sim_tick(&world, aInputs, 2);
+            if (world.aMechs[0].fY < fWas - MECHA_M(0.5f))
+                iFalling++;
+            fWas = world.aMechs[0].fY;
+            if (!mecha_mech_alive(&world.aMechs[0]))
+                break;
+        }
+        printf("   dropped into the hole: fell for %d ticks before it was "
+               "gone\n", iFalling);
+        CHECK(iFalling > 10);
+        CHECK(!mecha_mech_alive(&world.aMechs[0]));
+    }
+
+    /*
+     * And a fight on it is decided by shooting rather than by everybody
+     * walking off. Some of them will go over -- that is the map -- but they
+     * have to last the opening while they do.
+     */
+    {
+        tMechaWorld world;
+        tMechaInput aInputs[MECHA_MAX_MECHS];
+        int iAlive = 0;
+        int iTick;
+        int i;
+
+        mecha_sim_init(&world, iIdx, 0xFACEu, 1);
+        for (i = 0; i < MECHA_MAX_MECHS; i++)
+            mecha_sim_add_mech(&world, i % mecha_def_count(),
+                               MECHA_CONTROL_AI, (uint8_t)(i + 1));
+        mecha_sim_begin_match(&world);
+        memset(aInputs, 0, sizeof(aInputs));
+        /* Everyone is placed on solid ground, not in the hole. */
+        for (i = 0; i < MECHA_MAX_MECHS; i++)
+            CHECK(world.aMechs[i].fY > -MECHA_M(1.0f));
+        for (iTick = 0; iTick < MECHA_TICK_HZ * 10; iTick++)
+            mecha_sim_tick(&world, aInputs, MECHA_MAX_MECHS);
+        for (i = 0; i < MECHA_MAX_MECHS; i++)
+            if (mecha_mech_alive(&world.aMechs[i]))
+                iAlive++;
+        printf("   %d of %d still up after the first ten seconds\n", iAlive,
+               MECHA_MAX_MECHS);
+        CHECK(iAlive > MECHA_MAX_MECHS / 2);
+    }
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static int test_machines_carry_their_weight(void)
 {
     float afSkid[3];
@@ -6891,6 +7193,12 @@ int main(void)
         { "machines carry their weight", test_machines_carry_their_weight },
         { "both triggers make the centre shot",
           test_both_triggers_make_the_centre_shot },
+        { "pilots get round what is in the way",
+          test_pilots_get_round_what_is_in_the_way },
+        { "the pilot turns a dash it is already in",
+          test_the_pilot_turns_a_dash_it_is_already_in },
+        { "the causeway map is a causeway",
+          test_the_causeway_map_is_a_causeway },
     };
     size_t i;
 

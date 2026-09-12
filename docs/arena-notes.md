@@ -1742,3 +1742,128 @@ Skid follows the same idea. Whiplash decides a car is sliding by comparing the
 steered yaw against the one the car ended up with; the arena compares the
 machine's facing against the direction it is actually travelling, and folds the
 backwards half of the circle away so that reversing is not sliding.
+
+## AI-09 — going round what is in the way
+
+Neither pilot could see an obstacle. The footing checks knew about pits and
+about the edge of an open arena, and nothing else, so a car drove into the side
+of a building and parked there for the rest of the round, and a walker stood
+against it pressing forward. Measured on MERIDIAN CROSSING's middle block, with
+the enemy directly behind it: the car travelled 0 m sideways in fourteen
+seconds, the walker 24 m and never round.
+
+The fix is a fan. `mecha_ai_detour` traces along the direction the pilot wanted,
+and if that is blocked it tries bearings either side -- 17 degrees apart, up to
+seven of them, nearest side first -- and takes the first that is clear. The car
+steers for that bearing instead of for the enemy; the walker puts it in as its
+stick and spends gauge on it. Both come round the same block in under seven
+seconds now.
+
+Two things that had to be right:
+
+- **A wall is not a step.** `mecha_arena_ground_height` hides any box whose roof
+  is more than `MECHA_ARENA_STEP_UP` above the feet, which is exactly the tall
+  ones, so a hundred-metre building reads through it as flat ground. A pilot
+  asking the ground query whether it could climb the thing in front of it was
+  told yes about a tower block. Two traces at two heights -- the body, and a
+  jump higher -- is what actually separates a crate from a building.
+- **The detour is decided before the guard.** The pilot used to sit down and
+  refill when it had no line and no gauge, which on the far side of a building
+  is most of the time. Finding a way round is now a reason not to.
+
+## AI-10 — the pilot takes the crossing step
+
+Watari-dashing is already in the simulation: let the stick go mid-burst and put
+it down somewhere else, and the burst starts again the new way rather than
+limping out the old one [SIM-08]. The pilot never used it, because it held one
+direction for the whole burst.
+
+It now checks, last of all, whether what it wants is far enough off what it
+launched with to be worth turning -- and if it is, it lets the stick go for one
+tick, because that is what the machine is waiting to see, then puts it down the
+new way. Last, because the detour, the evasion and the lock may all still change
+its mind about where it is going.
+
+What this buys is the thing it is for: leaving cover on one heading and arriving
+on another. The detour above takes the pilot round the corner of a building; the
+crossing step is what lets it cut back at the enemy without stopping first.
+
+## AI-11 — a drop is a drop however the arena makes one
+
+`mecha_ai_footing_clear` tested two things: a pit flag, and whether the point is
+inside an open arena's boundary. Ground that simply falls away is neither -- the
+sides of a causeway are inside the boundary and carry no flag -- so the pilots
+walked off them. It also explains the rooftop walk-off in the city arena: the
+roof of a building is inside the boundary too.
+
+It now also refuses ground more than `MECHA_AI_FOOTING_DROP` (25 m) below where
+the machine is standing. Hills and kerbs are well inside that; a causeway edge,
+a roof and a hole are not. On the causeway map it cut the machines lost over the
+side in the first minute of a sixteen-way from ten to four.
+
+## ARENA-14 — where machines start when the ground is not a square
+
+The spawn ring is a circle of `fHalfExtent * 0.62`, which is right for every
+arena whose floor fills its own boundary. Two lanes with a hole down the middle
+is not one of those: half the ring is over the hole.
+
+`bySpawnShape` picks the rule. `MECHA_SPAWN_LANES` spreads the slots along the
+long axis and alternates which lane each one is on, so a duel opens at opposite
+ends on opposite sides and a sixteen-way fills both lanes rather than the drop
+between them. The facing is worked out from where the machine actually ended up
+rather than from the ring angle, which is only the same thing on a circle.
+
+The spawn line also has to clear the buildings: at 120 m it put machines inside
+the keep's flank wall, which the mesh test caught as quads facing into a box.
+104 m stands them on the approach instead.
+
+## ARENA-15 — a hole you fall into, not a hole that deletes you
+
+Whiplash makes a hole in a track by flagging the surface, and the arena
+inherited it: `MECHA_SURF_PIT` kills a machine the moment its feet are on a pit
+cell. That reads as being deleted. It is also why a hole made that way felt
+wrong -- there is no fall, no tumble, and no moment of knowing it has happened.
+
+The causeway map makes holes out of ground instead. `mecha_arena_void` drops
+every node far below the arena, and the ground it actually has is painted back
+over that a piece at a time with `mecha_arena_lane` and `mecha_arena_pad`.
+Anything not painted is a hole, and a machine that goes into one falls --
+measured at 35 ticks of falling before the kill plane takes it, against zero for
+a pit.
+
+The nodes either side of an edge are one cell apart, so with 40 cells over 400 m
+the drop is 260 m over 10 m of ground: a cliff, not a slope.
+
+## ARENA-16 — FACING WORLDS
+
+After the Unreal Tournament map, from the layout the player supplied: two keeps
+at the ends and two inclined causeways between them with a hole down the middle
+of the run.
+
+- Three hundred metres end to end, the bases standing 15 m above the middle, so
+  leaving a base is downhill and coming back is a climb.
+- Two lanes, one either side of the hole, 28 m of usable width each. Widening
+  them was tried and is worse: it pinches the hole into a slot that is easier to
+  stumble into than to see, and the machines lost over the side went up rather
+  than down.
+- A keep on each base: four walls with the causeway-facing one split either side
+  of a gateway, so it is a building a machine drives into. Open to the sky,
+  because a box here is solid from the ground up and a roof would be a lid with
+  nothing able to get under it. What it gives instead is a courtyard and a wall
+  top.
+- One block on each lane, out where the ground is lowest, for the only cover
+  between the keeps.
+
+The walls wear `MECHA_TILE_RUST`, which is the one face in the building bank
+that reads as masonry. `MECHA_TILE_BRICK` is a floral decoration in the retail
+data and `MECHA_TILE_CONCRETE` is the same index as one of the glazed facades,
+so neither does what its name suggests.
+
+## SIM-24 — a spawn stands on the ground, not under it
+
+`mecha_reset_round` asked `mecha_arena_ground_height` for the spawn height with
+the feet at zero. On an open arena that is the query for "am I under this
+platform", and any ground above zero answers void -- so on the first arena with
+raised ground, every machine was placed at -4000 m and fell out of the world
+before the round started. It asks `mecha_arena_terrain_height` now, which is the
+ground itself with nothing standing on it.

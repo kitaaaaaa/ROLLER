@@ -166,6 +166,36 @@
 #define MECHA_AI_CLIMB_LOOK  MECHA_M(7.0f)
 #define MECHA_AI_CLIMB_MIN   MECHA_M(4.0f)
 
+/*
+ * Looking past what is in the way. The pilot probes along a fan of bearings
+ * either side of where it wants to go and takes the first that is not
+ * blocked; the step is how far apart those bearings are and the count is
+ * how far round it is willing to look before giving up and going anyway.
+ * A machine the width of a car needs a couple of its own lengths of warning
+ * at walking pace, and more of them the faster it is going. [AI-09]
+ */
+#define MECHA_AI_DETOUR_STEP    MECHA_DEG(17)
+#define MECHA_AI_DETOUR_FANS    7
+#define MECHA_AI_DETOUR_LOOK    MECHA_M(26.0f)
+#define MECHA_AI_DETOUR_LEAD    0.70f
+/* Cover taller than this above the pilot's own head is not something to be
+ * climbed, however much gauge it has: it is something to be gone round.
+ * [AI-09] */
+#define MECHA_AI_DETOUR_WALL    1.7f
+
+/*
+ * The crossing step -- watari-dash. A burst already under way is worth
+ * turning when what the pilot wants now is this far off what it launched
+ * with, and turning it means letting the stick go for a tick first, which
+ * is what the machine is waiting to see. [AI-10]
+ */
+#define MECHA_AI_WATARI_DOT     0.72f
+
+/* A step down worth refusing to take. Below this a pilot treats the ground
+ * ahead as somewhere it would arrive badly rather than somewhere it is
+ * going; above it, hills and kerbs are still just ground. [AI-11] */
+#define MECHA_AI_FOOTING_DROP   MECHA_M(25.0f)
+
 #define MECHA_AI_FOOTING_WALK   MECHA_M(16.0f)
 #define MECHA_AI_FOOTING_LEAD   0.35f
 #define MECHA_AI_FOOTING_CANCEL 0.60f

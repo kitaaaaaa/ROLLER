@@ -24,13 +24,13 @@
 #define MECHA_MAX_MECHS         16
 #define MECHA_MAX_PROJECTILES 192
 #define MECHA_MAX_EFFECTS      96
-#define MECHA_MAX_OBSTACLES    24
+#define MECHA_MAX_OBSTACLES    32
 
 /* Terrain: a grid of square cells, a height per corner and a surface word
  * per cell. Coarse on purpose. [ARENA-04] */
 /* The array size, not any arena's own division -- each carries its own
  * count in iTerrainCells, and a bigger arena needs more. */
-#define MECHA_TERRAIN_CELLS 28
+#define MECHA_TERRAIN_CELLS 40
 #define MECHA_TERRAIN_NODES (MECHA_TERRAIN_CELLS + 1)
 /* What an arena gets when it does not ask for anything else. */
 #define MECHA_TERRAIN_CELLS_DEFAULT 12
@@ -578,6 +578,13 @@ typedef struct
  * on eight, and an open one is not walled at all -- its floor simply stops,
  * and so does anything that walks off it.
  */
+/* How an arena lays out its starting positions. [ARENA-14] */
+typedef enum
+{
+  MECHA_SPAWN_RING  = 0,    /* a circle inside the boundary */
+  MECHA_SPAWN_LANES = 1     /* spread along two lanes, alternating sides */
+} eMechaSpawnShape;
+
 typedef enum
 {
   MECHA_ARENA_SQUARE  = 0,
@@ -626,6 +633,16 @@ typedef struct
    * a platform; two hundred reads as the top of a tower.
    */
   float    fSkirt;
+
+  /*
+   * Where machines start. A ring inside the boundary is right for every
+   * arena whose floor fills its own square; an arena that is two lanes with
+   * a hole down the middle has to place them along the lanes instead, or
+   * half of them start over the hole. [ARENA-14]
+   */
+  uint8_t  bySpawnShape;    /* eMechaSpawnShape */
+  float    fSpawnHalfX;
+  float    fSpawnHalfZ;
 
   /* Ground drawn past the boundary, and scenery for it. Not walkable; zero
    * reach draws none of it. [ARENA-07] */

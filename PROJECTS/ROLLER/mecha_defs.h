@@ -484,4 +484,8 @@ int mecha_def_count(void);
 const tMechaMechDef *mecha_def_get(int iDefIdx);
 
 //-------------------------------------------------------------------------------------------------
+int mecha_scheme_count(void);
+const tMechaScheme *mecha_scheme_get(int iScheme);
+const char *mecha_scheme_name(int iScheme);
+
 #endif

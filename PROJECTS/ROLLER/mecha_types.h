@@ -440,6 +440,8 @@ typedef struct
    * The heading the stick is read against, which is the machine's own
    * except while a move is swinging the body onto its lock. [SIM-21]
    */
+  /* Index into the paint schemes; zero is the machine's own. [DEF-06] */
+  uint8_t byScheme;
   int   iStickYaw;
   int   iRecentreTicks;
 
@@ -642,6 +644,18 @@ typedef struct
 } tMechaArena;
 
 //-------------------------------------------------------------------------------------------------
+
+/*
+ * A paint scheme: a body colour, a trim colour and a joint colour, replacing
+ * the three the machine's own definition carries. [DEF-06]
+ */
+typedef struct
+{
+  const char *szName;
+  uint8_t     byBody;
+  uint8_t     byTrim;
+  uint8_t     byJoint;
+} tMechaScheme;
 
 typedef struct
 {

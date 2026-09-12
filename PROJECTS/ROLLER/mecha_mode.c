@@ -6,6 +6,8 @@
 #include "mecha_mesh.h"
 #include "mecha_render.h"
 #include "mecha_sim.h"
+#include "view.h"
+#include "roller.h"
 
 #include "3d.h"
 #include "frontend.h"
@@ -54,12 +56,15 @@ typedef enum
 typedef enum
 {
   MECHA_ROW_START = 0,
+  MECHA_ROW_MODE,
   MECHA_ROW_MECH,
+  MECHA_ROW_COLOURS,
   MECHA_ROW_OPPONENT,
   MECHA_ROW_ARENA,
   MECHA_ROW_SKILL,
   MECHA_ROW_TIME,
   MECHA_ROW_HOLD_FIRE,
+  MECHA_ROW_SPECTATE,
   MECHA_ROW_CONTROLS,
   MECHA_ROW_EXIT,
   MECHA_ROW_COUNT
@@ -71,6 +76,27 @@ typedef enum
  * out, which is a different game rather than a longer one.
  */
 static const int s_aiRoundSeconds[] = { 30, 60, 90, 120, 0 };
+
+/*
+ * A duel is two machines. Survival fills the arena: one of everything the
+ * roster has, over and over, until the world is full -- sixteen of them on
+ * MERIDIAN CROSSING costs a fifth of a second of simulation for a minute of
+ * fighting, and needs about five thousand quads at its worst. [MODE-04]
+ */
+typedef enum
+{
+  MECHA_GAME_DUEL = 0,
+  MECHA_GAME_SURVIVAL,
+  MECHA_GAME_COUNT
+} eMechaGameMode;
+
+static const char *mecha_mode_game_name(int iMode)
+{
+  switch (iMode) {
+  case MECHA_GAME_SURVIVAL: return "SURVIVAL";
+  default:                  return "DUEL";
+  }
+}
 
 #define MECHA_ROUND_CHOICES \
   ((int)(sizeof(s_aiRoundSeconds) / sizeof(s_aiRoundSeconds[0])))
@@ -89,6 +115,11 @@ static int s_iAiSkill = MECHA_AI_VETERAN;
 /* Index into s_aiRoundSeconds; starts on the default the simulation uses. */
 static int s_iRoundChoice = 2;
 static bool s_bAiHoldFire;
+static int s_iGameMode = MECHA_GAME_DUEL;
+static int s_iScheme;
+/* No machine of the player's own: the camera flies and the fight runs
+ * without them. [MODE-05] */
+static bool s_bSpectate;
 
 static int s_iPlayerIdx = -1;
 static uint64 s_ullLastTimeNs;
@@ -322,8 +353,12 @@ static void mecha_mode_build_briefing(tMechaBriefing *pBrief)
   pBrief->iRowCount = MECHA_ROW_COUNT;
 
   pBrief->aRows[MECHA_ROW_START].szLabel = "START MATCH";
+  pBrief->aRows[MECHA_ROW_MODE].szLabel = "GAME MODE";
+  pBrief->aRows[MECHA_ROW_MODE].szValue = mecha_mode_game_name(s_iGameMode);
   pBrief->aRows[MECHA_ROW_MECH].szLabel = "YOUR MECH";
   pBrief->aRows[MECHA_ROW_MECH].szValue = mecha_mode_mech_name(s_iPlayerDef);
+  pBrief->aRows[MECHA_ROW_COLOURS].szLabel = "PAINT";
+  pBrief->aRows[MECHA_ROW_COLOURS].szValue = mecha_scheme_name(s_iScheme);
   pBrief->aRows[MECHA_ROW_OPPONENT].szLabel = "OPPONENT";
   pBrief->aRows[MECHA_ROW_OPPONENT].szValue =
       mecha_mode_mech_name(s_iOpponentDef);
@@ -336,9 +371,54 @@ static void mecha_mode_build_briefing(tMechaBriefing *pBrief)
   pBrief->aRows[MECHA_ROW_HOLD_FIRE].szLabel = "ENEMY WEAPONS";
   pBrief->aRows[MECHA_ROW_HOLD_FIRE].szValue = s_bAiHoldFire
                                                  ? "HELD - DEBUG" : "LIVE";
+  pBrief->aRows[MECHA_ROW_SPECTATE].szLabel = "SPECTATOR";
+  pBrief->aRows[MECHA_ROW_SPECTATE].szValue = s_bSpectate ? "FREE CAMERA"
+                                                          : "OFF";
   pBrief->aRows[MECHA_ROW_CONTROLS].szLabel = "VIEW CONTROLS";
   pBrief->aRows[MECHA_ROW_EXIT].szLabel = mecha_mode_retail_present()
                                            ? "EXIT TO WHIPLASH" : "QUIT";
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * The spectator camera is ROLLER's own free camera: the same mouse look,
+ * the same WASD and the same speed multipliers the track's noclip uses. It
+ * keeps its state in the track frame, where Z is up, so the arena maps on
+ * the way in and on the way back out -- (x, y, z) there is (x, z, y) here,
+ * and its yaw is measured from a different axis, so a quarter turn
+ * separates them. [MODE-05]
+ */
+static void mecha_mode_free_camera_place(void)
+{
+  const tMechaArena *pArena = &s_World.arena;
+  float fBack = pArena->fHalfExtent * 0.55f;
+
+  s_Camera.fX = 0.0f;
+  s_Camera.fY = pArena->fHalfExtent * 0.30f;
+  s_Camera.fZ = -fBack;
+  s_Camera.iYaw = 0;
+  s_Camera.iPitch = -MECHA_DEG(14);
+  s_Camera.bSettled = true;
+  noclip_camera_place(s_Camera.fX, s_Camera.fZ, s_Camera.fY,
+                      MECHA_ANGLE_QUARTER - s_Camera.iYaw, s_Camera.iPitch);
+}
+
+static void mecha_mode_free_camera_update(void)
+{
+  float fX = 0.0f;
+  float fY = 0.0f;
+  float fZ = 0.0f;
+  int iYaw = 0;
+  int iPitch = 0;
+
+  noclip_camera_update();
+  noclip_camera_get(&fX, &fY, &fZ, &iYaw, &iPitch);
+  s_Camera.fX = fX;
+  s_Camera.fY = fZ;
+  s_Camera.fZ = fY;
+  s_Camera.iYaw = mecha_angle_wrap(MECHA_ANGLE_QUARTER - iYaw);
+  s_Camera.iPitch = iPitch;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -352,14 +432,39 @@ static void mecha_mode_start_match(void)
                               s_aiRoundSeconds[s_iRoundChoice
                                                % MECHA_ROUND_CHOICES]);
   mecha_sim_set_ai_hold_fire(&s_World, s_bAiHoldFire);
-  s_iPlayerIdx = mecha_sim_add_mech(&s_World, s_iPlayerDef,
-                                    MECHA_CONTROL_HUMAN, 0);
-  mecha_sim_add_mech(&s_World, s_iOpponentDef, MECHA_CONTROL_AI, 1);
+  /*
+   * Everyone on their own team, so a free-for-all is genuinely free: the
+   * simulation only ever asks whether two machines share a team, and no two
+   * of these do. The player takes a slot like anybody else unless they are
+   * spectating, in which case the arena fills with machines that have
+   * nothing to do with them. [MODE-04]
+   */
+  s_iPlayerIdx = s_bSpectate
+    ? -1
+    : mecha_sim_add_mech(&s_World, s_iPlayerDef, MECHA_CONTROL_HUMAN, 0);
+  if (s_iGameMode == MECHA_GAME_SURVIVAL) {
+    int iSlot;
+
+    for (iSlot = 0; iSlot < MECHA_MAX_MECHS; iSlot++)
+      if (mecha_sim_add_mech(&s_World,
+                             (s_iOpponentDef + iSlot) % mecha_mode_mech_count(),
+                             MECHA_CONTROL_AI, (uint8)(iSlot + 1)) < 0)
+        break;
+  } else {
+    mecha_sim_add_mech(&s_World, s_iOpponentDef, MECHA_CONTROL_AI, 1);
+  }
+  if (s_iPlayerIdx >= 0)
+    s_World.aMechs[s_iPlayerIdx].byScheme = (uint8_t)s_iScheme;
   mecha_sim_begin_match(&s_World);
 
   mecha_camera_reset(&s_Camera);
-  if (s_iPlayerIdx >= 0)
+  if (s_iPlayerIdx >= 0) {
     mecha_camera_update(&s_Camera, &s_World, s_iPlayerIdx);
+  } else {
+    /* Nobody to chase, so the camera is the player's. */
+    g_bNoclip = true;
+    mecha_mode_free_camera_place();
+  }
 
   s_ullResultHoldNs = 0;
   s_ullLastTimeNs = SDL_GetTicksNS();
@@ -384,6 +489,12 @@ static void mecha_mode_return_to_briefing(const char *szResult, bool bWin)
 {
   s_szLastResult = szResult;
   s_bLastResultWin = bWin;
+  /* The free camera goes back where it was found: it grabs the mouse while
+   * it runs, and the briefing needs the pointer back. */
+  if (g_bNoclip) {
+    g_bNoclip = false;
+    noclip_camera_reset();
+  }
   s_eScreen = MECHA_SCREEN_BRIEFING;
   s_iBriefSelection = MECHA_ROW_START;
   s_ullResultHoldNs = 0;
@@ -531,6 +642,9 @@ static void mecha_mode_update_briefing(uint64 ullNowNs)
       s_iPlayerDef = mecha_mode_wrap(s_iPlayerDef + iStep,
                                      mecha_mode_mech_count());
       break;
+    case MECHA_ROW_COLOURS:
+      s_iScheme = mecha_mode_wrap(s_iScheme + iStep, mecha_scheme_count());
+      break;
     case MECHA_ROW_OPPONENT:
       s_iOpponentDef = mecha_mode_wrap(s_iOpponentDef + iStep,
                                        mecha_mode_mech_count());
@@ -549,6 +663,12 @@ static void mecha_mode_update_briefing(uint64 ullNowNs)
     case MECHA_ROW_HOLD_FIRE:
       /* Two states, so either direction is the same toggle. */
       s_bAiHoldFire = !s_bAiHoldFire;
+      break;
+    case MECHA_ROW_MODE:
+      s_iGameMode = mecha_mode_wrap(s_iGameMode + iStep, MECHA_GAME_COUNT);
+      break;
+    case MECHA_ROW_SPECTATE:
+      s_bSpectate = !s_bSpectate;
       break;
     default:
       break;
@@ -669,6 +789,8 @@ void mecha_mode_update(void)
 
   if (s_iPlayerIdx >= 0)
     mecha_camera_update(&s_Camera, &s_World, s_iPlayerIdx);
+  else
+    mecha_mode_free_camera_update();
 
   /* A decided match holds on VICTORY or DEFEAT long enough to be read, then
    * hands the player back to the briefing. The simulation keeps ticking

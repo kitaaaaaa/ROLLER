@@ -1,3 +1,4 @@
+#include <stddef.h>
 #include "mecha_defs.h"
 
 //-------------------------------------------------------------------------------------------------
@@ -34,6 +35,58 @@
 #define PAL_HULL_DARK     119
 #define PAL_HULL_DARK_T   127
 #define PAL_JOINT         105
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * Paint schemes, named for the makes that built the race game's cars.
+ *
+ * The names are Whiplash's own, out of CompanyNames in carplans.c. The
+ * colours are not: nothing in the retail data carries a flat colour per car
+ * -- tCarDesign is geometry, and car_flat_remap is a mirror remap -- so
+ * these are index pairs picked out of the same palette ramps the roster's
+ * own machines use, which is what keeps a repainted machine looking like it
+ * belongs in the same arena. Scheme zero is the machine's own. [DEF-06]
+ */
+static const tMechaScheme s_aSchemes[] = {
+  { "WORKS",             0,                 0,                0 },
+  { "AUTO ARIEL",        PAL_HULL_PALE,     PAL_TRACER_CYAN,  PAL_JOINT },
+  { "DESILVA",           PAL_HULL_DARK,     PAL_TRACER_AMBER, PAL_JOINT },
+  { "PULSE ENGINEERING", PAL_HULL_STEEL,    PAL_TRACER_VIOLET,PAL_JOINT },
+  { "GLOBAL",            PAL_HULL_IRON,     PAL_TRACER_GREEN, PAL_JOINT },
+  { "MILLION PLUS",      PAL_HULL_PALE_T,   PAL_TRACER_SAND,  PAL_JOINT },
+  { "MISSION MOTORS",    PAL_HULL_DARK_T,   PAL_TRACER_RED,   PAL_JOINT },
+  { "ZIZIN",             PAL_HULL_PALE,     PAL_HULL_DARK,    PAL_JOINT },
+  { "REISE WAGON",       PAL_HULL_STEEL_T,  PAL_TRACER_WHITE, PAL_JOINT },
+  { "DRH MOTORS",        PAL_HULL_IRON_T,   PAL_TRACER_ORANGE,PAL_JOINT },
+  { "GODLEY PLC",        PAL_HULL_DARK,     PAL_TRACER_GREEN, PAL_JOINT },
+  { "GSS AUTOS",         PAL_HULL_STEEL,    PAL_TRACER_SAND,  PAL_JOINT },
+  { "CROSS CARS",        PAL_HULL_PALE_T,   PAL_TRACER_RED,   PAL_JOINT },
+  { "VRANIC",            PAL_HULL_IRON,     PAL_TRACER_VIOLET,PAL_JOINT },
+  { "DEATH MOTORS",      PAL_HULL_DARK_T,   PAL_TRACER_AMBER, PAL_JOINT },
+};
+
+#define MECHA_SCHEME_COUNT \
+  ((int)(sizeof(s_aSchemes) / sizeof(s_aSchemes[0])))
+
+int mecha_scheme_count(void)
+{
+  return MECHA_SCHEME_COUNT;
+}
+
+const tMechaScheme *mecha_scheme_get(int iScheme)
+{
+  if (iScheme <= 0 || iScheme >= MECHA_SCHEME_COUNT)
+    return NULL;
+  return &s_aSchemes[iScheme];
+}
+
+const char *mecha_scheme_name(int iScheme)
+{
+  if (iScheme < 0 || iScheme >= MECHA_SCHEME_COUNT)
+    return s_aSchemes[0].szName;
+  return s_aSchemes[iScheme].szName;
+}
 
 //-------------------------------------------------------------------------------------------------
 

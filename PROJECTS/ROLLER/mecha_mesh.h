@@ -194,6 +194,6 @@ void mecha_mesh_shadows(tMechaQuadList *pList, const tMechaWorld *pWorld);
 
 //-------------------------------------------------------------------------------------------------
 /* Enough for the arena, eight mechs, and a full projectile table. */
-#define MECHA_QUAD_CAPACITY 4096
+#define MECHA_QUAD_CAPACITY 8192
 //-------------------------------------------------------------------------------------------------
 #endif

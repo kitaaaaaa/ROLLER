@@ -4116,6 +4116,123 @@ static int test_a_spread_is_a_cone_not_a_fan(void)
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * Paint schemes repaint a machine without touching what it is. Every scheme
+ * has a name and a distinct body colour; the tracer never changes, because
+ * that colour is how a player reads whose fire is crossing the arena.
+ */
+/*
+ * A full arena of machines, all on their own side, fights itself down to a
+ * winner -- and the geometry it builds still fits in the buffer.
+ */
+static int test_a_full_arena_fights_itself_out(void)
+{
+    tMechaWorld world;
+    tMechaInput aInputs[MECHA_MAX_MECHS];
+    static tMechaQuad aStorage[MECHA_QUAD_CAPACITY];
+    tMechaQuadList list;
+    int iArena = arena_by_name("MERIDIAN CROSSING");
+    int iAdded = 0;
+    int iAlive = 0;
+    int iPeak = 0;
+    int i;
+    int t;
+
+    CHECK(iArena >= 0);
+    mecha_sim_init(&world, iArena, 0x16A11u, 1);
+    /* Everyone on their own team, which is what makes it a free-for-all. */
+    for (i = 0; i < MECHA_MAX_MECHS; i++)
+        if (mecha_sim_add_mech(&world, i % mecha_def_count(),
+                               MECHA_CONTROL_AI, (uint8_t)i) >= 0)
+            iAdded++;
+    mecha_sim_begin_match(&world);
+    printf("   a full arena is %d machines\n", iAdded);
+    CHECK(iAdded == MECHA_MAX_MECHS);
+    CHECK(iAdded >= 16);
+
+    memset(aInputs, 0, sizeof(aInputs));
+    for (t = 0; t < MECHA_TICK_HZ * 90; t++) {
+        mecha_sim_tick(&world, aInputs, MECHA_MAX_MECHS);
+        if ((t % 30) == 0) {
+            mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
+            mecha_mesh_arena(&list, &world.arena);
+            for (i = 0; i < MECHA_MAX_MECHS; i++)
+                if (mecha_mech_alive(&world.aMechs[i]))
+                    mecha_mesh_mech(&list, &world, i);
+            mecha_mesh_projectiles(&list, &world, 0);
+            mecha_mesh_effects(&list, &world, 0);
+            if (list.iCount > iPeak)
+                iPeak = list.iCount;
+            /* Nothing may be lost: a machine that stops being drawn because
+             * the buffer filled is a machine the player cannot see coming. */
+            CHECK(list.iDropped == 0);
+        }
+        if (world.match.byPhase == MECHA_PHASE_MATCH_OVER)
+            break;
+    }
+    for (i = 0; i < MECHA_MAX_MECHS; i++)
+        if (mecha_mech_alive(&world.aMechs[i]))
+            iAlive++;
+    printf("   after %d s: %d standing, peak %d of %d quads\n",
+           t / MECHA_TICK_HZ, iAlive, iPeak, MECHA_QUAD_CAPACITY);
+    /* It thinned itself out rather than stalemating. */
+    CHECK(iAlive < iAdded);
+    CHECK(iPeak < MECHA_QUAD_CAPACITY);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+static int test_paint_schemes_repaint_the_machine(void)
+{
+    tMechaWorld world;
+    static tMechaQuad aPlain[MECHA_QUAD_CAPACITY];
+    static tMechaQuad aPainted[MECHA_QUAD_CAPACITY];
+    tMechaQuadList plain;
+    tMechaQuadList painted;
+    int iSchemes = mecha_scheme_count();
+    int iDef;
+    int i;
+
+    printf("   %d paint schemes\n", iSchemes);
+    CHECK(iSchemes > 1);
+
+    /* Scheme zero is the machine's own, and every other one names a make. */
+    CHECK(mecha_scheme_get(0) == NULL);
+    for (i = 1; i < iSchemes; i++) {
+        const tMechaScheme *pScheme = mecha_scheme_get(i);
+
+        CHECK(pScheme != NULL);
+        CHECK(pScheme->szName != NULL && pScheme->szName[0] != '\0');
+        CHECK(mecha_scheme_name(i) == pScheme->szName);
+    }
+
+    /* Painting a machine changes what is drawn, and the same number of
+     * quads come out: it is a repaint, not a different machine. */
+    for (iDef = 0; iDef < mecha_def_count(); iDef++) {
+        int iDiffer = 0;
+
+        start_duel(&world, 0, iDef, iDef, 0x7A17u, 1);
+        mecha_quads_reset(&plain, aPlain, MECHA_QUAD_CAPACITY);
+        mecha_mesh_mech(&plain, &world, 0);
+
+        world.aMechs[0].byScheme = 1;
+        mecha_quads_reset(&painted, aPainted, MECHA_QUAD_CAPACITY);
+        mecha_mesh_mech(&painted, &world, 0);
+
+        CHECK(painted.iCount == plain.iCount);
+        for (i = 0; i < plain.iCount; i++)
+            if (aPlain[i].byPalette != aPainted[i].byPalette)
+                iDiffer++;
+        printf("   %s: %d of %d quads repainted\n",
+               mecha_def_get(iDef)->szName, iDiffer, plain.iCount);
+        CHECK(iDiffer > 0);
+    }
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static int test_machines_are_solid_to_each_other(void)
 {
     tMechaWorld world;
@@ -6604,6 +6721,10 @@ int main(void)
           test_an_empty_gauge_still_jumps_and_cancels },
         { "a cambered launch rolls the car",
           test_a_cambered_launch_rolls_the_car },
+        { "a full arena fights itself out",
+          test_a_full_arena_fights_itself_out },
+        { "paint schemes repaint the machine",
+          test_paint_schemes_repaint_the_machine },
         { "machines are solid to each other",
           test_machines_are_solid_to_each_other },
         { "firing turns the body not the travel",

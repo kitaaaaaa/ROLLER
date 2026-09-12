@@ -52,6 +52,12 @@ void noclip_camera_reset(void);
 void noclip_camera_set_input_enabled(bool bEnabled);
 void noclip_camera_update(void);
 void noclip_camera_apply(void);
+/* The free camera's own state, for a caller that draws its own view rather
+ * than the track's -- the arena mode does. Positions are in the track
+ * frame, where the up axis is Z. */
+void noclip_camera_place(float fX, float fY, float fZ, int iYaw, int iPitch);
+void noclip_camera_get(float *pfX, float *pfY, float *pfZ,
+                       int *piYaw, int *piPitch);
 void chase_look_apply(void);
 
 //-------------------------------------------------------------------------------------------------

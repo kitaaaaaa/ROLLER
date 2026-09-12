@@ -1534,3 +1534,56 @@ machine keeps it where it is on screen and turns it in place.
 
 The usual camera lift is scaled back once the pivot has moved up, or the
 view ends up looking down on the fight from the height of two offsets stacked.
+
+## DEF-06 — paint schemes, named for Whiplash's makes
+
+The names are the race game's own, out of `CompanyNames` in `carplans.c`. The
+colours are not: nothing in the retail data carries a flat colour per car —
+`tCarDesign` is geometry, and `car_flat_remap` is a mirror remap for the
+advanced car set. So the schemes are index pairs picked out of the same
+palette ramps the roster's own machines already use, which keeps a repainted
+machine looking like it belongs in the same arena.
+
+A scheme replaces body, trim and joint. It never replaces the glow index:
+that colour is how a player reads whose fire is crossing the arena, and a
+repaint that changed it would undo [REND-13].
+
+Scheme zero is the machine's own paint, and `mecha_scheme_get` returns NULL
+for it so the mesh falls through to the definition.
+
+## MODE-04 — survival fills the arena
+
+A duel is two machines; survival adds one of everything the roster has, over
+and over, until the world is full. Measured on MERIDIAN CROSSING, sixteen
+machines cost about 140 ms of simulation for a minute of fighting — a fifth
+of a per cent of realtime — and fight down to one or two survivors inside
+ninety seconds rather than stalemating.
+
+What it does cost is geometry. Sixteen machines peak near 4,900 quads against
+the old 4,096 cap, which silently dropped nineteen thousand quads over a
+minute — a machine that stops being drawn because the buffer filled is a
+machine the player cannot see coming. The cap is 8,192 now, and the test
+asserts nothing is dropped rather than just that it runs.
+
+Everyone is given their own team. The simulation only ever asks whether two
+machines share a team, so distinct teams is the whole of a free-for-all.
+
+## MODE-05 — spectator flies ROLLER's own free camera
+
+With no machine of the player's own there is nothing to chase, so the arena
+borrows the track's noclip camera: the same mouse look, the same WASD, the
+same speed multipliers, driven through `noclip_camera_update`.
+
+It keeps its state in the track frame, where **Z is up**, and the arena is
+Y-up — so the two are mapped rather than shared. Position `(x, y, z)` there
+is `(x, z, y)` here. For the heading: the arena's forward is
+`(sinYaw·cosPitch, sinPitch, cosYaw·cosPitch)` and noclip's, mapped into the
+arena's axes, is `(cosYaw·cosPitch, sinPitch, sinYaw·cosPitch)` — so a
+quarter turn separates the two yaws and the pitches are the same.
+
+The arena draws through its own renderer and never reads the view globals
+`noclip_camera_apply` publishes, which is why `view.c` grew a place/get pair
+rather than the mode reading `worldx`.
+
+The camera grabs the mouse while it runs, so leaving a match releases it and
+resets `g_bNoclip`, or the briefing has no pointer.

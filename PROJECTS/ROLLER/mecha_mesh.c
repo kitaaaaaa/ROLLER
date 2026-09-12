@@ -1285,6 +1285,22 @@ static void mecha_add_zizin_gun(tMechaQuadList *pList,
 
 //-------------------------------------------------------------------------------------------------
 
+/* The machine's own three colours, or the paint scheme it was given. The
+ * glow is never repainted: it is what says whose fire is whose. [DEF-06] */
+static void mecha_mech_colours(const tMechaMech *pMech,
+                               const tMechaMechDef *pDef,
+                               uint8_t *pbyBody, uint8_t *pbyTrim,
+                               uint8_t *pbyJoint)
+{
+  const tMechaScheme *pScheme = mecha_scheme_get((int)pMech->byScheme);
+
+  *pbyBody = pScheme ? pScheme->byBody : pDef->abyPalette[0];
+  *pbyTrim = pScheme ? pScheme->byTrim : pDef->abyPalette[1];
+  *pbyJoint = pScheme ? pScheme->byJoint : pDef->abyPalette[2];
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static void mecha_mesh_car(tMechaQuadList *pList, const tMechaWorld *pWorld,
                            int iMechIdx)
 {
@@ -1296,6 +1312,9 @@ static void mecha_mesh_car(tMechaQuadList *pList, const tMechaWorld *pWorld,
   float fScale;
   int iAimYaw;
   int iAimPitch;
+  uint8_t byBody;
+  uint8_t byTrim;
+  uint8_t byJoint;
 
   mecha_zizin_extent(&fPlanLength, &fPlanHeight);
   if (fPlanHeight <= 0.0f)
@@ -1335,18 +1354,17 @@ static void mecha_mesh_car(tMechaQuadList *pList, const tMechaWorld *pWorld,
                      pMech->fX, pMech->fY + fLift, pMech->fZ, 1.0f);
   }
 
-  mecha_add_zizin_body(pList, &pose, fScale, 0.0f, pDef->abyPalette[0],
-                       pDef->abyPalette[1]);
+  mecha_mech_colours(pMech, pDef, &byBody, &byTrim, &byJoint);
+  mecha_add_zizin_body(pList, &pose, fScale, 0.0f, byBody, byTrim);
 
   mecha_mech_aim(pWorld, iMechIdx, &iAimYaw, &iAimPitch);
   iAimPitch = mecha_clampi(iAimPitch, -MECHA_ARM_PITCH_LIMIT,
                            MECHA_ARM_PITCH_LIMIT);
   mecha_add_zizin_gun(pList, &pose, pMech, pDef, iAimYaw, iAimPitch,
-                      fPlanLength * fScale, pDef->abyPalette[0],
-                      pDef->abyPalette[1], pDef->abyPalette[3]);
+                      fPlanLength * fScale, byBody, byTrim,
+                      pDef->abyPalette[3]);
 }
 
-//-------------------------------------------------------------------------------------------------
 
 void mecha_mesh_mech(tMechaQuadList *pList, const tMechaWorld *pWorld,
                      int iMechIdx)
@@ -1401,9 +1419,7 @@ void mecha_mesh_mech(tMechaQuadList *pList, const tMechaWorld *pWorld,
     mecha_mesh_car(pList, pWorld, iMechIdx);
     return;
   }
-  byBody = pDef->abyPalette[0];
-  byTrim = pDef->abyPalette[1];
-  byJoint = pDef->abyPalette[2];
+  mecha_mech_colours(pMech, pDef, &byBody, &byTrim, &byJoint);
   byGlow = pDef->abyPalette[3];
   fHeight = pDef->fHeight;
   fRadius = pDef->fRadius;

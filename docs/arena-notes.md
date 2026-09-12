@@ -135,3 +135,326 @@ were leaving the roof.
 Held fire, by contrast, is applied at the trigger rather than earlier, so the
 pilot goes on closing, circling and dodging exactly as it would. A machine
 that stopped fighting would not show anything about how the fighting looks.
+
+---
+
+## MESH-01 — translucent quads carry a shade level, not a colour
+
+`POLYFLAT` hands `SURFACE_FLAG_TRANSPARENT` polygons to `shadow_poly`, which
+indexes `shade_palette[256 * level]` to darken what is already there.
+`shade_palette` is 4096 bytes, so the level must stay under 16 or the read
+runs off the end. The engine's own callers use 2 and 3 — `func2.c`'s
+`blankwindow` and `replay.c`'s car shadows — so the mode's match.
+
+## MESH-02 — walls are panelled because POLYTEX fits one tile per polygon
+
+The legacy texture path works its coordinates out inside `POLYTEX` from the
+tile index and the projected polygon, and fits exactly one tile to whatever
+polygon it is given. A wall built as a single quad wears one tile stretched
+two hundred metres wide and twenty high — a smear, not a texture. Cut into
+panels the size of the floor's own tiles, each panel gets a tile at the scale
+the ground is using and the two agree.
+
+## MESH-03 — outer ground is rings, not a grid with a hole
+
+Ground past the boundary cannot be walked on and is drawn coarsely, since it
+is only ever seen at a distance. What it buys is that the arena stops being
+an island.
+
+It is built as rings of the boundary's own shape rather than a grid with the
+middle knocked out, and that is not tidiness. A grid coarse enough to be
+cheap has tiles far wider than the boundary is straight, so every tile it
+drops for overlapping the arena takes a wedge of ground with it and the
+horizon fills with holes, while every tile it keeps lies coplanar over the
+arena's own floor. Rings share the edge exactly, so there is neither.
+
+## MESH-04 — the walk cycle is paced by distance, not time
+
+`fStepPhase` counts distance — one cycle every stride — so a machine that
+stops mid-stride stops mid-stride, and a heavy one that covers ground slowly
+takes slow steps without anything having to say so.
+
+The thigh swings as a sine of the phase; the knee bends through the forward
+half of that swing and straightens for the half the foot is on the ground
+pushing back, which is the difference between walking and a pair of planks
+pivoting at the hip.
+
+Angles are positive forward and the caller negates them, because a positive
+pitch in the pose matrix swings a limb backwards.
+
+## MESH-05 — a glide runs on its own clock
+
+Every other cycle is paced by distance. A boost breaks that: at seventy
+metres a second, one stroke every five metres is fourteen cycles a second,
+and legs moving that fast are a grey blur. The glide is timed instead — one
+long push every two thirds of a second — which is what makes it read as
+gliding rather than sprinting.
+
+Boosting on the ground is not running. The thrusters do the work, so the legs
+hold the machine up and steer it, which is a skater's problem: both knees
+bent throughout, weight low, one leg reaching out and back in a long push
+while the other glides underneath. The pushing leg straightens as it goes
+out, which is what lets it stay on the floor at full stretch.
+
+## MESH-06 — the ankle drop is what keeps feet on the floor
+
+The body is lowered by whatever the straighter leg has lost, so bending the
+knees sinks the machine instead of leaving it hanging in the air.
+
+The thigh's pose pitch is `-A` and the knee's is `+K`, so the shin's frame
+sits at `K - A` off the vertical and the ankle drops by the cosine of that.
+Getting this sum wrong is the difference between a machine that walks and one
+that skates with its feet through the floor.
+
+## MESH-07 — attitude is summed in one place
+
+Whiplash keeps the pieces apart all the way to the render pose and sums them
+at the end (`car.c`: yaw takes the shake; pitch and roll take the landing
+wobble, the shake and the control offset). The same three lines are all that
+is needed here, and keeping them together makes it possible to read what a
+body is doing without chasing the terms round the simulation.
+
+## MESH-08 — a car's knockdown is a roll, not a pitch
+
+Something tall enough to have a face pitches forward onto it. A machine nine
+metres long and two high has nowhere to pitch to, and a Zizin standing on its
+nose reads as a glitch rather than a wreck. The knockdown for a wheeled
+machine is a half roll onto its roof.
+
+## MESH-09 — the Zizin plan's axes are of opposite handedness
+
+The body is the race game's own Zizin, polygon for polygon: `xzizin_coords`
+and `xzizin_pols` out of `carplans.c`, the same fifty quads the car is drawn
+with on the track.
+
+The plan is in the race game's axes — x along the car, y across it, z up —
+where the arena's are x across, y up, z forward. The three swap and the
+lateral one is negated. That negation is what keeps the car the right way
+round: the two frames are of opposite handedness, so swapping axes alone
+builds the car's reflection, with wheel arches, exhausts and both flanks of
+its livery on the wrong sides.
+
+Reflecting it back reverses every winding the plan had, which is why its
+panels face inwards here and why artwork on them needs different treatment
+from the rest of the mode.
+
+## MESH-10 — three kinds of texture word in the plan
+
+The race game's own draw path walks all three:
+
+- Most panels carry a texture word: `APPLY_TEXTURE` set, tile in the low byte.
+- Eight — the wheels and the livery — carry `ANMS_LOOKUP`, where the low byte
+  indexes the car's animation table and the real word is a frame out of it.
+  Frame zero is the one at rest.
+- The rest carry no texture flag and the low byte is a plain palette index,
+  which is how the tyres come out black.
+
+## MESH-11 — the fifty panels do not need a sorted list
+
+The race game draws this body through a sorted polygon list of its own — the
+`nNextPolIdx` links in the plan — and a painter's algorithm has no such list,
+so two panels sharing a plane would flicker. They do not: the fifty are
+tested against each other by the coplanar check, and the body is rigid, so
+passing at one pose is passing at all of them.
+
+## MESH-12 — panel orientation comes from the plan, not from us
+
+Each polygon carries `SURFACE_FLAG_FLIP_HORIZ` and `SURFACE_FLAG_FLIP_VERT`
+beside its tile index. That is how the body wears one tile across a pair of
+mirrored panels — roof rails, rear roof edge, lower tail corners — and it is
+why painting it panel for panel out of the same file still came out back to
+front: those bits were being dropped and the orientation guessed at
+afterwards, one panel at a time, from renders.
+
+Read the flags off the surface the lookup settled on, not off the polygon.
+This matters for the wheels: those four name an animation slot and carry no
+orientation of their own, while the frames behind them do — the near-side
+pair flipped, the off-side pair not. Taking the polygon's word for it left
+all four wheels wearing the same face.
+
+Dropping the corner reversal is the vertical mirror, so horizontal is that
+reversal plus two quarter turns, and the two together are a half turn with no
+reflection at all. `MECHA_QUAD_TEX_ROT90` and `MECHA_QUAD_TEX_ROT180` form a
+two-bit turn count, so all eight arrangements are reachable.
+
+## MESH-13 — the gun car's gun
+
+A handgun about as long as the car, attached to nothing: it floats off the
+front right wheel, held over on its side so the slide is horizontal and the
+shot goes out across the bonnet rather than over the roof. That roll is what
+puts the grip out to the left instead of underneath. No arms, no turret, just
+an absurd pistol keeping station beside a race car.
+
+Firing throws it up and back. The recovery counts down from the shot, so the
+kick is hardest on the tick it goes off and has run out by the time the next
+round is chambered. The same kick shoves the car in the simulation, so what
+is drawn is what happened.
+
+## MESH-14 — rolling over lifts the body back onto the floor
+
+The pose turns about the car's own floor, so half a roll puts the whole body
+below it: a point at height `h` lands at `h cos t`, and at 180 degrees the
+roof is a full height underground. Raising the origin by however far the
+lowest corner has gone under keeps the car resting on the floor the whole way
+over — a car rolling, rather than a car sinking into the tarmac.
+
+## MESH-15 — the lean is negated
+
+Positive roll lifts the machine's right side and so leans the machine left.
+Established by building a mesh at a known roll and measuring which flank came
+out lower, after reasoning about it got the sign wrong twice.
+
+Without the negation the machine leant away from its direction of travel. A
+machine boosting to its right leans right, as anything on wheels or blades
+does.
+
+## MESH-16 — the planting solve opens the hips, not the knees
+
+Both feet down: the floor is as far as the shorter leg can reach once its own
+hip roll is counted, and the other leg makes up the difference by rolling
+further out.
+
+That is how the pose works rather than a fudge. A skater at full stretch has
+its pushing leg out to the side precisely because it is straight, and a
+machine standing with its feet apart has its hips open for the same reason.
+Take the difference out of the knees instead and the stance has no width.
+
+## MESH-17 — hip roll is its own frame, above the swing
+
+Rolled first and swung afterwards, the whole leg tips outwards as one and its
+foot lands exactly `cos(roll)` of the way down, which is what lets the
+planting solve pick a roll and be right.
+
+Roll the thigh itself instead and the swing happens in the unrolled plane,
+the two rotations no longer commute, and the feet miss the floor.
+
+## MESH-18 — the knee stands proud of the limb
+
+It is how the reference art draws a knee, and it is the only thing keeping
+its faces out of their planes: a joint the same width as the limb it sits on
+has coplanar sides with it the moment the joint angle passes through
+straight, and there is no depth buffer to sort that out.
+
+## MESH-19 — the ankle cancels the hip roll
+
+The foot stays flat to the floor whatever the leg above it is doing, both
+ways. The three pitches up the chain cancel to nothing by construction, so
+what is left of the hip above the ankle is the roll alone, and giving the
+ankle the same roll back undoes it exactly. Without it a splayed leg lands on
+the outer edge of its foot and drives the inner corner through the floor.
+
+## MESH-20 — an idle machine lets its arms down
+
+A machine with nothing locked and nothing in flight lets the whole chain
+unfold: the shoulder stops tracking, the elbow gives up its right angle, and
+the guns end up pointed at the floor. It is the only way to tell at a glance
+which of two machines across the arena is about to shoot, and it costs
+nothing to read.
+
+## MESH-21 — mirroring a sprite means reversing its corners
+
+`POLYTEX` takes its texture coordinates from the projected corners, so a quad
+always carries the whole tile however wide it is drawn. The way to mirror a
+sprite is therefore to reverse the order its corners arrive in, which is what
+`MECHA_QUAD_TEX_FLIP` switches. Two half-billboards side by side, one
+flipped, are one sprite and its own reflection meeting down the middle.
+
+## MESH-22 — the blade is geometry, not a billboard
+
+It used to be an ordinary billboard: a bright square facing the camera, which
+read as a shield held up rather than anything being swung. A close-quarters
+weapon wants a shape with direction in it.
+
+Built as two planes through the same axis, one flat and one upright, so it
+never turns edge-on and vanishes — there is no camera in the geometry at all,
+which is the point. Each plane is a tapering body and a point, and a short
+crossguard at the hilt stops the whole thing reading as a spike.
+
+## MESH-23 — the depth key, and the two cases the middle gets wrong
+
+There is no depth buffer, so a quad is drawn either before another or after
+it, whole. For most geometry the middle of the quad is the honest answer to
+which. Two cases it is not:
+
+- **A shadow lying on the floor.** Its middle can easily be further off than
+  the middle of a floor tile it covers, and the tile is then painted over it,
+  cutting the shadow along a tile edge that moves with the camera. Sorting
+  the decal by its nearest corner and the ground by its farthest fixes it
+  both ways round.
+- **Broad horizontal surfaces**, the same argument from the other side: a
+  floor tile stretching away under a machine standing on it has to be drawn
+  first, and its far corner is what says so.
+
+## MESH-24 — self-lit geometry is pulled forward in the sort
+
+A blast centred on a machine intersects it, and per-quad sorting then lets
+some panels paint over the fireball and not others — a fireball with a hole
+in it that swims about as the camera moves.
+
+Pulling the key forward by the sprite's own half-width, which is the radius
+of the volume it stands for, sorts it as though it stood clear in front:
+everything inside that volume is outranked, everything outside is not, so a
+shoulder well clear of the fireball still occludes it. The narrower of the
+two edges is measured, because a long thin tracer has no business claiming to
+be half its length nearer than it is.
+
+## MESH-25 — the sky dome radius is chosen against the arena
+
+The floor is a couple of hundred metres across, so a dome at six hundred
+swung by nearly twenty degrees as a player crossed it — the sky sliding
+rather than the machine walking. At fourteen hundred it is a few degrees.
+
+Puff size scales with radius, so pushing it out costs nothing but parallax,
+and it is still four orders of magnitude short of straining a float. The
+retail dome sits ten million units out, which suits a track renderer written
+around it and does not suit this one.
+
+## MESH-26 — the forest grows outwards off the boundary
+
+The trees a machine can hide behind are boxes built from the same panels as
+the cover. These are the other hundred and fifty: the game's own tree
+sprites, upright and camera-facing, with nothing behind them. They do not
+collide, do not block a shot and are not on the ground mesh. They are there
+so an arena with an invisible boundary reads as a clearing in a wood rather
+than a field that stops.
+
+Placement is a hash of the tree's index and the match seed, so nothing is
+stored between frames and the same match always grows the same forest.
+
+The draw is squared rather than uniform. A square scatter puts as many trees
+five hundred metres away as fifty, which is a thin haze on the horizon and
+nothing at the edge — and the edge is the point, since that is where the
+invisible wall is. Squaring crowds them against the boundary and thins them
+behind.
+
+## MESH-27 — a tracer's streak keeps the weapon's colour
+
+That colour is how a player tells whose fire is crossing the arena. A
+textured quad draws the frame's colours and nothing else, so a plasma-skinned
+streak would make every machine's beams the same blue. The head is small
+enough to read as the glow at the front of the bolt rather than the bolt.
+
+## MESH-28 — a blast opens fast and collapses
+
+There is no alpha in an indexed frame buffer, so size is the only thing
+carrying the shape of the blast. The earlier curve grew all the way to full
+scale at the end of its life, so a blast covered the most screen on the last
+frame before vanishing — which reads as the arena being blanked and restored
+rather than something exploding. Peaking a third of the way in and shrinking
+from there reads as a burst.
+
+## MESH-29 — debris cools as it falls
+
+The ramp runs from the pale gold at the top of the sky gradient back down
+through orange into the deep reds at its zenith. The shared indices are not a
+coincidence worth fighting: they are the one contiguous warm ramp the palette
+has, they read as heat in either palette, and a particle walking them
+downwards is a particle going out.
+
+## MESH-30 — the jetpack flame is two mirrored halves
+
+The fire tiles are drawn leaning one way, so a single one reads as a flame
+blown sideways — wrong for something pointing straight down out of a
+jetpack. Two halves meeting down the middle, the right-hand copy mirrored,
+cost one extra quad and no overlap, so nothing is drawn twice into the same
+pixels and the painter's order has nothing to decide.

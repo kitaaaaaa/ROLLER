@@ -10,12 +10,8 @@
 #include <math.h>
 #include <string.h>
 
-/*
- * Which of the game's own texture banks are loaded, answered once a frame by
- * the render layer before anything is built. Both start false, so a checkout
- * with no retail data draws the whole mode flat rather than naming tiles no
- * bank has.
- */
+/* Which retail texture banks are loaded, set once a frame by the render
+ * layer. Both start false, so a checkout with no data draws flat. */
 static bool s_bSprites = false;
 static bool s_bCarSkin = false;
 
@@ -33,22 +29,11 @@ static bool s_bCarSkin = false;
  * bank loads but a tile in it does not. */
 #define MECHA_PAL_CANOPY 252
 
-/*
- * The gun car. How square to the sky a panel has to look to be painted as
- * the top of the car, how far the gun swings off the nose, how it is held,
- * and what firing does to it.
- */
+/* How square to the sky a panel must look to be painted as the car's top. */
 #define MECHA_ZIZIN_ROOF_FACING 0.55f
 
-/*
- * How each panel of the body wants its artwork read.
- *
- * The plan is hand-made and its polygons are not wound to one convention,
- * so this is a list of which ones, not a rule -- every attempt to derive it
- * from the geometry got some other panel wrong. Indices are into
- * xzizin_pols, which is fixed data, and are the numbers the render test
- * paints onto the panels themselves.
- */
+/* The gun: how far it swings off the nose, how it is held, what firing does
+ * to it. */
 #define MECHA_GUN_YAW_LIMIT   MECHA_DEG(40)
 #define MECHA_GUN_ROLL        MECHA_DEG(84)
 /* How far across the bonnet it points on top of wherever it is aiming. */
@@ -58,12 +43,10 @@ static bool s_bCarSkin = false;
 #define MECHA_GUN_KICK_PITCH  MECHA_DEG(34)
 
 /*
- * Translucent quads carry a SHADE LEVEL in the low byte, not a colour.
- * POLYFLAT hands SURFACE_FLAG_TRANSPARENT polygons to shadow_poly, which
- * indexes shade_palette[256 * level] to darken whatever is already there --
- * and shade_palette is only 4096 bytes, so the level has to stay under 16 or
- * the read runs off the end of it. The engine's own callers use 2 and 3
- * (func2.c's blankwindow, replay.c's car shadows), so these match.
+ * Translucent quads carry a shade level in the low byte, not a colour:
+ * shadow_poly indexes shade_palette[256 * level], and that table is 4096
+ * bytes, so the level must stay under 16. These match the engine's own
+ * callers, blankwindow and replay.c's car shadows. [MESH-01]
  */
 #define MECHA_SHADE_SHADOW 3
 #define MECHA_SHADE_DUST   2
@@ -235,12 +218,10 @@ static void mecha_pose_apply(const tMechaPose *pPose, float fX, float fY,
 //-------------------------------------------------------------------------------------------------
 
 /*
- * A pose hung off another one. The pivot is a point in the parent's space --
- * a hip, a knee, a shoulder -- and the rotation is the parent's with a
- * further turn applied on top, so a forearm swings about an elbow that is
- * itself swinging about a shoulder on a torso that is turning independently
- * of the legs it stands on. Everything the mech is built from is a chain of
- * these; nothing but the root knows where it is in the world.
+ * A pose hung off another. The pivot is a point in the parent's space and
+ * the rotation is the parent's plus a further turn, so a forearm swings
+ * about an elbow swinging about a shoulder. Every limb is a chain of these;
+ * only the root knows where it is in the world.
  */
 static void mecha_pose_child(tMechaPose *pOut, const tMechaPose *pParent,
                              float fPivotX, float fPivotY, float fPivotZ,
@@ -310,11 +291,9 @@ static void mecha_add_box(tMechaQuadList *pList, const tMechaPose *pPose,
 //-------------------------------------------------------------------------------------------------
 
 /*
- * One tile of ground, with each corner at the height the terrain gives it.
- * A level arena leaves every corner at zero and this is the flat quad it
- * always was; a sloped one gets a quad per tile that follows the hill, and
- * because the four corners need not be coplanar the slope reads as facets
- * rather than as a smooth surface -- which is the look, not a compromise.
+ * One tile of ground, each corner at the height the terrain gives it. The
+ * four corners need not be coplanar, so a slope reads as facets rather than
+ * a smooth surface, which is the look rather than a compromise.
  */
 static void mecha_add_ground_quad(tMechaQuadList *pList,
                                   const tMechaArena *pArena,
@@ -378,18 +357,12 @@ static void mecha_tag_box(tMechaQuadList *pList, int iFirst, int iBank,
 static void mecha_tag_texture(tMechaQuadList *pList, int iBank, int iTile);
 
 /*
- * A wall, in panels rather than as one slab.
+ * A wall, in panels rather than one slab: POLYTEX fits exactly one tile to
+ * whatever polygon it is given, so a single-quad wall wears one tile
+ * stretched two hundred metres wide. [MESH-02]
  *
- * The legacy texture path works its coordinates out inside POLYTEX from the
- * tile index and the projected polygon, and it fits exactly one tile to
- * whatever polygon it is given. A wall built as a single quad therefore
- * wears one tile stretched two hundred metres wide and twenty high, which
- * is not a wall with a texture on it, it is a smear. Cut into panels the
- * size of the floor's own tiles, each panel gets a tile at the scale the
- * ground is using and the two agree.
- *
- * Panels are emitted from the start end, so the winding -- and with it
- * which way the wall faces -- is the caller's to pick exactly as before.
+ * Panels are emitted from the start end, so the winding, and with it which
+ * way the wall faces, stays the caller's to pick.
  */
 static void mecha_add_wall(tMechaQuadList *pList,
                            float fX0, float fZ0, float fX1, float fZ1,
@@ -433,13 +406,10 @@ static void mecha_add_wall(tMechaQuadList *pList,
 //-------------------------------------------------------------------------------------------------
 
 /*
- * A block of cover, in panels for the same reason the walls are. Its sides
- * face outwards, which is the opposite winding to an arena wall: the normal
- * comes a quarter turn anticlockwise from the run seen from above, so each
- * side is walked from the end that puts it on the outside.
- *
- * No underside. It is sitting on the floor and the only way to see one is
- * to get beneath the world.
+ * A block of cover, panelled for the same reason walls are. Its sides face
+ * outwards, the opposite winding to an arena wall, so each side is walked
+ * from the end that puts it on the outside. No underside: it sits on the
+ * floor.
  */
 static void mecha_add_tiled_box(tMechaQuadList *pList, float fX, float fZ,
                                 float fHalfX, float fHalfZ, float fBaseY,
@@ -663,20 +633,9 @@ void mecha_mesh_arena(tMechaQuadList *pList, const tMechaArena *pArena)
   }
 
   /*
-   * Ground past the boundary.
-   *
-   * Nobody can walk on it -- the boundary still stops a machine at the
-   * arena's own edge -- and it is drawn coarsely because it is only ever
-   * seen at a distance. What it buys is that the arena stops being an
-   * island: the forest runs on past where the fight does.
-   *
-   * It is built as rings of the boundary's own shape rather than as a grid
-   * with the middle knocked out, and that is not tidiness. A grid coarse
-   * enough to be cheap has tiles far wider than the boundary is straight,
-   * so every tile it drops for overlapping the arena takes a wedge of
-   * ground with it and the horizon comes out full of holes; every tile it
-   * keeps lies coplanar over the arena's own floor. Rings share the edge
-   * exactly, so there is neither.
+   * Ground past the boundary: unwalkable, drawn coarsely, and there so the
+   * arena stops being an island. Built as rings of the boundary's own shape
+   * rather than a grid with the middle knocked out. [MESH-03]
    */
   if (pArena->fOuterReach > fExtent) {
     float fGrow = pArena->fOuterReach / fExtent;
@@ -806,29 +765,17 @@ static int mecha_blend_angle(int iFrom, int iTo, float fAmount)
 //-------------------------------------------------------------------------------------------------
 
 /*
- * The walk cycle.
- *
- * fStepPhase counts distance rather than time -- one cycle every five metres
- * -- so a machine that stops mid-stride stops mid-stride, and a heavy one
- * that covers ground slowly takes slow steps without anything having to say
- * so. The thigh swings as a sine of the phase; the knee bends through the
- * forward half of that swing and straightens for the half the foot is on the
- * ground pushing back, which is the difference between walking and a pair of
- * planks pivoting at the hip.
- *
- * Angles are positive forward, and the caller negates them for the pose,
- * because a positive pitch in the pose matrix swings a limb backwards.
+ * The walk cycle. fStepPhase counts distance, not time, so pace follows
+ * ground covered. Angles are positive forward and the caller negates them:
+ * a positive pose pitch swings a limb backwards. [MESH-04]
  */
 #define MECHA_LEG_SWING   MECHA_DEG(41)
 #define MECHA_LEG_KNEE    MECHA_DEG(56)
 /*
- * Standing, and standing with someone to fight.
- *
- * A machine at ease has its feet apart and its knees off the lock; give it a
- * lock to hold and it settles -- lower, wider, one foot forward -- without
- * any of it being animated as such. The lead angle breathes, which rocks the
- * weight slowly from one foot to the other, and that breath is the only
- * movement in either pose.
+ * Standing, and standing with someone to fight. A machine at ease has its
+ * feet apart and knees off the lock; given a target it settles lower, wider,
+ * one foot forward. The lead angle breathes, which is the only movement in
+ * either pose.
  */
 #define MECHA_STAND_LEAD   MECHA_DEG(5)
 #define MECHA_STAND_KNEE   MECHA_DEG(9)
@@ -837,17 +784,8 @@ static int mecha_blend_angle(int iFrom, int iTo, float fAmount)
 #define MECHA_FIGHT_KNEE   MECHA_DEG(25)
 #define MECHA_FIGHT_SPLAY  MECHA_DEG(11)
 #define MECHA_STANCE_BREATH MECHA_DEG(3)
-/*
- * Boosting on the ground is not running.
- *
- * The thrusters are doing the work, so the legs are not driving the machine
- * anywhere -- they are holding it up and steering it, which is a skater's
- * problem and not a runner's. So: both knees bent through the whole cycle,
- * the weight low, and one leg at a time reaching out to the side and back in
- * a long push while the other glides underneath. The pushing leg straightens
- * as it goes out, exactly as a skater's does, and that is what lets it stay
- * on the floor at full stretch.
- */
+/* Boosting on the ground is a skater's problem, not a runner's: knees bent
+ * throughout, weight low, one leg pushing while the other glides. [MESH-05] */
 #define MECHA_SKATE_KNEE    MECHA_DEG(34)
 #define MECHA_SKATE_PUSH    MECHA_DEG(20)
 #define MECHA_SKATE_GATHER  MECHA_DEG(11)
@@ -885,14 +823,9 @@ static int mecha_blend_angle(int iFrom, int iTo, float fAmount)
 #define MECHA_GAIT_STANCE  5
 
 /*
- * A glide runs on its own clock rather than on ground covered.
- *
- * Every other cycle here is paced by distance, which is what makes a heavy
- * machine take slow steps without anything having to say so. A boost breaks
- * that: at seventy metres a second, one stroke every five metres is fourteen
- * cycles a second, and legs moving that fast are a grey blur. So the glide
- * is timed instead -- one long push every two thirds of a second, which is
- * what makes it read as gliding rather than as sprinting.
+ * A glide runs on its own clock rather than on ground covered: at boost
+ * speed, a distance-paced cycle is fourteen strokes a second and reads as a
+ * grey blur. [MESH-05]
  */
 
 /* Whether both feet are meant to be on the floor throughout. A stance and a
@@ -1002,15 +935,9 @@ static void mecha_leg_angles(int iGait, float fPhase, int iSide, int iTick,
 //-------------------------------------------------------------------------------------------------
 
 /*
- * How far below the hip the ankle ends up, for a given pair of joint angles.
- * This is what keeps the feet on the floor: the body is lowered by whatever
- * the straighter leg has lost, so bending the knees sinks the machine
- * instead of leaving it hanging with its feet in the air.
- *
- * The thigh's pose pitch is -A and the knee's is +K, so the shin's own frame
- * sits at K - A off the vertical and the ankle drops by the cosine of that.
- * Getting this sum wrong is not a small error: it is the difference between
- * a machine that walks and one that skates with its feet through the floor.
+ * How far below the hip the ankle ends up. This is what keeps the feet on
+ * the floor: the body sinks by whatever the straighter leg has lost. The
+ * shin's frame sits at K - A off the vertical. [MESH-06]
  */
 static float mecha_leg_reach(int iThigh, int iKnee, float fThighLen,
                              float fShinLen)
@@ -1067,14 +994,8 @@ static void mecha_mech_aim(const tMechaWorld *pWorld, int iMechIdx,
 //-------------------------------------------------------------------------------------------------
 
 /*
- * The drawn attitude, added up.
- *
- * Whiplash keeps the pieces apart all the way to the render pose and sums
- * them in one place at the end (car.c: yaw takes the shake, pitch and roll
- * take the landing wobble, the shake and the control offset). The same
- * three lines are all that is needed here, and keeping them together is
- * what makes it possible to read what a machine's body is doing without
- * chasing the terms round the simulation.
+ * The drawn attitude, added up in one place as Whiplash does it in car.c.
+ * [MESH-07]
  */
 static void mecha_mesh_attitude(const tMechaMech *pMech, int *piYaw,
                                 int *piPitch, int *piRoll)
@@ -1121,16 +1042,8 @@ static int mecha_mesh_fall_pitch(const tMechaMech *pMech)
 
 //-------------------------------------------------------------------------------------------------
 
-/*
- * A car does not fall on its face. It goes over.
- *
- * Something tall enough to have a face pitches forward onto it; a thing
- * nine metres long and two high has nowhere to pitch to, and a Zizin
- * standing on its nose reads as a glitch rather than as a wreck. So the
- * knockdown for a wheeled machine is a half roll onto its roof, which is
- * what happens to a car that has been hit hard enough to stop caring
- * which way up it is.
- */
+/* A car does not fall on its face, it goes over: a wheeled machine's
+ * knockdown is a half roll onto its roof. [MESH-08] */
 static int mecha_mesh_fall_roll(const tMechaMech *pMech)
 {
   return (int)((float)MECHA_ANGLE_HALF * mecha_mesh_fall_progress(pMech));
@@ -1159,23 +1072,9 @@ static int mecha_mesh_lean_pitch(const tMechaMech *pMech)
 
 /*
  * The ZIZIN KLR 330's body is the race game's own Zizin, polygon for
- * polygon: `xzizin_coords` and `xzizin_pols` out of carplans.c, the same
- * fifty quads the car is drawn with on the track.
- *
- * Two things are converted on the way in. The plan is in the race game's
- * axes -- x along the car, y across it, z up -- where the arena's are x
- * across, y up, z forward, so the three swap and the lateral one is
- * negated. The negation is what keeps the car the right way round: those
- * two frames are of opposite handedness, so swapping the axes alone builds
- * the car's reflection, with its wheel arches, its exhausts and both flanks
- * of its livery on the wrong sides. Reflecting it back reverses every
- * winding the plan had, which is why its panels all face inwards here and
- * why the artwork on them needs a different treatment from the one the rest
- * of the mode gets. And the plan's polygons carry
- * a texture word rather than a colour, indexing a per-car bank this mode
- * does not load, so they are flat-shaded in the machine's own two palette
- * entries instead, picked apart by which way each face looks. The shape is
- * the game's; the paint is the mode's.
+ * polygon, out of carplans.c. The plan's axes are of opposite handedness to
+ * the arena's, so they swap and the lateral one is negated -- which reverses
+ * every winding and is why these panels face inwards. [MESH-09]
  */
 #define MECHA_ZIZIN_VERTS 86
 /* The size of xzizin_anms in carplans.c, which the header only declares. */
@@ -1202,15 +1101,8 @@ static void mecha_zizin_extent(float *pfLength, float *pfHeight)
 //-------------------------------------------------------------------------------------------------
 
 /*
- * What the plan says a panel is painted with.
- *
- * Three cases, and the race game's own draw path walks all three. Most
- * panels carry a texture word: APPLY_TEXTURE set and the tile in the low
- * byte. Eight of them -- the wheels and the livery -- carry ANMS_LOOKUP
- * instead, which means the low byte is an index into the car's animation
- * table and the real word is a frame out of it; frame zero is the one at
- * rest. The rest carry no texture flag at all and the low byte is a plain
- * palette index, which is how the tyres come out black.
+ * What the plan says a panel is painted with: a texture word, an animation
+ * slot to look the real word up in, or a plain palette index. [MESH-10]
  */
 static uint32_t mecha_zizin_surface(int iPoly)
 {
@@ -1240,15 +1132,8 @@ static void mecha_add_zizin_body(tMechaQuadList *pList,
     float afVert[4][3];
     int iCorner;
 
-    /*
-     * Straight off the plan, with nothing nudged apart. The race game draws
-     * this body through a sorted polygon list of its own -- that is what the
-     * nNextPolIdx links in the plan are -- and a painter's algorithm has no
-     * such list, so two of its panels sharing a plane would have flickered.
-     * They do not: the fifty are tested against each other by the coplanar
-     * check, and the body is rigid, so passing at one pose is passing at
-     * all of them.
-     */
+    /* Straight off the plan, with nothing nudged apart: no two of the fifty
+     * share a plane, so the painter's algorithm needs no help. [MESH-11] */
     for (iCorner = 0; iCorner < 4; iCorner++) {
       const tVec3 *pPlan = &xzizin_coords[xzizin_pols[iPoly].verts[iCorner]];
 
@@ -1264,24 +1149,10 @@ static void mecha_add_zizin_body(tMechaQuadList *pList,
       uint32_t uiTex = mecha_zizin_surface(iPoly);
 
       /*
-       * How the artwork sits is the plan's to say, not ours. Each polygon
-       * carries SURFACE_FLAG_FLIP_HORIZ and SURFACE_FLAG_FLIP_VERT beside
-       * its tile index, which is how the body wears one tile on a pair of
-       * mirrored panels -- the roof rails, the rear roof edge, the lower
-       * tail corners -- and it is why panel for panel out of the same file
-       * was still coming out back to front: those bits were being dropped
-       * and the orientation guessed at afterwards.
-       *
-       * Read off the surface the lookup settled on rather than off the
-       * polygon, which matters for the wheels: those four name an
-       * animation slot and carry no orientation of their own, while the
-       * frames behind them do -- the near-side pair flipped, the off-side
-       * pair not. Taking the polygon's word for it left all four wheels
-       * wearing the same face.
-       *
-       * Dropping the corner reversal is the vertical mirror, so horizontal
-       * is that reversal plus two quarter turns, and the two together are
-       * a half turn with no reflection at all.
+       * How the artwork sits is the plan's to say. Read the flip flags off
+       * the surface the lookup settled on, not off the polygon -- the wheels
+       * carry no orientation of their own and the frames behind them do.
+       * [MESH-12]
        */
       bool bFlipH = (uiTex & SURFACE_FLAG_FLIP_HORIZ) != 0;
       bool bFlipV = (uiTex & SURFACE_FLAG_FLIP_VERT) != 0;
@@ -1301,14 +1172,10 @@ static void mecha_add_zizin_body(tMechaQuadList *pList,
   }
 
   /*
-   * With no skin to wear it falls back to the machine's own two colours:
-   * bonnet and roof in the lighter, flanks in the darker, picked off each
-   * panel's own normal once it has been worked out rather than off where
-   * the panel sits -- the plan is a real car body and its sills are as high
-   * off the ground as some of its bonnet. Downwards, because reflecting the
-   * plan into this frame reversed every winding in it and so every normal:
-   * the panel looking at the sky is the one whose normal points at the
-   * floor.
+   * With no skin, fall back to the machine's two colours, split by each
+   * panel's own normal rather than by where it sits -- the sills are as high
+   * as some of the bonnet. Downwards, because the reflection reversed every
+   * normal. [MESH-09]
    */
   if (!s_bCarSkin) {
     for (i = iFirst; i < pList->iCount; i++) {
@@ -1321,18 +1188,8 @@ static void mecha_add_zizin_body(tMechaQuadList *pList,
 //-------------------------------------------------------------------------------------------------
 
 /*
- * And the gun.
- *
- * It is a handgun, it is about as long as the car, and it is not attached
- * to anything -- it floats off the front right wheel, held over on its side
- * so the slide is horizontal and the shot goes out across the bonnet. That
- * is the whole character of the machine: no arms, no turret, just an
- * absurd pistol keeping station beside a race car.
- *
- * Firing kicks it. The recovery counts down from the shot, so the kick is
- * strongest on the tick it goes off and has run out by the time the next
- * one is chambered -- and the same kick shoves the car itself, in the
- * simulation, so what you see is what happened.
+ * And the gun: a handgun as long as the car, attached to nothing, floating
+ * off the front right wheel and held on its side. [MESH-13]
  */
 static void mecha_add_zizin_gun(tMechaQuadList *pList,
                                 const tMechaPose *pCar, const tMechaMech *pMech,
@@ -1350,17 +1207,8 @@ static void mecha_add_zizin_gun(tMechaQuadList *pList,
   float fBarrel = fLength * 0.52f;
   float fThick = fLength * 0.11f;
 
-  /*
-   * Beside the front right wheel, at about the height of one, and held over
-   * on its side -- that roll is the sideways part, and it is what puts the
-   * grip out to the left instead of underneath and lays the slide flat so
-   * the shot goes out across the bonnet rather than over the roof.
-   *
-   * Firing throws it up and back. The recovery counts down from the shot,
-   * so the kick is hardest on the tick it goes off and has run out by the
-   * time the next round is chambered, and the same kick shoves the car in
-   * the simulation: what you see is what happened.
-   */
+  /* Beside the front right wheel and rolled onto its side; firing throws it
+   * up and back as the recovery runs down. [MESH-13] */
   mecha_pose_child(&gun, pCar,
                    pDef->fRadius * (1.45f + 0.12f * fKick),
                    pDef->fHeight * (0.42f + 0.42f * fKick),
@@ -1435,17 +1283,8 @@ static void mecha_mesh_car(tMechaQuadList *pList, const tMechaWorld *pWorld,
     float fLift = 0.0f;
 
     iRoll += iFlip;
-    /*
-     * Going over lifts it back onto the ground it is rolling off.
-     *
-     * The pose turns about the car's own floor, so half a roll puts the
-     * whole body below it -- a point at height h lands at h cos t, and at
-     * a hundred and eighty degrees the roof is a full height under the
-     * ground. Raising the origin by however far the lowest corner has
-     * gone under keeps the car resting on the floor the whole way over,
-     * which is what a car rolling looks like and what a car sinking into
-     * the tarmac does not.
-     */
+    /* Going over lifts it back onto the ground: the pose turns about the
+     * car's floor, so half a roll would bury it. [MESH-14] */
     if (iFlip != 0) {
       float fDrop = -mecha_cos(iFlip);
 
@@ -1535,14 +1374,9 @@ void mecha_mesh_mech(tMechaQuadList *pList, const tMechaWorld *pWorld,
                           + 0.05f * MECHA_METRE;
 
   /*
-   * Lean into the direction of travel, scaled by how much of it is
-   * sideways. fLeanRoll is smoothed by the simulation so this never snaps.
-   *
-   * Negated, because positive roll lifts the right side and so leans the
-   * machine left: without the minus this leant away from the direction of
-   * travel, which is what the comment above has always said it should not
-   * do. A machine boosting to its right leans right, the way anything on
-   * wheels or blades does.
+   * Lean into the direction of travel, scaled by how much of it is sideways;
+   * fLeanRoll is smoothed by the simulation so this never snaps. Negated,
+   * because positive roll lifts the right side. [MESH-15]
    */
   fLateral = (pMech->fVelX * mecha_cos(pMech->iFacing)
               - pMech->fVelZ * mecha_sin(pMech->iFacing));
@@ -1611,16 +1445,8 @@ void mecha_mesh_mech(tMechaQuadList *pList, const tMechaWorld *pWorld,
                                          fThighLen, fShinLen);
 
       if (mecha_gait_plants(iGait)) {
-        /*
-         * Both feet down. The floor is as far as the shorter leg can reach
-         * once its own hip roll is counted, and the other leg makes up the
-         * difference by rolling further out -- which is not a fudge, it is
-         * how the pose works: a skater at full stretch has its pushing leg
-         * out to the side precisely because it is straight, and a machine
-         * standing with its feet apart has its hips open for the same
-         * reason. Take the difference out of the knees instead and the
-         * stance has no width to it.
-         */
+        /* Both feet down: the shorter leg sets the floor and the other
+         * makes up the difference at the hip, not the knee. [MESH-16] */
         float fFloor = afReach[0] * mecha_cos(aiRoll[0]);
         float fOther = afReach[1] * mecha_cos(aiRoll[1]);
 
@@ -1670,15 +1496,8 @@ void mecha_mesh_mech(tMechaQuadList *pList, const tMechaWorld *pWorld,
 
     /*
      * Rolled out at the hip, so a stance has width and a glide has an edge
-     * to push off. Positive roll walks the limb towards +x, so the side it
-     * is on decides the sign.
-     *
-     * It is a frame of its own rather than a roll on the thigh, and that is
-     * not tidiness: rolled first and swung afterwards, the whole leg tips
-     * outwards as one and its foot lands exactly cos(roll) of the way down,
-     * which is what lets the planting solve above pick a roll and be right.
-     * Roll the thigh itself and the swing happens in the unrolled plane, the
-     * two rotations no longer commute, and the feet miss the floor.
+     * to push off. A frame of its own rather than a roll on the thigh: the
+     * two rotations do not commute. [MESH-17]
      */
     mecha_pose_child(&hip, &pose, fSide * 0.42f * fRadius * fLimb,
                      0.47f * fHeight, 0.0f, 0, 0,
@@ -1687,15 +1506,8 @@ void mecha_mesh_mech(tMechaQuadList *pList, const tMechaWorld *pWorld,
     mecha_add_box(pList, &thigh, 0.0f, -0.5f * fThighLen, 0.0f,
                   0.23f * fRadius * fLimb, 0.5f * fThighLen,
                   0.24f * fRadius * fLimb, byBody, byBody, 0);
-    /*
-     * The knee itself, so the joint reads as a joint from any angle rather
-     * than as two boxes that happen to meet. It stands proud of both the
-     * thigh above it and the shin below, which is how the reference art
-     * draws a knee anyway and is also the only thing keeping its faces out
-     * of their planes: a joint the same width as the limb it sits on has
-     * coplanar sides with it the moment the joint angle passes through
-     * straight, and there is no depth buffer here to sort that out.
-     */
+    /* The knee, standing proud of both thigh and shin so it reads as a
+     * joint and its faces stay out of their planes. [MESH-18] */
     mecha_add_box(pList, &thigh, 0.0f, -fThighLen, 0.0f,
                   0.26f * fRadius * fLimb, 0.05f * fHeight,
                   0.27f * fRadius * fLimb, byJoint, byJoint, 0);
@@ -1713,15 +1525,8 @@ void mecha_mesh_mech(tMechaQuadList *pList, const tMechaWorld *pWorld,
                   0.19f * fRadius * fLimb, 0.5f * fShinLen,
                   0.20f * fRadius * fLimb, byBody, byBody, 0);
 
-    /*
-     * The foot stays flat to the floor whatever the leg above it is doing,
-     * which is the whole reason it gets a joint of its own -- and that now
-     * means flat both ways. The three pitches up the chain cancel to
-     * nothing by construction, so what is left of the hip above the ankle
-     * is the roll alone, and giving the ankle the same roll back undoes it
-     * exactly. Without it a splayed leg lands on the outer edge of its foot
-     * and drives the inner corner through the floor.
-     */
+    /* The foot stays flat to the floor both ways: the pitches cancel by
+     * construction, and the ankle gives the hip roll back. [MESH-19] */
     mecha_pose_child(&foot, &shin, 0.0f, -fShinLen, 0.0f, 0,
                      aiThigh[iSide] - aiKnee[iSide],
                      -(int)(fSide * (float)aiRoll[iSide]));
@@ -1798,14 +1603,8 @@ void mecha_mesh_mech(tMechaQuadList *pList, const tMechaWorld *pWorld,
                     0.30f * fRadius * fShoulder, 0.09f * fHeight * fShoulder,
                     0.36f * fRadius * fShoulder, byTrim, byTrim, 0);
 
-      /*
-       * And whether it is holding them up at all. A machine with nothing
-       * locked and nothing in flight lets the whole chain unfold: the
-       * shoulder stops tracking, the elbow gives up its right angle, and
-       * the guns end up pointed at the floor. It is the only way to tell at
-       * a glance which of two machines across the arena is about to shoot
-       * you, and it costs nothing to read.
-       */
+      /* A machine with nothing locked lets the whole chain unfold and
+       * points its guns at the floor. [MESH-20] */
       mecha_pose_child(&shoulder, &torso,
                        fSide * 0.98f * fRadius * fShoulder, 0.27f * fHeight,
                        0.0f, (int)((float)iArmYaw * fReady),
@@ -2020,14 +1819,8 @@ static void mecha_add_billboard(tMechaQuadList *pList, int iCameraYaw,
 }
 
 /*
- * Half a billboard, offset sideways, optionally mirrored.
- *
- * POLYTEX takes its texture coordinates from the projected corners, so a
- * quad always carries the whole tile however wide it is drawn -- which
- * means the way to mirror a sprite is to reverse the order its corners
- * arrive in, and MECHA_QUAD_TEX_FLIP is exactly that switch. Two of these
- * side by side, one flipped, is one sprite and its own reflection meeting
- * down the middle.
+ * Half a billboard, offset sideways, optionally mirrored. Two side by side,
+ * one flipped, make a sprite and its reflection. [MESH-21]
  */
 static void mecha_add_billboard_half(tMechaQuadList *pList, int iCameraYaw,
                                      float fX, float fY, float fZ,
@@ -2095,19 +1888,9 @@ static void mecha_add_upright_billboard(tMechaQuadList *pList, int iCameraYaw,
 //-------------------------------------------------------------------------------------------------
 
 /*
- * The close-quarters blade.
- *
- * This used to be an ordinary billboard: a bright square facing the camera,
- * which read as a shield held up rather than as anything being swung. What
- * a close-quarters weapon wants is a shape with a direction in it, so this
- * is an actual blade -- pointed, lying flat and level, running out along
- * the line of the swing from the gun that threw it.
- *
- * Built as two planes through the same axis, one flat and one upright, so
- * it never turns edge-on and vanishes: there is no camera in the geometry
- * at all, which is the point. Each plane is a tapering body and a point,
- * and a short crossguard at the hilt is what stops the whole thing reading
- * as a spike.
+ * The close-quarters blade: pointed, level, running out along the line of
+ * the swing. Two planes through the same axis, so it never turns edge-on --
+ * there is no camera in the geometry at all. [MESH-22]
  */
 static void mecha_add_blade(tMechaQuadList *pList, float fX, float fY,
                             float fZ, float fDirX, float fDirZ,
@@ -2325,46 +2108,20 @@ float mecha_quad_depth_key(const tMechaQuad *pQuad, const float afEye[3],
   }
 
   /*
-   * There is no depth buffer, so a quad is either drawn before another one
-   * or after it, whole. For most geometry the middle of the quad is the
-   * honest answer to which, and for two things it is not.
-   *
-   * A shadow lying on the floor is the first. Its middle can easily be
-   * further off than the middle of a floor tile it covers, and then the
-   * tile is painted over the top of it and the shadow is cut in half along
-   * a tile edge that moves as the camera does. Sorting the decal by its
-   * nearest corner and the ground beneath it by its farthest fixes that
-   * both ways round: whichever of the two is larger, the ground's far
-   * corner is behind the decal's near one, so the ground always goes down
-   * first.
-   *
-   * Broad horizontal surfaces are the second, and it is the same argument
-   * seen from the other side -- a floor tile stretching away under a
-   * machine standing on it has to be drawn before the machine, and its far
-   * corner is what says so.
+   * No depth buffer, so a quad is drawn before another or after it, whole.
+   * The middle of the quad is the honest key for most geometry; decals take
+   * their nearest corner and broad floors their farthest. [MESH-23]
    */
   if (pQuad->byFlags & (MECHA_QUAD_SHADOW | MECHA_QUAD_DECAL))
     return fMin;
 
   /*
-   * Self-lit geometry -- blasts, flames, tracers, a visor -- is drawn on top
-   * of whatever it is going off inside. A blast centred on a machine
-   * intersects it, and per-quad sorting then lets some of the machine's
-   * panels paint over the fireball and not others, which as the camera
-   * moves is a fireball with a hole in it that swims about. Pulling the key
-   * forward by the sprite's own size, capped, sorts it as though it stood
-   * clear in front of the thing it is engulfing. The cap is what stops a
-   * long tracer claiming to be metres nearer than it is.
+   * Self-lit geometry is drawn on top of whatever it is going off inside:
+   * the key is pulled forward by the sprite's own size, capped. [MESH-24]
    */
   if (pQuad->byFlags & MECHA_QUAD_GLOW) {
-    /*
-     * Pulled forward by the sprite's own half-width, which is exactly the
-     * radius of the volume it stands for: everything inside that volume is
-     * then outranked and everything outside it is not, so a shoulder well
-     * clear of the fireball still occludes it. The narrower of the two
-     * edges is the one measured, because a tracer is a long thin quad and
-     * has no business claiming to be half its length nearer than it is.
-     */
+    /* The half-width is the radius of the volume the sprite stands for.
+     * The narrower edge is measured, for the sake of tracers. [MESH-24] */
     float fEdgeA = mecha_length3(pQuad->afVert[1][0] - pQuad->afVert[0][0],
                                  pQuad->afVert[1][1] - pQuad->afVert[0][1],
                                  pQuad->afVert[1][2] - pQuad->afVert[0][2]);
@@ -2407,15 +2164,8 @@ float mecha_quad_depth_key(const tMechaQuad *pQuad, const float afEye[3],
 /* Clouds */
 
 /*
- * How many, how far out, and how big. The radius is chosen against the
- * arena rather than against the sky. The floor is a couple of hundred
- * metres across, so a dome at six hundred swung by nearly twenty degrees as
- * a player crossed it, which reads as the sky sliding rather than as the
- * machine walking; at fourteen hundred it is a few degrees. Puff size
- * scales with the radius, so pushing it out costs nothing but parallax --
- * and it is still four orders of magnitude short of straining a float. The retail dome sits ten million units out,
- * which is fine for a track renderer that was written around it and not
- * fine for this one.
+ * How many, how far out, and how big. The radius is chosen against the arena
+ * rather than the sky, so crossing the floor does not swing it. [MESH-25]
  */
 #define MECHA_CLOUD_COUNT   30
 #define MECHA_CLOUD_RADIUS  MECHA_M(1400.0f)
@@ -2439,22 +2189,10 @@ static uint32_t mecha_cloud_hash(uint32_t uiValue)
 }
 
 /*
- * The forest.
- *
- * The trees a machine can hide behind are boxes built out of the same
- * panels the cover is, and there are a dozen of them. These are the other
- * hundred and fifty: the game's own tree sprites, stood upright and turned
- * to face the camera, with nothing behind them at all. They do not collide,
- * they do not block a shot and they are not on the ground mesh -- they are
- * there so an arena with an invisible boundary reads as a clearing in a
- * wood rather than as a field that stops.
- *
- * Placement is a hash of the tree's index and the match seed, exactly as
- * the sky is: nothing is stored between frames, and the same match always
- * grows the same forest. They are spread over the whole outer reach and
- * simply skipped where they would stand somewhere a machine can walk, so
- * the density falls off naturally at the boundary rather than stopping at a
- * line.
+ * The forest: camera-facing tree sprites past the boundary that neither
+ * collide nor block a shot, so the arena reads as a clearing in a wood.
+ * Placed by a hash of index and match seed, so the same match grows the
+ * same forest. [MESH-26]
  */
 #define MECHA_TREE_TILE_FIRST 27
 #define MECHA_TREE_TILE_COUNT 3
@@ -2486,15 +2224,8 @@ void mecha_mesh_scenery(tMechaQuadList *pList, const tMechaArena *pArena,
     float fZ;
     float fHigh;
 
-    /*
-     * Grown outwards off the boundary itself rather than scattered over a
-     * square. A square scatter puts as many trees five hundred metres away
-     * as fifty, which from inside the arena is a thin haze on the horizon
-     * and nothing at the edge -- and the edge is the whole point, because
-     * that is where the invisible wall is and where the player needs to
-     * see a wood rather than an ending. Squaring the draw crowds them in
-     * against the boundary and thins them out behind.
-     */
+    /* Squared, so the trees crowd against the boundary rather than
+     * scattering evenly into a haze. [MESH-26] */
     mecha_boundary_corner(pArena, (int)((uiHash >> 20) % (uint32_t)iEdges),
                           afFrom);
     mecha_boundary_corner(pArena,
@@ -2691,14 +2422,8 @@ void mecha_mesh_projectiles(tMechaQuadList *pList, const tMechaWorld *pWorld,
       break;
 
     case MECHA_PROJ_BEAM:
-      /*
-       * Streak plus head. The streak stays flat and keeps the weapon's own
-       * colour, because that colour is how a player tells whose fire is
-       * crossing the arena -- a textured quad draws the frame's colours and
-       * nothing else, so a plasma-skinned streak would make every machine's
-       * beams the same blue. The head is small enough to read as the glow
-       * at the front of the bolt rather than as the bolt itself.
-       */
+      /* Streak plus head. The streak stays flat and keeps the weapon's own
+       * colour, which is how a player reads whose fire it is. [MESH-27] */
       mecha_add_tracer(pList, iCameraYaw, pShot->fPrevX, pShot->fPrevY,
                        pShot->fPrevZ, pShot->fX, pShot->fY, pShot->fZ,
                        pShot->fRadius, pShot->byPalette);
@@ -2759,15 +2484,8 @@ void mecha_mesh_effects(tMechaQuadList *pList, const tMechaWorld *pWorld,
 
     switch (pFx->byKind) {
     case MECHA_FX_EXPLOSION:
-      /*
-       * Opens fast, then collapses. There is no alpha in an indexed frame
-       * buffer, so size is the only thing carrying the shape of the blast --
-       * and the earlier curve grew all the way to fScale at the end of its
-       * life, which meant a blast covered the most screen on the last frame
-       * before it vanished. That reads as the arena being blanked and then
-       * restored rather than as something exploding. Peaking a third of the
-       * way in and shrinking from there reads as a burst.
-       */
+      /* Opens fast, then collapses: with no alpha, size is all that carries
+       * the shape of a blast. [MESH-28] */
       fSize = fAge < MECHA_FX_BURST_PEAK
               ? pFx->fScale * (0.35f + 0.65f * (fAge / MECHA_FX_BURST_PEAK))
               : pFx->fScale * (1.0f - 0.7f * ((fAge - MECHA_FX_BURST_PEAK)
@@ -2780,14 +2498,8 @@ void mecha_mesh_effects(tMechaQuadList *pList, const tMechaWorld *pWorld,
       break;
 
     case MECHA_FX_EMBER: {
-      /*
-       * Debris cools as it falls. The ramp runs from the pale gold at the
-       * top of the sky gradient back down through orange into the deep reds
-       * at its zenith -- the same indices, which is not a coincidence worth
-       * fighting: they are the one contiguous warm ramp the palette has,
-       * they read as heat in either palette, and a particle that walks them
-       * downwards is a particle going out.
-       */
+      /* Debris cools as it falls, down the sky gradient's own warm ramp --
+       * the only contiguous one the palette has. [MESH-29] */
       static const uint8_t abyCool[] = {
         207, 204, 171, 170, 167, 230, 227, 224, 221
       };
@@ -2912,16 +2624,9 @@ void mecha_mesh_effects(tMechaQuadList *pList, const tMechaWorld *pWorld,
 
     case MECHA_FX_THRUSTER: {
       /*
-       * Burning fuel, not a bolt: the fire frames, cycling, because a
-       * boost lasts longer than one pass through them.
-       *
-       * Drawn twice across the same plane, the right-hand copy mirrored,
-       * so the flame is symmetrical about the thruster it is coming out
-       * of. The fire tiles are drawn leaning one way -- a single one reads
-       * as a flame blown sideways, which is wrong for something pointing
-       * straight down out of a jetpack. Two halves meeting down the middle
-       * cost one extra quad and no overlap, so nothing is drawn twice into
-       * the same pixels and the painter's order has nothing to decide.
+       * Burning fuel, not a bolt: the fire frames cycle, because a boost
+       * outlasts one pass. Drawn as two mirrored halves so the flame is
+       * symmetrical about its thruster. [MESH-30]
        */
       int iFrame = mecha_sprite_frame(MECHA_SPRITE_FIRE_FIRST,
                                       MECHA_SPRITE_FIRE_LAST, fAge);

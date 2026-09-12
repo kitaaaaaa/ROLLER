@@ -304,20 +304,9 @@ static void mecha_spawn_burst(tMechaWorld *pWorld, float fX, float fY,
 //-------------------------------------------------------------------------------------------------
 
 /*
- * Wearing the damage.
- *
- * The race game's dospray() runs every frame over every car and throws a
- * particle when a die roll beats the car's health factor: the worse the
- * car, the more often it lands, so a machine does not switch from clean to
- * smoking, it gets gradually dirtier. The same shape is here, with one
- * addition -- Whiplash has a single damage tier and this has two, so a
- * machine that is merely hurt smokes and one that is nearly gone burns as
- * well.
- *
- * Every draw comes off the machine's own generator rather than the
- * world's. Written the other way first, this took three extra numbers a
- * tick out of the shared stream and moved a rooftop fight off a cliff --
- * the particles were fine, the fight was simply no longer the same fight.
+ * Wearing the damage, in the shape of the race game's dospray(): the worse
+ * the machine, the more often a particle lands. Two tiers rather than one.
+ * Every draw comes off the machine's own RNG, never the world's. [SIM-02]
  */
 static void mecha_emit_damage(tMechaWorld *pWorld, int iMechIdx)
 {
@@ -404,14 +393,9 @@ void mecha_sim_spawn_effect(tMechaWorld *pWorld, uint8_t byKind,
 //-------------------------------------------------------------------------------------------------
 
 /*
- * How much of a hit a guarding mech keeps out.
- *
- * Only melee, and only while actually in the stance. Guard is a posture for
- * answering something that has closed the distance, not a shield -- standing
- * in it against gunfire has to lose, or the fast boost refill it already
- * grants would make it the only thing anyone ever does. Returns 1.0 for
- * every case that is not a guarded melee hit, so callers can multiply
- * unconditionally.
+ * How much of a hit a guarding machine keeps out: melee only, and only in
+ * the stance. Returns 1.0 for everything else, so callers can multiply
+ * unconditionally. [SIM-03]
  */
 static void mecha_guard_mitigation(const tMechaMech *pVictim, uint8_t byKind,
                                    float *pfDamageScale,
@@ -430,19 +414,9 @@ static void mecha_guard_mitigation(const tMechaMech *pVictim, uint8_t byKind,
 //-------------------------------------------------------------------------------------------------
 
 /*
- * Whether anything can land on this machine right now.
- *
- * Three ways to be off the table: destroyed, invulnerable through a rise,
- * or lying on the floor. The last is the point of it -- a machine that has
- * been knocked down takes the blow that knocked it down and nothing else,
- * so a knockdown is a reprieve rather than an invitation to empty a
- * magazine into something that cannot move.
- *
- * The reprieve starts on the tick after the knockdown, not on the hit, so
- * that a single volley resolves in full. Buckshot is seven projectiles and
- * one trigger pull; if the first pellet to arrive closed the door on the
- * other six, a shotgun would do a seventh of its damage exactly when it
- * was working.
+ * Whether anything can land on this machine: destroyed, invulnerable through
+ * a rise, or already floored. The reprieve starts the tick after the
+ * knockdown, so one volley still resolves in full. [SIM-04]
  */
 static bool mecha_mech_hittable(const tMechaWorld *pWorld, int iMechIdx)
 {
@@ -646,18 +620,9 @@ static void mecha_update_target(tMechaWorld *pWorld, int iMechIdx,
 //-------------------------------------------------------------------------------------------------
 
 /*
- * Whether the mech is actually tracking whoever the reticle is on.
- *
- * mecha_update_target picks who; this decides whether the lock is live. It
- * holds while the target sits inside a generous cone of the mech's own
- * heading and drops once it has been outside for the grace period, at which
- * point the auto-turn stops following and every weapon fires straight down
- * the barrel. Boosting or jumping snaps it back on from any angle, which is
- * what makes those worth spending gauge on for reasons other than distance.
- *
- * Reads byMove as movement left it last tick. One tick of lag on a dash that
- * lasts dozens does not matter, and running before movement is what lets the
- * facing update downstream act on a fresh lock.
+ * Whether the machine is actually tracking whoever the reticle is on.
+ * mecha_update_target picks who; this decides whether the lock is live.
+ * Reads byMove as movement left it last tick, deliberately. [SIM-05]
  */
 static void mecha_update_lock(tMechaWorld *pWorld, int iMechIdx)
 {
@@ -903,14 +868,9 @@ static void mecha_update_facing(tMechaWorld *pWorld, int iMechIdx,
    * again once it has gone. */
   if (pDef->bWheeled) {
     /*
-     * Steering, not turning. Whiplash works the lock out as
-     * `input * (1 + (top - speed) / k)` and then throws it away entirely
-     * below the car's own steering speed limit, and both halves are here:
-     * the lock is widest just off a standstill and narrows as the speed
-     * comes up, and a car that is not moving cannot be pointed at all.
-     *
-     * It is the stick as much as the turn axis, because a car has no
-     * strafe for the stick to mean anything else by.
+     * Steering, not turning: the race game's own lock, widest just off a
+     * standstill and gone entirely below its steering floor. Reads the stick
+     * as well as the turn axis, since a car has no strafe. [SIM-06]
      */
     float fSpeed = mecha_length2(pMech->fVelX, pMech->fVelZ);
     float fAlong = pMech->fVelX * mecha_sin(pMech->iFacing)
@@ -926,21 +886,10 @@ static void mecha_update_facing(tMechaWorld *pWorld, int iMechIdx,
                         * (float)mecha_clampi(iSteer, -100, 100) / 100.0f);
 
       /*
-       * Backwards, the wheels point the other way round -- but only when
-       * the car is actually in reverse, not merely sliding.
-       *
-       * Whiplash decides this on fFinalSpeed, the car's own signed speed
-       * along its nose, and on a track that is the only speed it has:
-       * position is advanced straight along the heading, so a Whiplash car
-       * cannot travel at an angle to where it points. This one carries a
-       * real velocity vector, and in a drift that vector swings more than
-       * a quarter turn off the nose -- at which point a test on the dot
-       * product decides the car is reversing and flips the steering, which
-       * stops the slide dead. That was the rotation limit: not a clamp
-       * anywhere, but the stick fighting the spin halfway through it.
-       *
-       * Reverse is slow -- a third of the forward top speed -- and a drift
-       * is fast, so the car's own reverse speed separates the two cleanly.
+       * Backwards the wheels point the other way -- but only in reverse, not
+       * merely sliding. Judged on the car's own reverse speed, because a
+       * drift swings the velocity past a quarter turn off the nose and a dot
+       * product alone calls that reversing. [SIM-06]
        */
       if (fAlong < 0.0f
           && fSpeed <= pDef->fWalkSpeed * MECHA_CAR_REVERSE)
@@ -960,14 +909,9 @@ static void mecha_update_facing(tMechaWorld *pWorld, int iMechIdx,
 //-------------------------------------------------------------------------------------------------
 
 /*
- * Hitting something solid.
- *
- * The push the arena applied to get the machine back out is the surface
- * normal, which is all a bounce needs. At walking pace the machine simply
- * leans on the wall and the speed into it is dropped -- pressing into a
- * corner should not build up a shove that fires you out of it later. Carry a
- * boost into the same wall and it comes off, the way the race game's cars
- * do, and the burst is over: you hit something.
+ * Hitting something solid. The push the arena applied to get the machine out
+ * is the surface normal, which is all a bounce needs. Walking pace leans;
+ * a boost comes off it and ends the burst. [SIM-07]
  */
 static void mecha_wall_impact(tMechaWorld *pWorld, int iMechIdx,
                               float fPushX, float fPushZ, bool bAirborne)
@@ -1042,13 +986,9 @@ static void mecha_start_dash(tMechaMech *pMech, const tMechaInput *pInput)
 //-------------------------------------------------------------------------------------------------
 
 /*
- * Steering a burst you are already committed to.
- *
- * Two ways in. Boost again while pushing back against the direction you left
- * on and the dash restarts the other way -- the cancel, and the reason a
- * committed dash is not a trap. Or let the stick go and tap a new direction:
- * the burst turns without a second press, which is the crossing step, and
- * the release is the whole cost of it.
+ * Steering a burst you are already committed to: boost again against it for
+ * the cancel, or release and tap a new direction for the crossing step.
+ * [SIM-08]
  */
 static void mecha_steer_dash(tMechaMech *pMech, const tMechaInput *pInput,
                              float fStick, float fDirX, float fDirZ,
@@ -1085,17 +1025,11 @@ static void mecha_steer_dash(tMechaMech *pMech, const tMechaInput *pInput,
 //-------------------------------------------------------------------------------------------------
 
 /*
- * Drives the machine towards a velocity instead of assigning one.
+ * Drives the machine towards a velocity rather than assigning one, splitting
+ * what it has into along and across. The sideways part is the skid and grip
+ * is how fast it stops being one. [SIM-09]
  *
- * The velocity it already has is split into the part pointing where it is
- * being asked to go and the part pointing across that. The first is pushed
- * towards the speed asked for at the machine's own drive rate; the second is
- * bled off at its grip. That single split is what makes a heavy machine
- * slide out of a direction change and a light one snap round -- the sideways
- * component is the skid, and grip is how fast it stops being one.
- *
- * fDirX/fDirZ must be unit length, or zero to mean "no direction asked for",
- * in which case everything is treated as sideways and simply brakes.
+ * The direction must be unit length, or zero for "nothing asked for".
  */
 static void mecha_drive(tMechaMech *pMech, const tMechaMechDef *pDef,
                         float fDirX, float fDirZ, float fSpeed,
@@ -1201,20 +1135,9 @@ static int mecha_car_throttle(const tMechaInput *pInput, bool bCanAct)
 //-------------------------------------------------------------------------------------------------
 
 /*
- * Driving.
- *
- * A wheeled machine has one number for its motion and it points along the
- * nose: throttle and brakes move it, the tyres kill anything sideways, and
- * the steering turns the nose rather than the machine. There is no strafe
- * because a car has none, no boost because it does not need one, and no
- * jump because it has no legs to jump with -- but gravity still applies, so
- * driving off a roof does exactly what driving off a roof does.
- *
- * The steering is the race game's, in shape and in both of its rules: the
- * lock is widest just off a standstill and narrows as the speed comes up,
- * and below the machine's own steering floor there is no steering at all.
- * That second rule is why this thing has to keep moving to point at
- * anybody, which is the whole of how it fights.
+ * Driving. One number for the motion, pointing along the nose: no strafe, no
+ * boost, no jump, but gravity still applies. The steering is the race
+ * game's, in shape and in both of its rules. [SIM-06]
  */
 static void mecha_update_wheels(tMechaWorld *pWorld, int iMechIdx,
                                 const tMechaInput *pInput, bool bCanAct)
@@ -1304,13 +1227,9 @@ static float mecha_whip_decay(float fPerTick36)
 //-------------------------------------------------------------------------------------------------
 
 /*
- * How the body sits.
- *
- * Everything here is drawn and nothing here is simulated: not one of these
- * angles is read back by the movement code, by collision, or by the firing
- * solution. That is deliberate and it is also what makes the whole thing
- * affordable -- a machine can be squatting, ringing and rattling at once
- * because none of the three has to agree with the others about anything.
+ * How the body sits. Everything here is drawn and nothing is simulated: no
+ * angle below is read back by movement, collision or the firing solution,
+ * which is what lets them all run at once. [SIM-10]
  */
 static void mecha_update_attitude(tMechaWorld *pWorld, int iMechIdx,
                                   const tMechaInput *pInput, bool bCanAct)
@@ -1325,14 +1244,8 @@ static void mecha_update_attitude(tMechaWorld *pWorld, int iMechIdx,
   float fTop = pDef->fWalkSpeed > 1.0f ? pDef->fWalkSpeed : 1.0f;
 
   /* --- the tilt that answers the stick ----------------------------------
-   *
-   * Both games do this and they do it in opposite directions, which is the
-   * only interesting thing about it. A car leans out of the corner because
-   * that is what weight transfer does to a body on springs; a robot leans
-   * into it because a machine that has already started moving before it
-   * has moved feels quicker to the hands than one that has not. Neither is
-   * more than a couple of degrees.
-   */
+   * A car leans out of the corner, a robot into it. A couple of degrees
+   * either way. [SIM-10] */
   {
     int iSign = pDef->bWheeled ? MECHA_TILT_CAR_SIGN : MECHA_TILT_MECH_SIGN;
     int iCeiling = pDef->bWheeled ? MECHA_TILT_LIMIT : MECHA_TILT_MECH_LIMIT;
@@ -1420,21 +1333,8 @@ static void mecha_update_attitude(tMechaWorld *pWorld, int iMechIdx,
   }
 
   /* --- the shape of the ground it is standing on -------------------------
-   *
-   * A car sitting perfectly flat while it drives up the side of a hill is
-   * what gives away that the hill is a height field rather than a surface.
-   * So the machine asks what the ground is doing across its own footprint
-   * -- fore against aft for the climb, left against right for the
-   * traverse -- and sits on the answer.
-   *
-   * Only on wheels. A walking machine has feet and a gait to put them
-   * down with, and tilting the whole of it to match the ground would
-   * fight both.
-   *
-   * Only on the terrain, too: standing on the roof of a box, the height
-   * field underneath is describing ground the machine is nowhere near,
-   * and following it would lean the car over on a flat roof.
-   */
+   * The machine asks what the ground does across its own footprint and sits
+   * on the answer. Wheels only, and terrain only. [SIM-10] */
   if (pDef->bWheeled && !bAirborne) {
     float fHere = mecha_arena_terrain_height(&pWorld->arena, pMech->fX,
                                              pMech->fZ);
@@ -1816,40 +1716,19 @@ integrate:
   }
 
   /*
-   * Asked from where the feet were, not where they have got to.
-   *
-   * A platform answers a height query only to something near enough
-   * above it -- below the lip it is a wall, not a floor, which is what
-   * stops a machine underneath a roof popping up onto it. A jump cancel
-   * falls at a hundred and twenty metres a second, which is two metres a
-   * tick against a lip of one and a half, so a cancel from high over
-   * Tower Seven stepped straight past the roof in one tick, was told
-   * there was no floor, and fell to its death through solid ground.
-   * Taking the higher of where it was and where it is means the query
-   * sees the same surface the machine was standing over when the tick
-   * began, and the contact rules below land it.
+   * Asked from the higher of where the feet were and where they have got to,
+   * so a fast fall cannot step past a platform's lip in one tick and be told
+   * there is no floor. [SIM-11]
    */
   fGround = mecha_arena_ground_height(&pWorld->arena, pMech->fX, pMech->fZ,
                                       fPreY > pMech->fY ? fPreY
                                                         : pMech->fY);
 
   /*
-   * Staying on a slope that is running away downhill.
-   *
-   * The contact rules below only see a machine that has sunk to or below
-   * the ground. Going downhill it never does: the ground drops out from
-   * under it far faster than one tick of gravity follows, so it is left
-   * hanging a fraction of a metre up, falls, lands, and is hanging again
-   * -- the invisible staircase. A machine that was on the ground when the
-   * tick began and is over ground that has merely sloped away is put back
-   * on it, and then falls through the ordinary contact rules like anything
-   * else standing on something.
-   *
-   * Three things stop this from gluing a machine to the world. It has to
-   * have been in contact already, so nothing in flight is caught. It has
-   * to not be climbing, so a launch off a crest is never undone. And the
-   * ground has to have sloped rather than ended: past one in one it is a
-   * cliff, not a hill, and driving off it should fly.
+   * Staying on a slope running away downhill, instead of falling down it in
+   * invisible steps. Three conditions keep this from gluing a machine to the
+   * world: already in contact, not climbing, and sloped rather than ended.
+   * [SIM-12]
    */
   if (pMech->fY > fGround && !bAirborne && pMech->fVelY <= 0.0f) {
     float fDrop = (pMech->fGroundY - fGround) / MECHA_DT;
@@ -1870,19 +1749,9 @@ integrate:
      * from the drop. */
     float fImpactVelY = pMech->fVelY;
     /*
-     * Off a ramp, the way the race game does it.
-     *
-     * A car in Whiplash is held to the road by the surface being magnetic;
-     * where it is not, the game compares where the car's own momentum would
-     * put it against the height of the ground under it, and if the ground
-     * has dropped away, the car is in the air. The same rule stated from
-     * the other end: on a surface that does not hold you, the rate the
-     * ground rose under you this tick is a real upward velocity, and when
-     * the slope runs out you keep it.
-     *
-     * So a machine that walks up a hill is glued to it -- the climb is
-     * slow, and the threshold sees to that -- and one that boosts up the
-     * same hill leaves the ground at the top.
+     * Off a ramp, the way the race game does it: on a surface that does not
+     * hold you, the rate the ground rose under you is a real upward
+     * velocity, and you keep it when the slope runs out. [SIM-13]
      */
     float fClimb = (fGround - pMech->fGroundY) / MECHA_DT;
     uint32_t uiSurface = mecha_arena_surface(&pWorld->arena, pMech->fX,
@@ -1944,15 +1813,8 @@ integrate:
     }
   }
 
-  /*
-   * Two ways to be gone that have nothing to do with damage.
-   *
-   * A pit in the race game is a surface like any other -- it answers a
-   * height query, it is simply flagged as a pit and not drawn -- so a
-   * machine standing over one has fallen in rather than fallen through.
-   * And below the kill plane there is nothing at all, which is what
-   * becomes of anything that walks off an open arena.
-   */
+  /* Two ways to be gone that are not damage: a pit, which is a surface like
+   * any other, and the kill plane. [SIM-14] */
   if (mecha_mech_alive(pMech)) {
     uint32_t uiSurface = mecha_arena_surface(&pWorld->arena, pMech->fX,
                                             pMech->fZ);
@@ -2161,18 +2023,9 @@ static void mecha_fire_weapon(tMechaWorld *pWorld, int iMechIdx, int iSlot)
     pMech->aiReload[iSlot] = pWeapon->iReloadTicks;
   }
   /*
-   * One gun, three triggers, one magazine.
-   *
-   * A machine that carries a single weapon still has all three slots, so
-   * it plays and reads like everything else on the roster -- but they are
-   * three loads for the same gun, not three guns, and a magazine that
-   * could be stretched by rolling across the other two triggers would not
-   * be a magazine. So every round spent is spent out of all of them, and
-   * they run dry and reload together.
-   *
-   * Which makes the choice a real one: nine rounds, and each is either
-   * buckshot, a lance or a shell. Nothing about picking the third stops
-   * the first two costing exactly as much.
+   * One gun, three triggers, one magazine: three loads for the same gun, so
+   * every round spent is spent out of all of them and they reload together.
+   * [SIM-15]
    */
   if (pDef->bWheeled) {
     int iOther;
@@ -2656,17 +2509,9 @@ static bool mecha_shot_trades(const tMechaProjectile *pShot)
 //-------------------------------------------------------------------------------------------------
 
 /*
- * Fire against fire.
- *
- * Two shots that meet are worth what they do: within a sixth of each other
- * they trade, both gone, and outside that the heavier one carries on
- * through unchanged. It is what makes a siege shell worth the wind-up and a
- * spread worth firing at one -- and it is why a wall of fire is a wall
- * rather than a suggestion.
- *
- * Anything carrying a blast goes off where it was stopped rather than
- * blinking out, so shooting a bomb down is a decision about where it
- * explodes rather than whether it does.
+ * Fire against fire: within a sixth of each other two shots trade, otherwise
+ * the heavier carries on. Anything carrying a blast goes off where it was
+ * stopped rather than blinking out. [SIM-16]
  */
 static void mecha_trade_projectiles(tMechaWorld *pWorld)
 {
@@ -3019,14 +2864,9 @@ static void mecha_resolve_overlaps(tMechaWorld *pWorld)
                                    pDefB->fHeight, &pB->fX, &pB->fZ);
 
       /*
-       * And a machine that runs on wheels can run somebody over.
-       *
-       * It is the only thing this one has at close quarters -- it carries
-       * no melee row at all -- so it has to hurt, and it is charged on the
-       * speed it is closing at rather than on its own speed: driving
-       * alongside somebody is not a ram, and a head-on is worse than
-       * catching them up. Both machines can be doing it at once, which is
-       * fair, and neither can do it to a friend.
+       * A machine on wheels can run somebody over -- the only thing it has
+       * at close quarters. Charged on the closing speed, not its own.
+       * [SIM-17]
        */
       if (pA->byTeam != pB->byTeam) {
         /* How fast the gap is shutting: the relative velocity resolved

@@ -688,3 +688,360 @@ not the ability to leave the ground.
 The cost is charged only when there is gauge to charge. Otherwise a locked
 machine mashing jump would spend the recovery it needs in order to unlock,
 and never climb back out.
+
+---
+
+## ARENA-01 — palette indices are tuned, not derived
+
+ROLLER's flat polygons take a palette index in the low byte of the surface
+flags, and that palette comes from the game's own data. Every arena and mech
+colour goes through a name defined in `mecha_arena.c` or `mecha_defs.c`, so
+retuning against a different palette is a one-file edit. See [REND-12] for
+how the indices were chosen.
+
+The meadow takes its greens from 244-255, a black-to-green ramp in the game's
+palette, and its browns from 48-63, rather than borrowing tracer colours;
+stone stays one of the greys. A field checkered green against grey read as a
+chess board, which is the one thing a meadow must not look like.
+
+## ARENA-02 — the projectile trace stride
+
+The stride decides whether a bullet can step over a hillside between two
+samples. A metre against hills forty metres wide leaves no gap to step
+through, and the fastest shot in the game covers seven metres in a tick, so a
+segment is eight samples at worst. The step cap exists only so an absurdly
+long query cannot become an unbounded loop.
+
+## ARENA-03 — the ground begins slightly below where it is drawn
+
+The gun car's weapon floats six metres off its right flank, so parked across
+the steepest hillside in Coldwater Meadow its muzzle dips about three
+centimetres into the slope. Sweeping every machine over every square metre of
+that arena at sixteen facings found that in 24 of 2.28 million samples —
+rare, and unplayable where it happens, because a shot that begins underground
+detonates at the muzzle.
+
+So the ground is treated as beginning a little below where it is drawn.
+Twenty centimetres is six times the worst graze measured and small enough to
+be invisible: a shot stopping into a slope stops a fifth of a metre late
+along the normal, on hills that stand twenty-six metres.
+
+## ARENA-04 — hills are raised by hand, and are meant to be faceted
+
+Pick a middle, a reach and a height, and every grid corner inside comes up by
+a cosine of its distance. Angular, because the corners are all the ground
+has: a hill built this way is a dozen facets, which is what it should look
+like.
+
+## ARENA-05 — a ramp is a truncated cone, and every part of that is load-bearing
+
+- **Straight sides** are one constant grade, which is what a ramp is. A
+  smooth shoulder launches nothing, because by the time the machine is fast
+  the slope has flattened out under it.
+- **A flat top** is somewhere to land and fight, and it stops a walker
+  hopping the apex — a cone that comes to a point drops out from under
+  anything crossing it, boost or no boost.
+- **The edge between them** is the lip the launch comes off.
+
+## ARENA-06 — retail tiles do not replace the palette entries
+
+Track-bank tiles are used whenever the retail data is installed. The palette
+entries stay as the fallback, so an arena still comes up on a bare checkout
+and draws the same checkerboard, only flat.
+
+Each arena takes a different surface so they do not read as one place with
+the furniture moved: a yard in tarmac, a field in grass, a plate floor in
+worn metal.
+
+## ARENA-07 — the meadow, and why it has no visible walls
+
+Eight sides, hills you can be thrown off, nothing built on it. The ground is
+not magnetic, which is the point: boost up one of these and you leave it at
+the top.
+
+The boundary is still there and still stops a machine, but what is drawn past
+it is more forest — ground running out to twice the arena again with trees on
+it — so the edge of the fight is a place the fight stops rather than a place
+the world does. A wall in a meadow is a fence around a field.
+
+## ARENA-08 — MERIDIAN CROSSING puts a city in the middle of that
+
+The biggest ground the mode has: an octagon four hundred and twenty metres to
+a side face, near enough twice the meadow. Almost all of it is meadow — the
+same rolling, non-magnetic grass with hills, rocks and a wood, and forest
+drawn past the boundary.
+
+What is different is the middle. Three blocks by three of tall building sit
+at the centre and nowhere else, so the city is a place you go into rather
+than a place the arena is. The streets do not stop at the last building: they
+run straight out to the boundary both ways, which is what stops the city
+reading as nine boxes dropped on a field.
+
+## ARENA-09 — the tower roof
+
+No walls at all — walk off it and you are falling — with a raised hexagonal
+tabletop in the middle and a block in each corner to fight around. The
+tabletop is sloped rather than sheer, so it is high ground you take rather
+than a wall you go round.
+
+The edge runs a long way down. It is the top of a tower, and a tower that
+stops six metres below its own roof is a table.
+
+## ARENA-10 — terrain is a height per grid corner; the tabletop is not
+
+The cell a point falls in is found by index and the height inside it
+interpolated between four corners, which is what makes a slope a slope rather
+than a staircase. Everything else about the ground — the pit, whether a
+machine sticks to it — lives in the cell's surface word, exactly as a track
+chunk's does.
+
+The tabletop is answered rather than baked. Hills go into the grid because
+they are meant to be lumpy. A tabletop is a made thing with six straight
+edges, and rounding those to the nearest grid corner would lose the only
+thing that says somebody built it. The ground mesh picks the computed
+version up for free, because it samples the same query at every corner it
+draws.
+
+## ARENA-11 — a platform is a floor from above and nothing from below
+
+Off the edge there is no floor at any height, and underneath it there is none
+either. Without that second half, a machine that has fallen past the edge and
+drifted back beneath the roof pops up through it — the same mistake as
+walking into the side of a box and being teleported onto its roof.
+
+## ARENA-12 — the ground query is what makes terrain stop a bullet
+
+The floor used to be the `y = 0` plane, which was true of the first three
+arenas and nothing since. A shot crossing Coldwater Meadow passed clean
+through every hill it met, and one fired across Tower Seven went through the
+tabletop, because neither is at zero.
+
+The terrain query is what the ground mesh is built from, so asking it here is
+what makes the shape you can see the shape that stops a bullet.
+
+## ARENA-13 — grip, in the race game's own fourteen grades
+
+Whiplash keeps a table of surfaces (`loadtrak.c`, `tSurface surface[14]`) and
+stores an index into it per track chunk, separately for the centre lane and
+each shoulder. What the physics reads off it is `iGripModifier`, running 100,
+95, 90, 85, 80, 75, 70, 65, 60, 55, 50, 40, 30, 20 — then adds the engine's
+own grip bonus and divides by how wrecked the car is:
+
+    (modifier + engine.fGripBonus) / (2.5 - health * 1.5)
+
+clamped to `fMaxGripLimit`. Only the first term is a property of the ground,
+so only that is here: the engine bonus is the machine's own grip figure in
+the roster, and damage is accounted for elsewhere.
+
+Written as a fraction of the best surface, so grade zero is 1.0 and costs
+nothing. Every track the race game ships is laid at the maximum bar one bonus
+track, which is why an arena that says nothing gets the best of it.
+
+## SIM-02 — damage particles come off the machine's own generator
+
+The race game's `dospray()` runs every frame over every car and throws a
+particle when a die roll beats the car's health factor — the worse the car,
+the more often it lands, so a machine does not switch from clean to smoking,
+it gets gradually dirtier. Whiplash has one damage tier; this has two, so a
+machine that is merely hurt smokes and one nearly gone burns as well.
+
+Every draw comes off the machine's own RNG, not the world's. Written the
+other way first, this took three extra numbers a tick out of the shared
+stream and moved a rooftop fight off a cliff. The particles were fine; the
+fight was simply no longer the same fight.
+
+The same precedent applies to anything else cosmetic that needs randomness.
+
+## SIM-03 — guard stops melee only
+
+Guard is a posture for answering something that has closed the distance, not
+a shield. Standing in it against gunfire has to lose, or the fast boost
+refill it already grants would make it the only thing anyone ever does.
+
+The helper returns 1.0 for every case that is not a guarded melee hit, so
+callers can multiply unconditionally.
+
+## SIM-04 — a downed machine takes one blow, but a volley is one blow
+
+Three ways to be off the table: destroyed, invulnerable through a rise, or
+lying on the floor. The last is the point — a knockdown should be a reprieve,
+not an invitation to empty a magazine into something that cannot move.
+
+The reprieve starts on the tick *after* the knockdown, not on the hit, so a
+single volley resolves in full. Buckshot is seven projectiles and one trigger
+pull; if the first pellet to arrive closed the door on the other six, a
+shotgun would do a seventh of its damage exactly when it was working.
+
+## SIM-05 — the lock is live only inside a cone
+
+`mecha_update_target` picks who; this decides whether the lock is live. It
+holds while the target sits inside a generous cone of the machine's own
+heading and drops once it has been outside for the grace period, at which
+point the auto-turn stops following and every weapon fires straight down the
+barrel. Boosting or jumping snaps it back from any angle, which is what makes
+those worth gauge for reasons other than distance.
+
+It reads `byMove` as movement left it last tick. One tick of lag on a dash
+that lasts dozens does not matter, and running before movement is what lets
+the facing update act on a fresh lock.
+
+## SIM-06 — the car's steering is Whiplash's, both halves of it
+
+Whiplash works the lock out as `input * (1 + (top - speed) / k)` and then
+throws it away entirely below the car's own steering speed limit
+(`control.c`). Both halves are here: the lock is widest just off a standstill
+and narrows as speed comes up, and a car that is not moving cannot be pointed
+at all. That second rule is why the gun car has to keep moving to point at
+anybody, which is the whole of how it fights.
+
+It reads the stick as much as the turn axis, because a car has no strafe for
+the stick to mean anything else by.
+
+**Reverse flips the steering, and a drift must not count as reverse.**
+Whiplash decides this on `fFinalSpeed`, the car's signed speed along its
+nose, and on a track that is the only speed it has — position is advanced
+straight along the heading, so a Whiplash car cannot travel at an angle to
+where it points. This one carries a real velocity vector, and in a drift that
+vector swings more than a quarter turn off the nose. A test on the dot
+product then decided the car was reversing and flipped the steering, which
+stopped the slide dead. That was the "rotation limit": not a clamp anywhere,
+but the stick fighting the spin halfway through it.
+
+Reverse is a third of forward top speed and a drift is fast, so the car's own
+reverse speed separates the two cleanly.
+
+## SIM-07 — hitting a wall
+
+The push the arena applied to get the machine back out is the surface normal,
+which is all a bounce needs. At walking pace the machine leans on the wall
+and the speed into it is dropped — pressing into a corner should not build up
+a shove that fires you out of it later. Carry a boost into the same wall and
+it comes off, the way the race game's cars do, and the burst is over.
+
+## SIM-08 — a committed dash can still be steered
+
+Two ways in. Boost again while pushing back against the direction you left on
+and the dash restarts the other way — the cancel, and the reason a committed
+dash is not a trap. Or let the stick go and tap a new direction: the burst
+turns without a second press, which is the crossing step, and the release is
+the whole cost of it.
+
+## SIM-09 — drive towards a velocity, split into along and across
+
+The velocity a machine already has is split into the part pointing where it
+is being asked to go and the part across that. The first is pushed towards
+the speed asked for at the machine's drive rate; the second is bled off at
+its grip.
+
+That single split is what makes a heavy machine slide out of a direction
+change and a light one snap round: the sideways component is the skid, and
+grip is how fast it stops being one.
+
+The direction must be unit length, or zero to mean "nothing asked for", in
+which case everything is treated as sideways and simply brakes.
+
+## SIM-10 — the drawn attitude is never read back
+
+Nothing in the attitude block is read by movement, collision or the firing
+solution. That is deliberate and it is what makes it affordable: a machine
+can be squatting, ringing and rattling at once because none of the three has
+to agree with the others about anything.
+
+**The input tilt goes opposite ways in the two games**, which is the only
+interesting thing about it. A car leans out of the corner because that is
+what weight transfer does to a body on springs; a robot leans into it because
+a machine that has started moving before it has moved feels quicker to the
+hands. Neither is more than a couple of degrees.
+
+**The ground contour is wheels-only.** A car sitting perfectly flat while it
+drives up a hill gives away that the hill is a height field rather than a
+surface, so the machine asks what the ground does across its own footprint —
+fore against aft for the climb, left against right for the traverse. A
+walking machine has feet and a gait to put them down with, and tilting the
+whole of it would fight both. It is also terrain-only: standing on the roof
+of a box, the height field underneath describes ground the machine is nowhere
+near, and following it would lean the car over on a flat roof.
+
+## SIM-11 — the ground query asks from the higher of two positions
+
+A platform answers a height query only to something near enough above it;
+below the lip it is a wall, not a floor, which is what stops a machine
+underneath a roof popping up onto it.
+
+A jump cancel falls at a hundred and twenty metres a second — two metres a
+tick against a lip of one and a half — so a cancel from high over Tower Seven
+stepped straight past the roof in one tick, was told there was no floor, and
+fell to its death through solid ground. Measured: -449 m and dead before,
+resting on the tabletop at 9 m after.
+
+Taking the higher of where the feet were and where they have got to means the
+query sees the surface the machine was standing over when the tick began.
+
+## SIM-12 — downhill slopes are rolled down, not fallen down
+
+The contact rules only see a machine that has sunk to or below the ground.
+Going downhill it never does: the ground drops away faster than one tick of
+gravity follows, so the machine is left hanging a fraction of a metre up,
+falls, lands, and is hanging again — an invisible staircase.
+
+A machine that was in contact when the tick began and is over ground that has
+merely sloped away is put back on it, then falls through the ordinary contact
+rules like anything else.
+
+Three conditions stop this gluing a machine to the world: it must have been
+in contact already, so nothing in flight is caught; it must not be climbing,
+so a launch off a crest is never undone; and the ground must have sloped
+rather than ended — past one in one it is a cliff, not a hill, and driving
+off it should fly.
+
+## SIM-13 — leaving the ground off a ramp, the way the race game does it
+
+A car in Whiplash is held to the road by the surface being magnetic. Where it
+is not, the game compares where the car's own momentum would put it against
+the height of the ground under it, and if the ground has dropped away the car
+is in the air.
+
+The same rule from the other end: on a surface that does not hold you, the
+rate the ground rose under you this tick is a real upward velocity, and when
+the slope runs out you keep it. So a machine that walks up a hill is glued to
+it — the climb is slow and the threshold sees to that — and one that boosts
+up the same hill leaves at the top.
+
+## SIM-14 — two ways to be gone that are not damage
+
+A pit in the race game is a surface like any other: it answers a height
+query, it is simply flagged as a pit and not drawn, so a machine standing
+over one has fallen *in* rather than fallen through. And below the kill plane
+there is nothing at all, which is what becomes of anything that walks off an
+open arena.
+
+## SIM-15 — one gun, three triggers, one magazine
+
+A machine carrying a single weapon still has all three slots, so it plays and
+reads like everything else on the roster. But they are three loads for the
+same gun, not three guns, and a magazine that could be stretched by rolling
+across the other two triggers would not be a magazine. Every round spent is
+spent out of all of them, and they run dry and reload together.
+
+Which makes the choice a real one: nine rounds, each either buckshot, a lance
+or a shell, and nothing about picking the third stops the first two costing
+exactly as much.
+
+## SIM-16 — shots can shoot each other down
+
+Two shots that meet are worth what they do: within a sixth of each other they
+trade, both gone, and outside that the heavier one carries on unchanged. It
+is what makes a siege shell worth the wind-up and a spread worth firing at
+one, and it is why a wall of fire is a wall rather than a suggestion.
+
+Anything carrying a blast goes off where it was stopped rather than blinking
+out, so shooting a bomb down is a decision about *where* it explodes rather
+than whether it does.
+
+## SIM-17 — the gun car can run somebody over
+
+It is the only thing that machine has at close quarters — it carries no melee
+row at all — so it has to hurt. Charged on the speed the two are closing at
+rather than on its own speed: driving alongside somebody is not a ram, and a
+head-on is worse than catching them up. Both machines can be doing it at
+once, and neither can do it to a friend.

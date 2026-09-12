@@ -7,13 +7,9 @@
 
 //-------------------------------------------------------------------------------------------------
 /*
- * Palette indices.
- *
- * ROLLER's flat polygons take a palette index in the low byte of the surface
- * flags, and that palette comes from the game's own data, so these are tuned
- * numbers rather than derived ones. Every arena and mech colour in the mode
- * goes through a name defined here or in mecha_defs.c, so retuning against a
- * different palette is a one-file edit.
+ * Palette indices: tuned against the game's own palette rather than derived.
+ * Every arena and mech colour goes through a name here or in mecha_defs.c,
+ * so retuning is a one-file edit. [ARENA-01]
  */
 #define MECHA_PAL_FLOOR_A   123
 #define MECHA_PAL_FLOOR_B   126
@@ -23,13 +19,8 @@
 #define MECHA_PAL_BLOCK     124
 #define MECHA_PAL_BLOCK_TOP 130
 #define MECHA_PAL_HAZARD    193
-/*
- * The green arena. 244-255 is a black-to-green ramp in the game's own
- * palette and 48-63 a brown one, so the grass, the canopy and the bark come
- * off those rather than being borrowed from the tracer colours; stone stays
- * one of the greys. A field checkered green against grey read as a chess
- * board, which is the one thing a meadow must not look like.
- */
+/* The green arena, off the palette's own green and brown ramps rather than
+ * borrowed tracer colours. [ARENA-01] */
 #define MECHA_PAL_GRASS_A   249
 #define MECHA_PAL_GRASS_B   246
 #define MECHA_PAL_BARK      57
@@ -39,31 +30,17 @@
 
 //-------------------------------------------------------------------------------------------------
 /*
- * Marching a shot across the ground.
- *
- * The stride is what decides whether a bullet can step over a hillside
- * between two samples. A metre against hills forty metres wide leaves no
- * gap to step through, and the fastest shot in the game covers seven
- * metres in a tick, so a segment is eight samples at worst. The cap is
- * only there so an absurdly long query cannot turn into an unbounded loop.
+ * Marching a shot across the ground. The stride decides whether a bullet can
+ * step over a hillside between samples; the cap only stops an absurdly long
+ * query becoming an unbounded loop. [ARENA-02]
  */
 #define MECHA_TRACE_STRIDE  MECHA_M(1.0f)
 #define MECHA_TRACE_STEPS   48
 #define MECHA_TRACE_BISECT  12
 /*
- * How far under the surface counts as still being above it.
- *
- * The gun car's weapon floats six metres off its right flank, so parked
- * across the steepest hillside in Coldwater Meadow its muzzle dips about
- * three centimetres into the slope. Sweeping every machine over every
- * square metre of that arena at sixteen facings found that in 24 of 2.28
- * million samples -- rare, and unplayable where it happens, because a shot
- * that begins underground detonates at the muzzle.
- *
- * So the ground is treated as beginning a little below where it is drawn.
- * Twenty centimetres is six times the worst graze measured and small
- * enough to be invisible: a shot stopping into a slope stops a fifth of a
- * metre late along the normal, on hills that stand twenty-six metres.
+ * How far under the surface counts as still being above it. A muzzle can
+ * graze a slope by a few centimetres, and a shot that begins underground
+ * detonates at the muzzle. [ARENA-03]
  */
 #define MECHA_TRACE_SKIN    MECHA_M(0.2f)
 
@@ -79,12 +56,8 @@
 //-------------------------------------------------------------------------------------------------
 
 /*
- * Terrain helpers.
- *
- * A hill is raised by hand rather than by noise: pick a middle, a reach and
- * a height, and every grid corner inside it comes up by a cosine of its
- * distance. Angular, because the corners are all the ground has -- a hill
- * built this way is a dozen facets, which is what it should look like.
+ * Terrain helpers. A hill is raised by hand rather than by noise, and comes
+ * out as a dozen facets, which is what it should look like. [ARENA-04]
  */
 /* How much of a hill's reach is its flat top. A third leaves sides steep
  * enough to be a ramp and a top wide enough for two machines to argue on. */
@@ -124,17 +97,8 @@ static void mecha_arena_raise(tMechaArena *pArena, float fX, float fZ,
       if (fAway >= fReach)
         continue;
       /*
-       * A truncated cone: flat on top, straight down the sides, and a
-       * definite edge where the two meet.
-       *
-       * Every part of that is doing something. The straight sides are one
-       * constant grade, which is what a ramp is -- a smooth shoulder
-       * launches nothing, because by the time the machine is fast the
-       * slope has flattened out under it. The flat top is somewhere to
-       * land and fight, and it also stops a walker hopping the apex: a
-       * cone that comes to a point drops out from under anything that
-       * crosses it, boost or no boost. And the edge between them is the
-       * lip the launch comes off.
+       * A truncated cone: constant-grade sides to launch off, a flat top to
+       * land and fight on, and a definite lip between them. [ARENA-05]
        */
       fLift = fAway <= fReach * MECHA_HILL_FLAT_TOP
               ? fHeight
@@ -286,14 +250,9 @@ void mecha_arena_init(tMechaArena *pArena, int iArenaIdx)
   pArena->byWallPalette = MECHA_PAL_WALL;
 
   /*
-   * Tiles in the game's own track bank, used whenever the retail data is
-   * installed. They do not replace the palette entries above -- those stay
-   * as the fallback, so an arena still comes up on a bare checkout and the
-   * checkerboard it draws there is the same checkerboard, only flat.
-   *
-   * Each arena takes a different surface so the three do not read as one
-   * place with the furniture moved: a yard in tarmac, a field in grass, and
-   * a plate floor in worn metal.
+   * Track-bank tiles when the retail data is installed; the palette entries
+   * above stay as the fallback. A different surface per arena, so they do
+   * not read as one place with the furniture moved. [ARENA-06]
    */
   pArena->byFloorTile = MECHA_TILE_TARMAC_A;
   pArena->byGridTile = MECHA_TILE_TARMAC_B;
@@ -351,15 +310,9 @@ void mecha_arena_init(tMechaArena *pArena, int iArenaIdx)
 
   case 3: {
     /*
-     * Open country: eight sides, hills you can be thrown off, and nothing
-     * built on it. The ground is not magnetic, which is the whole point --
-     * boost up one of these and you leave it at the top.
-     *
-     * And no walls you can see. The boundary is still there and still stops
-     * a machine, but what is drawn past it is more forest: ground running
-     * out to twice the arena again with trees standing on it, so the edge
-     * of the fight is a place the fight stops rather than a place the world
-     * does. A wall in a meadow is a fence around a field.
+     * Open country: eight sides, non-magnetic hills you can be thrown off,
+     * and no walls you can see -- what is drawn past the boundary is more
+     * forest. [ARENA-07]
      */
     int iTree;
 
@@ -420,20 +373,9 @@ void mecha_arena_init(tMechaArena *pArena, int iArenaIdx)
 
   case 5: {
     /*
-     * Nine city blocks in the middle of open country.
-     *
-     * The biggest ground the mode has -- an octagon four hundred and twenty
-     * metres to a side face, near enough twice the meadow again -- and
-     * almost all of it is meadow: the same rolling, non-magnetic grass with
-     * hills to be thrown off, rocks and a wood, and more forest drawn past
-     * the boundary so the edge of the fight is not the edge of the world.
-     *
-     * What is different is the middle. Three blocks by three of tall
-     * building sit at the centre and nowhere else, so the city is a place
-     * you go into rather than a place the arena is. The streets between
-     * them do not stop at the last building: they run straight out to the
-     * boundary in both directions, which is what stops the city reading as
-     * nine boxes dropped on a field and makes it the middle of somewhere.
+     * Nine city blocks in the middle of open country, on the biggest ground
+     * the mode has. The streets run past the last building all the way to
+     * the boundary. [ARENA-08]
      */
     int iTree;
     int iRow;
@@ -528,15 +470,8 @@ void mecha_arena_init(tMechaArena *pArena, int iArenaIdx)
 
   case 4:
     /*
-     * A roof. No walls at all -- walk off it and you are falling -- with a
-     * raised hexagonal tabletop in the middle of it and a block in each
-     * corner to fight around. The tabletop is sloped rather than sheer, so
-     * it is high ground you take rather than a wall you go round, and its
-     * edges stay hexagonal because it is answered by the height query
-     * instead of being pressed into the terrain grid.
-     *
-     * The edge runs a long way down. It is the top of a tower, and a tower
-     * that stops six metres below its own roof is a table.
+     * A roof: no walls, a sloped hexagonal tabletop in the middle and a
+     * block in each corner. The edge runs a long way down. [ARENA-09]
      */
     pArena->byShape = MECHA_ARENA_OPEN;
     pArena->fHalfExtent = 78.0f * m;
@@ -606,13 +541,9 @@ bool mecha_arena_contains(const tMechaArena *pArena, float fX, float fZ)
 //-------------------------------------------------------------------------------------------------
 
 /*
- * Terrain, as a height at every corner of a coarse grid.
- *
- * The cell a point falls in is found by index and the height inside it
- * interpolated between its four corners, which is what makes a slope a
- * slope rather than a staircase. Everything else about the ground -- the
- * pit, whether a machine is stuck to it -- lives in the cell's surface
- * word, exactly as a track chunk's does.
+ * Terrain, as a height at every corner of a coarse grid, interpolated inside
+ * the cell so a slope is a slope rather than a staircase. Everything else
+ * lives in the cell's surface word, as a track chunk's does. [ARENA-10]
  */
 static float mecha_arena_cell_size(const tMechaArena *pArena)
 {
@@ -648,15 +579,9 @@ static float mecha_hex_distance(float fX, float fZ)
 //-------------------------------------------------------------------------------------------------
 
 /*
- * The tabletop, answered rather than baked.
- *
- * The hills go into the grid because they are meant to be lumpy -- a dozen
- * facets is what a hill built out of corners should look like. A tabletop
- * is not: it is a made thing with six straight edges, and rounding those
- * off to the nearest grid corner would lose the only thing that says
- * somebody built it. So it is computed here instead, and the ground mesh
- * picks it up for free because the mesh samples this same query at every
- * corner it draws.
+ * The tabletop, answered rather than baked: it is a made thing with six
+ * straight edges, and the grid would round them off. The ground mesh gets it
+ * for free by sampling this same query. [ARENA-10]
  */
 static float mecha_arena_mesa(const tMechaArena *pArena, float fX, float fZ)
 {
@@ -682,21 +607,9 @@ float mecha_arena_mesa_height(const tMechaArena *pArena, float fX, float fZ)
 
 //-------------------------------------------------------------------------------------------------
 /*
- * Grip, in the race game's own fourteen grades.
- *
- * Whiplash keeps a table of surfaces and stores an index into it per track
- * chunk, separately for the centre lane and each shoulder. What the
- * physics reads off it is iGripModifier, which runs 100, 95, 90, 85, 80,
- * 75, 70, 65, 60, 55, 50, 40, 30, 20 -- and then adds the engine's own
- * grip bonus and divides by how wrecked the car is. Only the first of
- * those is a property of the ground, so only the first is here: the engine
- * bonus is the machine's own grip figure in the roster, and damage is
- * already accounted for elsewhere.
- *
- * Written as a fraction of the best surface, so grade zero is 1.0 and
- * costs nothing. Every track the race game ships is laid at the maximum
- * bar one bonus track, which is why an arena that says nothing gets the
- * best of it.
+ * Grip, in the race game's own fourteen grades, as a fraction of the best
+ * surface. Only the ground's own term is here; the engine bonus is the
+ * machine's grip figure and damage is accounted for elsewhere. [ARENA-13]
  */
 float mecha_arena_grip_level(int iLevel)
 {
@@ -809,14 +722,8 @@ float mecha_arena_ground_height(const tMechaArena *pArena,
   fBest = mecha_arena_terrain(pArena, fX, fZ);
 
   if (pArena->byShape == MECHA_ARENA_OPEN) {
-    /*
-     * A platform is a floor from above and nothing at all from below. Off
-     * the edge there is no floor to be at any height, and underneath it
-     * there is none either -- without that second half, a machine that has
-     * fallen past the edge and drifted back beneath the roof pops up
-     * through it, which is the same mistake as walking into the side of a
-     * box and being teleported onto its roof.
-     */
+    /* A platform is a floor from above and nothing at all from below, or a
+     * machine drifting back under the roof pops up through it. [ARENA-11] */
     if (!mecha_arena_contains(pArena, fX, fZ))
       return MECHA_ARENA_VOID;
     if (fFeetY < fBest - MECHA_ARENA_STEP_UP)
@@ -971,18 +878,10 @@ bool mecha_arena_resolve_cylinder(const tMechaArena *pArena,
 //-------------------------------------------------------------------------------------------------
 
 /*
- * How far a point sits above the ground beneath it, and whether there is
- * any ground beneath it at all.
- *
- * The floor used to be the y = 0 plane, which was true of the first three
- * arenas and of nothing since. A shot crossing Coldwater Meadow passed
- * clean through every hill it met, and one fired across Tower Seven went
- * through the tabletop, because neither is at zero. The terrain query is
- * what the ground mesh is built from, so asking it here is what makes the
- * shape you can see the shape that stops a bullet.
- *
- * A platform arena has ground only where the platform is; past the edge a
- * shot keeps going rather than striking a floor that is not there.
+ * How far a point sits above the ground beneath it, and whether there is any
+ * ground there at all. Asking the same terrain query the ground mesh is
+ * built from is what makes the shape you see the shape that stops a bullet.
+ * [ARENA-12]
  */
 static bool mecha_arena_floor_gap(const tMechaArena *pArena, float fX,
                                   float fY, float fZ, float *pfGap)

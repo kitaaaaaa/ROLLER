@@ -2,11 +2,9 @@
 #define _ROLLER_MECHA_DEFS_H
 //-------------------------------------------------------------------------------------------------
 /*
- * The mech roster and the balance constants the simulation reads.
- *
- * Every machine here is original to ROLLER. The four are deliberately spread
- * across one axis -- how close you have to get to do damage -- so the same
- * three triggers play differently depending on what you picked.
+ * The machine roster and the balance constants the simulation reads. Every
+ * machine is original to ROLLER, spread along one axis: how close you have to
+ * get to do damage.
  */
 //-------------------------------------------------------------------------------------------------
 #include "mecha_types.h"
@@ -49,80 +47,36 @@
 #define MECHA_LOCK_RANGE       MECHA_M(260.0f)
 
 /*
- * The lock is breakable.
- *
- * Weapons aim themselves at whatever is locked, so a lock that can never be
- * lost means the fight is decided entirely by the feet. Holding it is a
- * skill instead: it survives while the target is inside a generous cone of
- * the mech's own heading, and once it has been outside for the grace period
- * it drops -- the auto-turn stops following, shots fire straight down the
- * barrel with no lead, and missiles launch unguided.
- *
- * Getting it back is deliberately harder than keeping it. On its own it
- * returns only when the target is well inside the much narrower reacquire
- * cone. The quick way back is to boost or jump, either of which snaps it on
- * from any angle -- which is what makes those two worth spending gauge on
- * beyond the distance they cover.
+ * The lock is breakable, and getting it back is harder than keeping it: a
+ * generous cone to hold, a narrow one to reacquire, and a boost or a jump to
+ * snap it on from any angle. [DEF-01]
  */
 #define MECHA_LOCK_CONE          MECHA_DEG(32)
 #define MECHA_LOCK_REACQUIRE_CONE MECHA_DEG(12)
 #define MECHA_LOCK_BREAK_TICKS   MECHA_SEC(0.35f)
 
 /*
- * Guard.
- *
- * It was a crouch, and it still refills the gauge fastest and still selects
- * its own row of weapons. What it adds is a hard answer to being closed on:
- * a guarding mech takes 15% of a melee hit. Only melee -- guard is a stance,
- * not a shield, and standing in it against gunfire has to lose, or the fast
- * refill it already grants would make it the only thing anyone does.
- *
+ * Guard: the fastest refill, its own row of weapons, and 15% of a melee hit.
  * Stagger is cut by half rather than by the same 85%, so a guarded blade
- * still rocks the machine it lands on. Reading the swing should win the
- * exchange outright; it should not make the swing feel like nothing
- * happened, and leaving some stagger on is what keeps a blade rush worth
- * committing to even against someone who saw it coming.
+ * still rocks what it lands on. [DEF-02]
  */
 #define MECHA_GUARD_MELEE_DAMAGE  0.15f
 #define MECHA_GUARD_MELEE_STAGGER 0.50f
 
-/*
- * Jump cancel.
- *
- * A jump snaps the lock on, which makes going up the reliable way to find an
- * opponent who has got behind you. Guard in the air then drops the mech
- * straight down instead of riding the arc out, and the landing leaves the
- * turn rate off its leash for a moment -- long enough to come down facing
- * the other way. That pair is the whole move: up to find them, down to face
- * them.
- */
-/*
- * A cancelled jump does not fall, it is dropped. Forty-six metres a second
- * was a brisk fall; at a hundred and twenty the machine is simply on the
- * ground, which is what makes the cancel a way of getting out of an arc
- * rather than a slightly faster way of finishing it.
- */
+/* The jump cancel: up to find them, down to face them. [DEF-03] */
+/* A cancelled jump does not fall, it is dropped. [DEF-03] */
 #define MECHA_CANCEL_FALL_SPEED  MECHA_MPS(120.0f)
 #define MECHA_CANCEL_LAND_TICKS  MECHA_SEC(0.12f)
 #define MECHA_CANCEL_TURN_TICKS  MECHA_SEC(0.45f)
 #define MECHA_CANCEL_TURN_SCALE  7
 
 /*
- * Tiles in the game's own texture banks.
+ * Tiles in the game's own texture banks, chosen by measuring the decoded
+ * banks for uniformity rather than by eye, and paired so the two alternating
+ * across a floor read as one surface. [DEF-04]
  *
- * Chosen by measuring the decoded banks, not by eye. track1.drh holds 246
- * tiles and most of them are track furniture -- kerbs, arrows, lane
- * markings, a sponsor emblem -- none of which survives being tiled across a
- * floor. What a ground surface needs is uniformity, so the candidates were
- * ranked by the standard deviation of their luminance and the flattest ones
- * taken: 54 and 55 are the same grey a shade apart, 205 and 210 clean grass,
- * 12 and 13 concrete and rust. A pair has to be neighbours in appearance as
- * well, because the two alternate across the floor the way the two palette
- * entries do -- pairing plain tarmac with a lane-marked tile turned the
- * arena into a chessboard instead of a surface.
- *
- * Every one of these is reached only when the retail data is installed;
- * each surface keeps a palette index for the flat fallback.
+ * Reached only when the retail data is installed; each surface keeps a
+ * palette index for the flat fallback.
  */
 /* Tarmac to draw a street with, in both the palette a data-less checkout
  * falls back to and the retail tiles. The two alternate so a road keeps
@@ -147,33 +101,19 @@
 #define MECHA_TILE_ROOF             8
 
 /*
- * Inside this the machine keeps its own shoulders square to whatever it has
- * locked; outside it, pointing the thing is the player's job.
- *
- * The auto-turn used to run at every range, which quietly took the steering
- * away: there was no distance at which a player chose where the machine was
- * facing. Confining it to knife range keeps the one place it earns its
- * keep -- a melee exchange is too fast to aim by hand -- and gives the
- * rest of the fight back. The lock is unaffected either way; it still
- * decides whether the weapons lead, and holding it at range now means
- * actually keeping the enemy in front of you.
+ * Inside this the machine keeps its shoulders square to whatever it has
+ * locked; outside it, pointing the thing is the player's job. [DEF-05]
  */
 #define MECHA_CLOSE_QUARTERS   MECHA_M(34.0f)
 /*
  * How much further out the chase camera lets go of a car and frames the
- * enemy instead. A machine on wheels is small, fast and always pointing
- * somewhere other than where it is going, so the range at which framing
- * the fight beats framing the driver starts sooner for it.
+ * enemy instead: a car is small, fast and rarely pointing where it is going.
+ * [REND-03]
  */
 #define MECHA_CAM_CAR_RANGE    1.5f
 
-/*
- * How long a move that re-centres holds the machine on its lock.
- *
- * Long enough to complete the turn and let a shot go, short enough that it
- * is a move rather than a mode -- the auto-turn coming back on permanently
- * would undo the point of confining it to knife range.
- */
+/* How long a move that re-centres holds the machine on its lock: a move,
+ * not a mode. [DEF-05] */
 /*
  * How far the feet are allowed to point away from the shoulders, and how
  * fast they get there. Past the clamp the machine walks with its legs
@@ -185,10 +125,8 @@
  * head does: an arm is a gun mount, a neck is a neck.
  */
 /*
- * A boost is a committed act. The button starts it and nothing but the
- * clock, an empty gauge, a jump or a wall ends it -- letting go does not.
- * What is left afterwards is the coast: the speed carries, the steering is
- * feeble, and the machine skids rather than turning.
+ * A boost is a committed act: the clock, an empty gauge, a jump or a wall
+ * ends it, and letting go does not. What follows is the coast. [SIM-08]
  */
 /* How far a machine travels per stride of the walk cycle. */
 /*
@@ -209,23 +147,15 @@
 #define MECHA_SHOT_TRADE_MARGIN 0.15f
 
 /*
- * How fast the ground has to be rising under a machine before a surface
- * that does not hold it down throws it off the top. Above a walk and well
- * below a boost, so climbing a hill on foot keeps your feet on it and
- * boosting up the same hill does not.
+ * How fast the ground must rise under a machine before a non-magnetic
+ * surface throws it off the top: above a walk, well below a boost.
+ * [SIM-13]
  */
 /*
  * How far ahead a computer pilot checks there is still an arena under it.
- *
- * Three different questions, so three different distances. On foot it is a
- * stride of reaction plus what the machine is carrying. Before pressing
- * boost it is the whole burst, because that is the distance the press buys
- * and there is no taking it back. And once the burst is under way it is
- * only as far as a cancel needs -- looking any further has the pilot
- * flinching at an edge it was always going to stop short of, and a panicked
- * counter-burst is its own way off a roof. In the air it is about how long
- * the machine has left before it comes down, since that is the only part of
- * the arc it still gets a say in.
+ * Three questions, so three distances: a stride on foot, the whole burst
+ * before pressing boost, and only as far as a cancel needs once it is under
+ * way. [AI-05]
  */
 #define MECHA_AI_FOOTING_WALK   MECHA_M(16.0f)
 #define MECHA_AI_FOOTING_LEAD   0.35f
@@ -235,28 +165,10 @@
 #define MECHA_RAMP_LAUNCH_CLIMB MECHA_MPS(18.0f)
 
 /*
- * Rolling down is not falling down.
- *
- * The launch rule above is one-sided, and the other side of it is what
- * makes a non-magnetic hill unusable. Going down, the ground drops out
- * from under the machine faster than one tick of gravity can follow it --
- * at forty-five metres a second on a one-in-three grade the ground falls
- * a third of a metre in a tick and gravity accounts for a centimetre of
- * that -- so the machine is left hanging, falls, lands, and is hanging
- * again. Whiplash does exactly this, which is why a hill there has to be
- * magnetic everywhere except its apex quads to be drivable at all.
- *
- * Rather than asking the arenas to paint that by hand, a machine already
- * in contact stays in contact down any slope its wheels could follow. The
- * test is the gradient, not the rate: a hillside is under one in one
- * however fast it is taken, and the lip of a box roof is a cliff at any
- * speed. Past the limit the ground has genuinely gone and the machine
- * flies, which is what driving off the side of something should do.
- *
- * A machine that did leave the ground on the way up is airborne, so none
- * of this applies to it -- crest a hill fast enough and you fly, take the
- * same hill slowly and you are stuck to it. That is the behaviour the
- * hand-painted magnetic quads exist to produce.
+ * Rolling down is not falling down: the steepest slope a machine already in
+ * contact will follow rather than fall away from in steps. A gradient, not a
+ * rate, so a hillside holds at any speed and a roof lip is a cliff at any
+ * speed. [SIM-12]
  */
 #define MECHA_RAMP_STICK_GRADE  1.0f
 /* Below this there is no meaningful forward speed to measure a gradient
@@ -281,13 +193,8 @@
 #define MECHA_COAST_ACCEL_SCALE 0.22f
 #define MECHA_COAST_GRIP_SCALE  0.18f
 
-/*
- * Two ways to change a dash you are already committed to. Boost again while
- * pushing back against it and the burst restarts the other way -- that is
- * the cancel. Or let the stick go and tap a new direction, and the burst
- * turns without a second press, which is the crossing step: cheaper, but it
- * costs the moment it takes to release.
- */
+/* Two ways to change a committed dash: the cancel and the crossing step.
+ * [SIM-08] */
 #define MECHA_DASH_CANCEL_DOT   (-0.35f)
 #define MECHA_DASH_STICK_FREE   0.20f
 #define MECHA_DASH_STICK_TAP    0.45f
@@ -301,26 +208,10 @@
 #define MECHA_BOUNCE_MIN_SPEED   MECHA_MPS(9.0f)
 
 /*
- * Steering, the way the race game does it.
- *
- * Whiplash works the lock out as `input * (1 + (360 - speed) / 60)` and
- * then throws it away entirely below the car's own steering speed limit --
- * so a car turns hardest just above a walking pace, loses lock as it gets
- * quicker, and cannot turn at all standing still. Both halves are what
- * makes driving one feel like driving rather than like walking on wheels,
- * and the second half is why a machine on wheels has to keep moving to
- * point at anything.
- *
- * 360 is that game's reference speed, so the divisor is a sixth of it and
- * the bonus runs from seven times the input at a standstill to nothing at
- * all flat out. Written here against the machine's own top speed, that is
- * a gain of six on the slack, which is the same curve.
- *
- * And there is no ceiling on any of it. The yaw is simply accumulated:
- * nothing in the race game limits how far a car may come round, which is
- * why one can be spun through a whole circle on the stick in a drift. The
- * grip decides whether the car goes where its nose has gone, and that is a
- * separate number.
+ * Steering, the way the race game does it: hardest just above a walking
+ * pace, gone below the steering floor, and with no ceiling on the
+ * accumulated yaw. A gain of six on the slack is Whiplash's own curve.
+ * [SIM-06]
  */
 #define MECHA_CAR_STEER_GAIN 6.0f
 /* How much of its forward speed it will do backwards, how hard it slows
@@ -330,10 +221,9 @@
 #define MECHA_CAR_DRAG       0.22f
 #define MECHA_CAR_ROLLING    MECHA_MPS(2.0f)
 /*
- * Running somebody over. How square the hit has to be to count as driving
- * into them, how long before the same car can do it again -- without which
- * a car resting against somebody bills them sixty times a second -- and how
- * much stagger comes with the damage.
+ * Running somebody over: how square the hit must be to count, how long
+ * before the same car can do it again, and how much stagger comes with it.
+ * [SIM-17]
  */
 #define MECHA_CAR_RAM_DOT     0.4f
 #define MECHA_CAR_RAM_TICKS   MECHA_SEC(0.55f)

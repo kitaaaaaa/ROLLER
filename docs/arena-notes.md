@@ -897,6 +897,17 @@ anybody, which is the whole of how it fights.
 It reads the stick as much as the turn axis, because a car has no strafe for
 the stick to mean anything else by.
 
+The exact form in `control.c` is `input * (1 + (360 - speed) / 60)`. 360 is
+that game's reference speed, so the divisor is a sixth of it and the bonus
+runs from seven times the input at a standstill to nothing flat out. Written
+against the machine's own top speed that is a gain of six on the slack, which
+is the same curve.
+
+**There is no ceiling on any of it.** The yaw is simply accumulated: nothing
+in the race game limits how far a car may come round, which is why one can be
+spun through a whole circle on the stick in a drift. Grip decides whether the
+car goes where its nose has gone, and that is a separate number.
+
 **Reverse flips the steering, and a drift must not count as reverse.**
 Whiplash decides this on `fFinalSpeed`, the car's signed speed along its
 nose, and on a track that is the only speed it has — position is advanced
@@ -1045,3 +1056,74 @@ row at all — so it has to hurt. Charged on the speed the two are closing at
 rather than on its own speed: driving alongside somebody is not a ram, and a
 head-on is worse than catching them up. Both machines can be doing it at
 once, and neither can do it to a friend.
+
+---
+
+## DEF-01 — the lock is breakable, and getting it back is harder than keeping it
+
+Weapons aim themselves at whatever is locked, so a lock that can never be
+lost means the fight is decided entirely by the feet. Holding it is a skill
+instead: it survives while the target is inside a generous cone of the
+machine's own heading, and once it has been outside for the grace period it
+drops — the auto-turn stops following, shots fire straight down the barrel
+with no lead, and missiles launch unguided.
+
+On its own it returns only when the target is well inside the much narrower
+reacquire cone. The quick way back is to boost or jump, either of which snaps
+it on from any angle — which is what makes those two worth gauge beyond the
+distance they cover.
+
+## DEF-02 — guard cuts damage by 85% and stagger by half
+
+It was a crouch, and it still refills the gauge fastest and selects its own
+row of weapons. What it adds is a hard answer to being closed on. Melee only,
+for the reason in [SIM-03].
+
+Stagger is cut by half rather than by the same 85%, so a guarded blade still
+rocks the machine it lands on. Reading the swing should win the exchange
+outright; it should not make the swing feel like nothing happened, and
+leaving some stagger on is what keeps a blade rush worth committing to even
+against someone who saw it coming.
+
+## DEF-03 — the jump cancel is one move in two halves
+
+A jump snaps the lock on, which makes going up the reliable way to find an
+opponent who has got behind you. Guard in the air then drops the machine
+straight down instead of riding the arc out, and the landing leaves the turn
+rate off its leash for a moment — long enough to come down facing the other
+way. Up to find them, down to face them.
+
+A cancelled jump does not fall, it is dropped. Forty-six metres a second was
+a brisk fall; at a hundred and twenty the machine is simply on the ground,
+which is what makes the cancel a way out of an arc rather than a slightly
+faster way of finishing it.
+
+See [SIM-01] for what an empty gauge does and does not take away.
+
+## DEF-04 — ground tiles were chosen by measuring the banks
+
+`track1.drh` holds 246 tiles and most are track furniture — kerbs, arrows,
+lane markings, a sponsor emblem — none of which survives being tiled across a
+floor. What a ground surface needs is uniformity, so the candidates were
+ranked by the standard deviation of their luminance and the flattest taken:
+54 and 55 are the same grey a shade apart, 205 and 210 clean grass, 12 and 13
+concrete and rust.
+
+A pair has to be neighbours in appearance as well, because the two alternate
+across the floor the way the two palette entries do. Pairing plain tarmac
+with a lane-marked tile turned the arena into a chessboard instead of a
+surface.
+
+## DEF-05 — the auto-turn is confined to knife range
+
+It used to run at every range, which quietly took the steering away: there
+was no distance at which a player chose where the machine was facing.
+Confining it keeps the one place it earns its keep — a melee exchange is too
+fast to aim by hand — and gives the rest of the fight back.
+
+The lock is unaffected either way; it still decides whether the weapons lead,
+and holding it at range now means actually keeping the enemy in front of you.
+
+A move that re-centres holds the machine on its lock for long enough to
+complete the turn and let a shot go, and no longer: the auto-turn coming back
+on permanently would undo the point of confining it.

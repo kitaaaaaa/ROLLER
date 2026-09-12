@@ -124,6 +124,11 @@
  * Every one of these is reached only when the retail data is installed;
  * each surface keeps a palette index for the flat fallback.
  */
+/* Tarmac to draw a street with, in both the palette a data-less checkout
+ * falls back to and the retail tiles. The two alternate so a road keeps
+ * the same checker the ground beside it has. */
+#define MECHA_SHADE_ROAD_A         123
+#define MECHA_SHADE_ROAD_B         126
 #define MECHA_TILE_TARMAC_A        54
 #define MECHA_TILE_TARMAC_B        55
 #define MECHA_TILE_GRASS_A        205

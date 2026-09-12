@@ -560,10 +560,24 @@ void mecha_mesh_arena(tMechaQuadList *pList, const tMechaArena *pArena)
       if (!mecha_arena_contains(pArena, fMidX, fMidZ))
         continue;
 
-      mecha_add_ground_quad(pList, pArena, fX0, fZ0, fX0 + fTile,
-                            fZ0 + fTile,
-                            bAlternate ? pArena->byFloorPalette
-                                       : pArena->byGridPalette);
+      /* A street is drawn in tarmac wherever the arena has marked one,
+       * and keeps the checker so it still reads as ground to move over. */
+      {
+        bool bRoad = (uiSurface & MECHA_SURF_ROAD) != 0;
+
+        mecha_add_ground_quad(pList, pArena, fX0, fZ0, fX0 + fTile,
+                              fZ0 + fTile,
+                              bRoad ? (bAlternate ? MECHA_SHADE_ROAD_A
+                                                  : MECHA_SHADE_ROAD_B)
+                                    : (bAlternate ? pArena->byFloorPalette
+                                                  : pArena->byGridPalette));
+        mecha_tag_texture(pList, MECHA_TEX_WORLD,
+                          bRoad ? (bAlternate ? MECHA_TILE_TARMAC_A
+                                              : MECHA_TILE_TARMAC_B)
+                                : (bAlternate ? pArena->byFloorTile
+                                              : pArena->byGridTile));
+        continue;
+      }
       /* The checkerboard survives the texturing: the two tiles alternate
        * the same way the two palette entries do, so a floor with the retail
        * art on it still reads as a grid to move about on rather than as one

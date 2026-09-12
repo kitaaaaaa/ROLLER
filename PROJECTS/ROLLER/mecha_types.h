@@ -61,6 +61,11 @@
 #define MECHA_SURF_SKIP_RENDER  0x00020000u
 #define MECHA_SURF_NON_MAGNETIC 0x00080000u
 #define MECHA_SURF_PIT          0x02000000u
+/* Tarmac rather than whatever the arena's ground normally is. Purely a
+ * drawing instruction -- a street holds a wheel exactly as the grass
+ * beside it does -- so it lives with the other surface bits rather than
+ * needing a second grid. */
+#define MECHA_SURF_ROAD         0x04000000u
 
 /* Left trigger, both triggers, right trigger -- the three shots every mech
  * carries. */

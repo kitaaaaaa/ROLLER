@@ -354,6 +354,27 @@ on the stick, and pick what to spend the next round on.
   stick, times seven when crawling. Flat out the car barely turns and has to be
   slowed into a corner rather than steered round one.
 
+- **MERIDIAN CROSSING.** The biggest ground the mode has: an octagon four
+  hundred and twenty metres to a face, near enough twice Coldwater Meadow again,
+  and almost all of it is meadow -- the same rolling non-magnetic grass with
+  hills to be thrown off, rocks, a wood, and more forest drawn past the
+  boundary.
+
+  What is different is the middle. Three blocks by three of tall building sit at
+  the centre and nowhere else, so the city is a place you go into rather than a
+  place the arena is. Heights alternate between fifty-four and a hundred and
+  four metres so the skyline is a skyline, and the streets between them are wide
+  enough for two machines to pass without either being cover for the other. The
+  streets do not stop at the last building: all four lines each way run straight
+  out to the boundary, which is what stops the city reading as nine boxes
+  dropped on a field.
+
+  A street is `MECHA_SURF_ROAD` -- a drawing instruction only, since tarmac
+  holds a wheel exactly as the grass beside it does -- so it needs no second
+  grid, and it keeps the ground's own checker so it still reads as something to
+  move over. Hills are kept out of the middle: the streets are the one flat
+  thing here.
+
 - **The machines were inside out.** `mecha_add_box` builds all of them -- every
   limb, the head, the thrusters, the gun car's handgun -- and its face table was
   wound so the renderer took the inside of each box for the front. Reversing

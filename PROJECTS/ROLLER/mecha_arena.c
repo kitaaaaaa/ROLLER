@@ -69,7 +69,7 @@
 
 //-------------------------------------------------------------------------------------------------
 
-#define MECHA_ARENA_COUNT 5
+#define MECHA_ARENA_COUNT 6
 
 /* Nothing may be pushed further than this in one resolve pass. A mech that
  * somehow ends up deep inside geometry crawls out over a few ticks instead of
@@ -258,6 +258,7 @@ const char *mecha_arena_name(int iArenaIdx)
     "REACTOR DECK",
     "COLDWATER MEADOW",
     "TOWER SEVEN ROOF",
+    "MERIDIAN CROSSING",
   };
 
   if (iArenaIdx < 0)
@@ -413,6 +414,114 @@ void mecha_arena_init(tMechaArena *pArena, int iArenaIdx)
     mecha_arena_add_prop(pArena, MECHA_PROP_ROCK, -148.0f * m, -16.0f * m,
                          10.0f * m, 9.0f * m);
     mecha_arena_add_prop(pArena, MECHA_PROP_ROCK, 150.0f * m, 96.0f * m,
+                         11.0f * m, 10.0f * m);
+    break;
+  }
+
+  case 5: {
+    /*
+     * Nine city blocks in the middle of open country.
+     *
+     * The biggest ground the mode has -- an octagon four hundred and twenty
+     * metres to a side face, near enough twice the meadow again -- and
+     * almost all of it is meadow: the same rolling, non-magnetic grass with
+     * hills to be thrown off, rocks and a wood, and more forest drawn past
+     * the boundary so the edge of the fight is not the edge of the world.
+     *
+     * What is different is the middle. Three blocks by three of tall
+     * building sit at the centre and nowhere else, so the city is a place
+     * you go into rather than a place the arena is. The streets between
+     * them do not stop at the last building: they run straight out to the
+     * boundary in both directions, which is what stops the city reading as
+     * nine boxes dropped on a field and makes it the middle of somewhere.
+     */
+    int iTree;
+    int iRow;
+    int iCol;
+    /* Block pitch, and the buildings inside it. The gap between the two is
+     * the street, and it is wide enough for two machines to pass without
+     * either of them being cover for the other. */
+    const float fPitch = 96.0f * m;
+    const float fBlock = 31.0f * m;
+    const float fStreet = 17.0f * m;
+
+    pArena->byShape = MECHA_ARENA_OCTAGON;
+    pArena->fHalfExtent = 420.0f * m;
+    pArena->fWallHeight = 0.0f;
+    pArena->iFloorTiles = 46;
+    pArena->iTerrainCells = 24;
+    pArena->fOuterReach = 760.0f * m;
+    pArena->iBillboards = 460;
+    pArena->byFloorPalette = MECHA_PAL_GRASS_A;
+    pArena->byGridPalette = MECHA_PAL_GRASS_B;
+    pArena->byFloorTile = MECHA_TILE_GRASS_A;
+    pArena->byGridTile = MECHA_TILE_GRASS_B;
+    pArena->byWallTile = MECHA_TILE_BRICK;
+    pArena->fKillY = -60.0f * m;
+
+    /*
+     * Hills, kept out of the middle: a city built on a slope would have the
+     * streets climbing, and the streets are the one flat thing here.
+     */
+    mecha_arena_raise(pArena, -250.0f * m, -140.0f * m, 54.0f * m, 24.0f * m);
+    mecha_arena_raise(pArena,  240.0f * m,  180.0f * m, 58.0f * m, 27.0f * m);
+    mecha_arena_raise(pArena,   60.0f * m, -290.0f * m, 46.0f * m, 18.0f * m);
+    mecha_arena_raise(pArena, -300.0f * m,  190.0f * m, 44.0f * m, 17.0f * m);
+    mecha_arena_raise(pArena,  300.0f * m, -230.0f * m, 50.0f * m, 21.0f * m);
+    mecha_arena_raise(pArena, -110.0f * m,  280.0f * m, 48.0f * m, 20.0f * m);
+    mecha_arena_mark_all(pArena, MECHA_SURF_NON_MAGNETIC);
+
+    /*
+     * The street grid: four lines each way, the two that bound the city and
+     * the two that run between its blocks, each marked from one side of the
+     * arena clean through to the other. Marking is by cell, so a line is
+     * laid as a row of overlapping stamps down its length.
+     */
+    for (iRow = 0; iRow < 4; iRow++) {
+      float fLine = (-1.5f + (float)iRow) * fPitch;
+      int iStep;
+
+      for (iStep = 0; iStep <= 60; iStep++) {
+        float fAlong = (-1.0f + (float)iStep / 30.0f) * pArena->fHalfExtent;
+
+        mecha_arena_mark(pArena, fAlong, fLine, fStreet, MECHA_SURF_ROAD);
+        mecha_arena_mark(pArena, fLine, fAlong, fStreet, MECHA_SURF_ROAD);
+      }
+    }
+
+    /* And the nine blocks, tall enough that the streets between them are
+     * corridors rather than gaps. Alternating heights so the skyline is a
+     * skyline. */
+    for (iRow = 0; iRow < 3; iRow++)
+      for (iCol = 0; iCol < 3; iCol++) {
+        static const float afStorey[9] = {
+          78.0f, 54.0f, 92.0f, 62.0f, 104.0f, 70.0f, 86.0f, 58.0f, 74.0f
+        };
+
+        mecha_arena_add_box(pArena,
+                            (-1.0f + (float)iCol) * fPitch,
+                            (-1.0f + (float)iRow) * fPitch,
+                            fBlock, fBlock,
+                            afStorey[iRow * 3 + iCol] * m,
+                            MECHA_PAL_BLOCK, MECHA_PAL_BLOCK_TOP);
+      }
+
+    /* Country, out past the last of it. */
+    for (iTree = 0; iTree < 8; iTree++) {
+      int iAngle = iTree * MECHA_ANGLE_FULL / 8 + MECHA_ANGLE_FULL / 24;
+      float fReach = (250.0f + 40.0f * (float)(iTree % 3)) * m;
+
+      mecha_arena_add_prop(pArena, MECHA_PROP_TREE,
+                           mecha_sin(iAngle) * fReach,
+                           mecha_cos(iAngle) * fReach,
+                           (5.0f + (float)(iTree % 3)) * m,
+                           (28.0f + 4.0f * (float)(iTree % 3)) * m);
+    }
+    mecha_arena_add_prop(pArena, MECHA_PROP_ROCK, -196.0f * m, 60.0f * m,
+                         12.0f * m, 11.0f * m);
+    mecha_arena_add_prop(pArena, MECHA_PROP_ROCK, 176.0f * m, -188.0f * m,
+                         10.0f * m, 9.0f * m);
+    mecha_arena_add_prop(pArena, MECHA_PROP_ROCK, 40.0f * m, 214.0f * m,
                          11.0f * m, 10.0f * m);
     break;
   }

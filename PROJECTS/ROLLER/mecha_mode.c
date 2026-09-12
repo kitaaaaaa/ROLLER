@@ -28,12 +28,8 @@
 
 //-------------------------------------------------------------------------------------------------
 /*
- * The simulation runs at a fixed 60 Hz whatever the display is doing, so a
- * match plays identically on any machine and stays reproducible from its
- * seed. A frame that took too long is allowed to catch up over a few ticks
- * and no further; without that cap, one long stall (a window drag, a
- * breakpoint) would be paid back as a burst of simulation the player cannot
- * react to.
+ * A fixed 60 Hz whatever the display does, with a cap on how much a slow
+ * frame may catch up. [MODE-03]
  */
 #define MECHA_TICK_NS (1000000000ull / (uint64)MECHA_TICK_HZ)
 #define MECHA_MAX_CATCHUP_TICKS 5
@@ -45,12 +41,8 @@
 #define MECHA_MENU_REPEAT_NS    110000000ull
 
 //-------------------------------------------------------------------------------------------------
-/*
- * The mode has three screens. The briefing is where it starts and where
- * every match returns to: it sets the match up and is the only way out to
- * the rest of the game. The controls are a page of their own off it. The
- * match is the fight.
- */
+/* Three screens: the briefing sets a match up and is the only way out, the
+ * controls are a page off it, and the match is the fight. */
 typedef enum
 {
   MECHA_SCREEN_BRIEFING = 0,
@@ -134,14 +126,9 @@ static GameRenderMode s_ePreviousRenderMode;
 static bool s_bCreatedRenderer;
 
 /*
- * The mode's own palette.
- *
- * Everything the arena draws is generated rather than loaded, but the frame
- * is still an indexed buffer that gets presented through pal_addr -- and
- * pal_addr is only filled in by the states that load the retail data. Coming
- * straight in on --arena skips all of those, so without this the geometry
- * rasterises correctly and then presents as a black screen. The previous
- * palette is put back on exit so the menus and the race are unaffected.
+ * The mode's own palette. Presentation reads pal_addr, which only the states
+ * that load retail data fill in, so coming in on --arena without this
+ * rasterises correctly and presents black. Put back on exit. [MODE-01]
  */
 static tColor s_aArenaPalette[256];
 static tColor s_aSavedPalette[256];
@@ -244,13 +231,9 @@ int mecha_mode_skill_count(void)
 //-------------------------------------------------------------------------------------------------
 
 /*
- * Whether the retail data is present, and so whether there is a game to
- * leave for.
- *
- * The arena runs on its own -- that is the point of it -- but the menus it
- * would hand control back to do not, and offering a way out that lands in a
- * game which cannot load is worse than not offering one. Probed once: a
- * missing install is not going to appear mid-match.
+ * Whether there is a game to leave for. The arena runs on its own; the menus
+ * it would hand back to do not. Probed once -- a missing install will not
+ * appear mid-match.
  */
 static bool mecha_file_present(const char *szFile)
 {
@@ -426,12 +409,8 @@ void mecha_mode_enter(void)
   s_iSavedYBase = ybase;
   s_pSavedScreenPointer = screen_pointer;
 
-  /*
-   * g_pGameRenderer is created by play_game_init(), which only runs once a
-   * race starts. Coming straight in on --arena leaves it NULL, and
-   * game_render_get_mode() dereferences it without a guard, so the mode has
-   * to stand one up itself the way play_game_init does.
-   */
+  /* g_pGameRenderer is built by play_game_init(), which --arena never runs,
+   * so the mode stands one up itself. [MODE-02] */
   s_bCreatedRenderer = false;
   if (!g_pGameRenderer) {
     g_pGameRenderer = game_render_create(ROLLERGetGPUDevice(),
@@ -458,28 +437,14 @@ void mecha_mode_enter(void)
    */
   s_pSavedPalAddr = pal_addr;
   s_bPaletteInstalled = false;
-  /*
-   * The game's own palette first, when it is installed.
-   *
-   * This mode's fallback table defines about thirty indices and fills the
-   * rest with one neutral grey, which is fine for geometry it colours
-   * itself and wrong for anything out of the retail banks: those tiles and
-   * frames are drawn in the retail palette's indices, so resolving them
-   * through the fallback turns a tarmac surface into noise. Loading the
-   * real palette is what makes the textures and the explosion frames look
-   * like themselves rather than like static.
-   */
+  /* The game's own palette first when it is installed: retail tiles are
+   * drawn in its indices, and the fallback turns them to noise.
+   * [MODE-01] */
   if (!mecha_mode_palette_loaded() && mecha_file_present("palette.pal")) {
     /*
-     * setpal owns pal_addr: it frees whatever was there, loads the file,
-     * and points pal_addr and pal_selector at the buffer it just read. This
-     * used to point pal_addr at the static palette[] array afterwards, on
-     * the strength of a note in the GPU renderer saying setpal leaves it
-     * alone -- which is true of the original and not of this one. The cost
-     * was not a wrong colour: the loaded buffer leaked, and the next setpal
-     * anybody called -- the main menu's, on the way out of the arena --
-     * took the static array's address to free() and aborted the process.
-     * That was the crash on "exit to whiplash".
+     * setpal owns pal_addr and frees it. Do not repoint it at the static
+     * array afterwards: the next setpal free()s that and aborts.
+     * [MODE-01]
      */
     setpal("palette.pal");
     FindShades();
@@ -493,14 +458,9 @@ void mecha_mode_enter(void)
     memcpy(s_aSavedPalette, palette, sizeof(s_aSavedPalette));
     mecha_render_build_palette(s_aArenaPalette);
     memcpy(palette, s_aArenaPalette, sizeof(palette));
-    /*
-     * Presentation reads pal_addr, so the mode's own table has to go there
-     * -- and that table is static, which setpal would try to free. The
-     * selector is how the engine says whose memory this is: setpal only
-     * frees pal_addr when the selector is non-negative, so marking it -1
-     * while the arena's table is installed makes the static safe to leave
-     * there. Both go back on the way out.
-     */
+    /* The mode's table is static and setpal would free it, so the selector
+     * goes to -1 while it is installed. Both restored on exit.
+     * [MODE-01] */
     s_pSavedPalSelector = pal_selector;
     pal_addr = s_aArenaPalette;
     pal_selector = (void *)-1;
@@ -760,10 +720,9 @@ void mecha_mode_draw(void)
 //-------------------------------------------------------------------------------------------------
 
 /*
- * The exit path, as a headless scene: boot into the arena the way --arena
- * does, take the way out, and hand over to the menus. Leaving the arena is
- * the one thing in this mode that cannot be tested from the mode's own
- * side, because what it has to work is somebody else's screen.
+ * The exit path as a headless scene: leaving the arena is the one thing here
+ * that cannot be tested from the mode's own side, because what it has to
+ * leave working is somebody else's screen.
  */
 void snapshot_render_arena_exit(void)
 {
@@ -782,14 +741,8 @@ void mecha_mode_exit(void)
     return;
 
   SDL_Log("arena: exiting");
-  /*
-   * The renderer stays. This mode creates one when it is entered before any
-   * race has, and tearing it down on the way out used to null g_pGameRenderer
-   * -- which is the renderer the menus and the race then reach for, so
-   * leaving the arena crashed the moment anything else tried to draw. It is
-   * the same renderer play_game_init would have built; handing it on is the
-   * whole point of having built it.
-   */
+  /* The renderer stays: tearing it down nulls g_pGameRenderer, which is what
+   * the menus and the race then reach for. [MODE-02] */
   s_bCreatedRenderer = false;
   if (g_pGameRenderer)
     game_render_set_mode(g_pGameRenderer, s_ePreviousRenderMode);

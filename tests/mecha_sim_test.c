@@ -685,24 +685,9 @@ static int test_ai_fights(void)
         CHECK(bDamaged);
         CHECK(world.aMechs[0].fDamageDealt + world.aMechs[1].fDamageDealt > 0.0f);
 
-        /*
-         * The computer pilot plays by the lock rules, and both halves of
-         * that have to be true. It has to lose the lock sometimes, or the
-         * mechanic does not exist in its hands and it is quietly privileged
-         * over the player; and it has to hold one for most of a fight, or
-         * it has no idea how to fight and the skill levels are measuring
-         * noise.
-         *
-         * How much of the time varies with what the machine is for, and
-         * the bound is deliberately the loose one. Everything that fights
-         * at range holds a lock for better than nine tenths of a fight.
-         * Kira sits near two thirds and belongs there: it is the close
-         * quarters machine, its sabre is worth more than its sidearm, and
-         * closing to knife range means spending the fight at the distance
-         * where anything moving sideways leaves the cone. Asserting the
-         * figure the rangefighters happen to hit would be asserting that
-         * every machine fights the same way.
-         */
+        /* The pilot must lose a lock sometimes and hold one most of a
+         * fight. Bounded loosely: the close-quarters machine legitimately
+         * holds one far less than the rangefighters. [TEST-06] */
         CHECK(iBrokenTicks > 0);
         printf("   %s holds a lock %.0f%% of the fight\n",
                mecha_def_get(iDefA)->szName,
@@ -744,18 +729,8 @@ static void run_skill_probe_world(tMechaWorld *pWorld, int iSkill,
         aInputs[0].bFireCenter = (i % 41) < 2;
         aInputs[0].bFireRight  = (i % 67) < 2;
 
-        /*
-         * The stand-in player points its machine at the enemy.
-         *
-         * It did not used to have to: a locked machine squared itself up at
-         * any range for free. Now that the auto-turn is confined to knife
-         * range, a scripted opponent that never touches the stick simply
-         * spins away from the fight -- and then this probe measures how
-         * often the computer pilot wandered into the fixed cone of someone
-         * who cannot turn, which ranks a pilot that steers decisively as
-         * the one that takes the most fire. Steering it makes the numbers
-         * mean what they say again.
-         */
+        /* The stand-in player has to point its machine at the enemy, or
+         * the probe measures the wrong thing entirely. [TEST-06] */
         iBearing = mecha_atan2_angle(
             pWorld->aMechs[1].fX - pWorld->aMechs[0].fX,
             pWorld->aMechs[1].fZ - pWorld->aMechs[0].fZ);
@@ -825,20 +800,8 @@ static int test_ai_skill_ladder(void)
     CHECK(afDealt[MECHA_AI_ACE] > afDealt[MECHA_AI_VETERAN]);
     CHECK(afDealt[MECHA_AI_VETERAN] > afDealt[MECHA_AI_ROOKIE]);
 
-    /*
-     * Damage absorbed is deliberately not asserted on.
-     *
-     * It reads as a skill measure and is not one here. What a pilot takes
-     * depends on how long it leaves its target alive to shoot back, so a
-     * better pilot ending rounds faster cuts its own exposure and a worse
-     * one wandering out of the fight cuts its exposure too -- the two ends
-     * meet in the middle. Confining the auto-turn to knife range made that
-     * worse again by putting the stand-in player's aim at the mercy of its
-     * own steering. Measured across twelve duels the three come out within
-     * a few per cent of each other in no reliable order, and an assertion
-     * that passes by one per cent is a future failure rather than a
-     * guarantee. The figure is still printed, because it is worth seeing.
-     */
+    /* Damage absorbed is printed but never asserted on: it reads as a skill
+     * measure and is not one. [TEST-06] */
 
     /* And the gap has to be worth having. A rookie that plays within a few
      * percent of an ace is not a difficulty setting. */
@@ -2591,15 +2554,9 @@ static int arena_by_name(const char *szName)
 //-------------------------------------------------------------------------------------------------
 
 /*
- * How long after a hit a machine still counts as having been shoved.
- *
- * The first version of this asked whether stagger was above zero on the
- * exact tick the machine crossed the line, and that is not the same
- * question. Stagger bleeds off at fifty-five a second, so a mech hit hard
- * at the far end of a slide arrives at the edge with none left and books
- * itself down as having strolled -- two of the six seeds here did exactly
- * that, each after being shot the whole way across the roof. What matters
- * is whether anybody had shot it recently, so that is what is recorded.
+ * How long after a hit a machine still counts as having been shoved. Recent
+ * memory rather than instantaneous stagger, which bleeds off mid-slide and
+ * books a shoved machine down as having strolled. [TEST-06]
  */
 #define ROOF_SHOVE_MEMORY MECHA_SEC(2.0f)
 
@@ -2696,19 +2653,9 @@ static int test_the_computer_pilot_stays_on_the_roof(void)
     int i;
 
     /*
-     * Half an hour of two computer pilots fighting on a roof with a hole
-     * in it. They are allowed to shoot each other to pieces, and to shove
-     * each other off the edge doing it; what they are not allowed to do is
-     * routinely walk into the pit under their own power, which would make
-     * the arena a joke.
-     *
-     * The bound is a rate rather than zero, and that is deliberate rather
-     * than a concession. The pilot declines to walk into nothing; it does
-     * not path around it, and there are three states -- mid-air, mid-
-     * landing, and coasting out of a burst -- in which it has no steering
-     * left to decline anything with. Getting into one of those already
-     * pointed at the edge is the whole of what still goes wrong, and it is
-     * rare rather than absent.
+     * Half an hour of two pilots on a roof with a hole in it. Shoving each
+     * other off is allowed; routinely walking in under their own power is
+     * not. The bound is a rate rather than zero, deliberately. [TEST-06]
      */
     for (i = 0; i < ROOF_FIGHTS; i++)
         CHECK(roof_excursions(0x2007u + (uint32_t)i * 0x9E37u,
@@ -2902,15 +2849,9 @@ static int test_the_gun_car_is_a_car_with_a_gun(void)
 
     /*
      * --- and it is the car, not its reflection --------------------------
-     *
-     * The race game's frame is right-handed and this one is not, so
-     * swapping the three axes without negating one builds the car's mirror
-     * image: same silhouette, wheel arches and exhausts and both flanks of
-     * the livery on the wrong sides. Negating the lateral axis puts it
-     * right, and a reflection reverses a winding -- so a correctly
-     * reflected body is one whose panels all face inwards. Drop the
-     * negation and all fifty turn round, which is what this catches,
-     * because nothing about the car's outline would.
+     * A correctly reflected body is one whose panels all face inwards. Drop
+     * the axis negation and all fifty turn round, which nothing about the
+     * car's outline would catch. [TEST-08]
      */
     {
         float fCentreY = world.aMechs[0].fY + pDef->fHeight * 0.5f;
@@ -3665,16 +3606,8 @@ static bool mesh_widest_side(tMechaWorld *pWorld, int iMechIdx,
 //-------------------------------------------------------------------------------------------------
 
 /*
- * A car can be spun right round, and goes over on its roof.
- *
- * Whiplash puts no ceiling on how far a car may come round: the yaw is
- * simply accumulated, the lock is worth seven times as much just off a
- * standstill as it is flat out, and the grip decides separately whether
- * the car goes where its nose has gone. What stopped that here was not a
- * clamp but the steering flipping direction the moment the velocity fell
- * more than a quarter turn behind the nose -- which is the middle of every
- * drift, so the stick fought the slide exactly when it should have been
- * driving it.
+ * A car can be spun right round, and goes over on its roof. What stopped
+ * that was not a clamp but the steering flipping mid-drift. [SIM-06]
  */
 static int test_the_gun_car_spins_and_rolls(void)
 {
@@ -3813,19 +3746,9 @@ static int test_the_gun_car_spins_and_rolls(void)
  * them down with.
  */
 /*
- * Hills are rolled down, not fallen down.
- *
- * The launch rule was one-sided, and the other side of it is what makes a
- * non-magnetic hill unusable. Going down, the ground drops out from under
- * a machine faster than one tick of gravity follows it, so the machine is
- * left hanging, falls, lands, and is hanging again -- an invisible
- * staircase all the way to the bottom. Whiplash does exactly this, which
- * is why a hill there has to be painted magnetic everywhere except its
- * apex quads to be drivable at all.
- *
- * What is asserted here is the pair: a machine already on the ground
- * stays on it down any slope its wheels could follow, and one that came
- * in fast enough to be thrown off the rise still flies.
+ * Hills are rolled down, not fallen down. Asserted as a pair: a machine
+ * already on the ground stays on it down any slope its wheels could follow,
+ * and one thrown off the rise still flies. [SIM-12]
  */
 /*
  * The ground holds a wheel, and holds it as well as the race game's best
@@ -5776,15 +5699,9 @@ static int test_death_throws_debris(void)
 //-------------------------------------------------------------------------------------------------
 
 /*
- * Runs a machine up to speed, then asks it for something else, and reports
- * the two things that separate a heavy machine from a light one: how far it
- * keeps drifting the old way, and how long it takes to obey.
- *
- * Everything is measured along whichever way the machine was actually
- * travelling, not along a world axis. A machine faces whatever it has
- * locked, so "forward" is wherever the fight put it -- measuring against +Z
- * reported zero for all three and looked for a moment like the physics had
- * simply stopped working.
+ * Runs a machine up to speed, asks it for something else, and reports how
+ * far it keeps drifting and how long it takes to obey. Measured along the
+ * motion, never along a world axis. [TEST-07]
  */
 static void measure_handling(int iDefIdx, float *pfSkidMetres,
                              int *piReverseTicks)
@@ -5885,16 +5802,8 @@ static int test_machines_carry_their_weight(void)
                aszNames[i], (int)afSkid[i], aiTicks[i]);
 
     /*
-     * Velocity is driven rather than assigned now, and the two levers that
-     * do it are separate. Grip decides how much of the old direction
-     * survives being asked for a new one -- so it is measured by turning
-     * across the motion, never by reversing along it, where the sideways
-     * component is zero and grip is never consulted at all. Drive
-     * acceleration decides how long obeying takes, and that is what
-     * reversing measures.
-     *
-     * Orderings rather than figures: the walk speeds these play out at move
-     * whenever the roster is tuned.
+     * Grip is measured by turning across the motion, drive acceleration by
+     * reversing along it. Orderings rather than figures. [TEST-07]
      */
     CHECK(afSkid[0] > afSkid[1]);
     CHECK(afSkid[1] > afSkid[2]);
@@ -6199,14 +6108,8 @@ static int test_builds_read_as_silhouettes(void)
 
     /*
      * The archetypes have to be visible, not just written in the stat block.
-     * Every machine is built from the same boxes scaled off fHeight and
-     * fRadius, so without the build multipliers these three come out the
-     * same shape at three sizes and a siege platform is indistinguishable
-     * from an interceptor at any distance where it matters.
-     *
-     * Aspect ratio rather than absolute size, because size alone is not
-     * silhouette: a machine that is merely bigger still reads as the same
-     * machine.
+     * Aspect ratio rather than absolute size, because a machine that is
+     * merely bigger reads as the same machine. [TEST-08]
      */
     CHECK(fBulwark > fLancer * 1.2f);
     CHECK(fHalcyon < fLancer * 0.85f);

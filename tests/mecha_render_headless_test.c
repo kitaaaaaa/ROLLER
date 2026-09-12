@@ -1,15 +1,8 @@
 /*
- * Headless proof that the arena mode actually rasterises.
- *
- * mecha_sim_test.c covers the simulation, which needs nothing but libc. This
- * one covers the other half: it builds a real GameRenderer in software mode
- * with no GPU device and no window, renders arena frames into an indexed
- * buffer, and asserts that the geometry, the effects and the HUD all reach
- * pixels. That is the part no unit test and no compile check can speak for.
- *
- * Given an output directory it also writes the frames out as indexed PNGs,
- * using a stand-in palette (the real one lives in the retail data), so the
- * layout can be looked at rather than only asserted about.
+ * Headless proof that the arena mode rasterises: a real GameRenderer in
+ * software mode with no device and no window, asserting that geometry,
+ * effects and HUD reach pixels. Given an output directory it writes the
+ * frames as indexed PNGs to be looked at. [TEST-01]
  */
 #include "3d.h"
 #include "game_render.h"
@@ -177,13 +170,8 @@ static int distinct_colours(const int aiCounts[256])
  */
 static void build_preview_palette(tColor *paPalette)
 {
-    /*
-     * The palette the frame was actually drawn through, when there is one.
-     * Dumping through the mode's own table regardless is what made these
-     * previews lie: retail tiles and effect frames are drawn in the retail
-     * palette's indices, so rendering them with the fallback showed noise
-     * for surfaces that were perfectly fine on screen.
-     */
+    /* The palette the frame was actually drawn through, when there is one,
+     * or the preview lies about retail tiles. [TEST-01] */
     if (mecha_test_palette_loaded()) {
         memcpy(paPalette, palette, sizeof(tColor) * 256);
         return;
@@ -285,14 +273,8 @@ int main(int argc, char **argv)
     dump_frame(szOutDir, "arena_ready.png");
 
     /* --- a rig sheet, for looking at the animation ----------------------
-     *
-     * The mech is posed by hand at four points of the step cycle with the
-     * legs turned off the shoulders, and a frame dumped for each. Nothing
-     * here is asserted -- the numbers that pin the rig live in the sim
-     * tests, which can measure the geometry instead of guessing at pixels
-     * -- but a jointed machine is the kind of thing that has to be looked
-     * at, and this is how you look at it.
-     */
+     * Four points of the step cycle, dumped rather than asserted: the
+     * numbers that pin the rig live in the sim tests. */
     if (szOutDir) {
         static tMechaWorld worldSaved;
         tMechaInput aIdle[MECHA_MAX_MECHS];
@@ -467,14 +449,8 @@ int main(int argc, char **argv)
     CHECK(!iSkyOnly);
     CHECK(distinct_colours(aiCounts) >= 6);
 
-    /*
-     * The sky is a gradient rather than a fill, and the cheapest way to say
-     * so without copying the band table into the test is that the top of the
-     * frame is not the colour of the band just above the horizon. Row zero
-     * is always sky; the row the horizon sits on is not known here, so a row
-     * a third of the way down stands in for it -- with the camera pitched
-     * down as it is, that is still sky and still several bands lower.
-     */
+    /* The sky is a gradient, not a fill: row zero must differ from a row a
+     * third of the way down, which at this pitch is still sky. */
     CHECK(row_colour(s_aFrame, 0) != row_colour(s_aFrame, FRAME_H / 3));
 
     /* The arena itself: both checkerboard tones and the walls. */
@@ -489,13 +465,8 @@ int main(int argc, char **argv)
     CHECK(aiCounts[115] > 0);
     CHECK(aiCounts[143] > 0);
 
-    /*
-     * Every index the mode paints with must have a colour of its own.
-     * Checked forwards, from the constants, rather than backwards from the
-     * frame: shadow_poly emits indices out of the shade table that this mode
-     * never chose, so "everything on screen is one of ours" is not true and
-     * asserting it only produces false failures.
-     */
+    /* Checked forwards from the constants, never backwards from the frame.
+     * [TEST-02] */
     CHECK(mecha_render_palette_defines(s_World.arena.byFloorPalette));
     CHECK(mecha_render_palette_defines(s_World.arena.byGridPalette));
     CHECK(mecha_render_palette_defines(s_World.arena.byWallPalette));
@@ -560,12 +531,8 @@ int main(int argc, char **argv)
 
     /*
      * --- the death blast is a burst, not a wall --------------------------
-     *
-     * The explosion is an opaque billboard and its scale is a half-extent,
-     * so an over-large figure paints a flat slab across the middle of the
-     * screen on the one frame the player most needs to read. Measured
-     * against a recorded match, the original covered 17% of the play area
-     * at its widest. This pins it well under that.
+     * An opaque billboard whose scale is a half-extent, so an over-large
+     * figure slabs the screen. [TEST-03]
      */
     {
         /* Machine 2's accent is the one colour on the roster that no HUD
@@ -616,15 +583,8 @@ int main(int argc, char **argv)
                 CHECK(mecha_render_palette_defines(abyCool[iCool]));
         }
 
-        /*
-         * Which path drew it decides what there is to measure. Drawn from
-         * the game's own texture bank the blast paints none of the flat
-         * path's palette index, so this count is legitimately zero and the
-         * size bound belongs to the other path. Without the bank -- which
-         * is how this runs on a checkout with no retail data, and so how it
-         * runs in CI -- the flat particles are what is on screen and their
-         * size is the thing worth pinning.
-         */
+        /* Which path drew it decides what there is to measure.
+         * [TEST-03] */
         printf("   death blast peaks at %d px, %.1f%% of the frame (%s)\n",
                iPeak, 100.0 * iPeak / (double)(FRAME_W * FRAME_H),
                mecha_render_sprites_active() ? "textured" : "flat");
@@ -632,34 +592,17 @@ int main(int argc, char **argv)
             int iForeign = 0;
             int iIdx;
 
-            /*
-             * The blast is drawn out of the retail bank now, so it paints
-             * none of the flat path's colour -- zero here is the expected
-             * reading, not a missing explosion. What proves the frames
-             * actually reached the screen is the opposite: the bank's tiles
-             * are drawn in the retail palette's indices, which are mostly
-             * ones this mode never paints with, so pixels the mode's own
-             * palette does not define can only have come from a sprite.
-             *
-             * (It is also why the dumped PNGs look empty here: they are
-             * written through the mode's fallback palette, where those
-             * indices resolve to the neutral fill. With the retail palette
-             * loaded, as in the game, they resolve to fire.)
-             */
+            /* Zero here is the expected reading, not a missing explosion:
+             * what proves the sprite drew is a pixel in an index the mode's
+             * own palette does not define. [TEST-03] */
             histogram(s_aFrame, aiPeak);
             for (iIdx = 0; iIdx < 256; iIdx++) {
                 if (aiPeak[iIdx] > 0 && !mecha_render_palette_defines(iIdx))
                     iForeign += aiPeak[iIdx];
             }
             printf("   %d px came out of the texture bank\n", iForeign);
-            /*
-             * Bank pixels on screen is the whole assertion. The flat path's
-             * colour is not required to vanish: the machine's own visor is
-             * painted in it too, so a handful of pixels survive that have
-             * nothing to do with the blast -- which is also why counting
-             * that index was never a clean measure of blast size, only ever
-             * an upper bound on it.
-             */
+            /* Bank pixels on screen is the whole assertion; the flat
+             * colour is not required to vanish. [TEST-03] */
             CHECK(iForeign > 0);
         } else {
             CHECK(iPeak > 0);
@@ -684,13 +627,9 @@ int main(int argc, char **argv)
     }
 
     /* --- every arena rasterises ------------------------------------------
-     *
-     * The two outdoor arenas are built out of terrain rather than a flat
-     * floor, and the roof out of nothing at all past its edge, so they are
-     * the ones most likely to come out as an empty screen. A frame each,
-     * for looking at, and the same "it drew something" floor the rest of
-     * this file uses.
-     */
+     * The outdoor arenas are terrain rather than a flat floor and the roof
+     * is nothing at all past its edge, so they are the ones most likely to
+     * come out empty. */
     {
         int iArena;
 
@@ -758,28 +697,15 @@ int main(int argc, char **argv)
         dump_frame(szOutDir, "arena_guncar.png");
 
         /*
-         * And the same car walked round, so its painted panels can be
-         * looked at rather than guessed about. The body is retail artwork
-         * on a hand-made plan and the only way to tell whether a tile
-         * reads the right way up is to see it -- from one three-quarter
-         * shot most of the car is turned away, and the gun covers the
-         * glass.
-         *
-         * The car is parked nose along +Z with the gun swung off to one
-         * side, and the camera is walked round it at a fixed radius. Yaw
-         * zero looks along +Z, so a camera sitting in direction fPhi from
-         * the car has to look back the other way.
+         * The same car walked round, so its painted panels can be looked at
+         * rather than guessed about. Parked nose along +Z; yaw zero looks
+         * along +Z, so a camera out at fPhi looks back the other way.
+         * [TEST-04]
          */
         {
             static const struct { const char *szName; int iPhi; } aOrbit[] = {
-                /*
-                 * Named for what the camera is looking at, which is the
-                 * opposite side of the car from where it stands: the nose
-                 * points +Z, so the camera out at +Z sees the front of it.
-                 * Flanks are named for the axis they face -- which of them
-                 * is the driver's right is not something the geometry
-                 * says, and it is not worth guessing at.
-                 */
+                /* Named for what the camera looks at, which is the far side
+                 * of the car from where it stands. [TEST-04] */
                 { "arena_car_front.png",           0 },
                 { "arena_car_front_xpos.png",     45 },
                 { "arena_car_side_xpos.png",      90 },
@@ -819,19 +745,9 @@ int main(int argc, char **argv)
                    (int)(sizeof(aOrbit) / sizeof(aOrbit[0])));
 
             /*
-             * And the same eight shots with every body panel wearing its
-             * own index, so a panel can be pointed at rather than argued
-             * about. The plan's fifty polygons are the first fifty quads
-             * the mesh puts out and one comes from each, so the quad's
-             * place in the list is the polygon's number.
-             *
-             * Only the panels facing the camera get a number, or the far
-             * side of the car writes over the near side. Which those are
-             * is read off the projected corners: all fifty share the
-             * plan's winding, so the ones turned towards the camera come
-             * out with one sign of screen area and the ones turned away
-             * with the other. That needs no view of how the normals in
-             * this frame ended up pointing.
+             * The same eight shots with every panel wearing its own index,
+             * so a panel can be pointed at rather than argued about. Facing
+             * is read off the sign of the projected screen area. [TEST-04]
              */
             for (iShot = 0; iShot < (int)(sizeof(aOrbit) / sizeof(aOrbit[0]));
                  iShot++) {
@@ -867,13 +783,8 @@ int main(int argc, char **argv)
                 body.iCapacity = MECHA_QUAD_CAPACITY;
                 mecha_mesh_mech(&body, &s_World, 0);
 
-                /*
-                 * Nearest panel wins the space. Without that the roof and
-                 * the tail, whose middles project into the same corner of
-                 * the screen as the windscreen does, write their numbers
-                 * over the panels actually facing the camera and the ones
-                 * being asked about cannot be read.
-                 */
+                /* Nearest panel wins the space, or the roof and the tail
+                 * write over the windscreen. [TEST-04] */
                 iLabels = 0;
                 for (iPoly = 0; iPoly < MECHA_ZIZIN_BODY_QUADS
                                 && iPoly < body.iCount; iPoly++) {
@@ -1035,13 +946,8 @@ int main(int argc, char **argv)
         CHECK(aiBrief[MECHA_TEST_SENTINEL] == 0);
         CHECK(distinct_colours(aiBrief) >= 4);
 
-        /*
-         * The screen has to fit, in both of the game's video modes. The
-         * footer is the last thing drawn, so anything that ran off the
-         * bottom took it first -- and the exit row sits just above it. The
-         * 320x200 case is the one that actually binds: twenty-five lines of
-         * this font is the entire buffer.
-         */
+        /* The screen has to fit in both video modes; 320x200 is the one
+         * that binds. [TEST-05] */
         {
             static uint8 aSmall[320 * 200];
             int iLast = last_ink_row(s_aFrame, FRAME_W, FRAME_H);
@@ -1085,13 +991,8 @@ int main(int argc, char **argv)
             dump_frame(szOutDir, "arena_controls.png");
         }
 
-        /*
-         * Every colour it paints with has to be one the mode's palette
-         * defines, or the screen presents as holes -- but only while the
-         * mode is choosing all of them. The retail HUD font brings its own
-         * indices, so with that loaded this says nothing and asserting it
-         * would only be asserting that the font failed to load.
-         */
+        /* Only meaningful while the mode is choosing all the colours: the
+         * retail font brings its own indices. [TEST-02] */
         if (!mecha_render_font_is_retail()) {
             for (i = 0; i < 256; i++) {
                 if (aiBrief[i] > 0)

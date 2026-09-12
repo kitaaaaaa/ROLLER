@@ -1216,3 +1216,203 @@ The mesh layer never sees a texture either: it names a bank and a tile and
 the renderer resolves them, which is what keeps the file free of the engine.
 Anything unresolvable falls back to `byPalette`, so the same mesh works with
 or without the retail data.
+
+---
+
+## MODE-01 — the palette dance on entry and exit
+
+Everything the arena draws is generated, but the frame is still an indexed
+buffer presented through `pal_addr`, and `pal_addr` is only filled in by the
+states that load the retail data. Coming straight in on `--arena` skips all
+of those, so without the mode installing its own the geometry rasterises
+correctly and then presents as a black screen.
+
+The game's own palette is loaded first when it is installed. The fallback
+table defines about thirty indices and fills the rest with one neutral grey,
+which is fine for geometry the mode colours itself and wrong for anything out
+of the retail banks — those tiles and frames are drawn in the retail
+palette's indices, so resolving them through the fallback turns a tarmac
+surface into noise.
+
+**Two ownership traps, both of which crashed the process.**
+
+`setpal` owns `pal_addr`: it frees whatever was there, loads the file, and
+points `pal_addr` and `pal_selector` at its own buffer. The mode used to
+repoint `pal_addr` at the static `palette[]` array afterwards, on the
+strength of a note in the GPU renderer saying `setpal` leaves it alone —
+true of the original, not of this one. The cost was not a wrong colour: the
+loaded buffer leaked, and the next `setpal` anybody called (the main menu's,
+on the way out) took the static array's address to `free()` and aborted.
+That was the crash on "exit to whiplash".
+
+Presentation reads `pal_addr`, so the mode's own table has to go there, and
+that table is static. The selector is how the engine says whose memory this
+is: `setpal` frees `pal_addr` only when the selector is non-negative, so
+marking it -1 while the arena's table is installed makes the static safe to
+leave there. Both go back on the way out.
+
+## MODE-02 — the renderer is created if absent and never torn down
+
+`g_pGameRenderer` is created by `play_game_init()`, which only runs once a
+race starts. Coming in on `--arena` leaves it NULL, and
+`game_render_get_mode()` dereferences it without a guard, so the mode stands
+one up itself the way `play_game_init` does.
+
+It is not torn down on the way out. Doing so nulled `g_pGameRenderer`, which
+is the renderer the menus and the race then reach for, so leaving the arena
+crashed the moment anything else tried to draw. It is the same renderer
+`play_game_init` would have built; handing it on is the point of having built
+it.
+
+## MODE-03 — the fixed tick, and the catch-up cap
+
+The simulation runs at a fixed 60 Hz whatever the display does, so a match
+plays identically anywhere and stays reproducible from its seed. A frame that
+took too long catches up over a few ticks and no further: without the cap,
+one long stall — a window drag, a breakpoint — is paid back as a burst of
+simulation the player cannot react to.
+
+---
+
+## TEST-01 — what the headless render test is for
+
+`mecha_sim_test.c` covers the simulation, which needs nothing but libc. This
+covers the other half: a real `GameRenderer` in software mode with no GPU
+device and no window, rendering arena frames into an indexed buffer, and
+asserting that geometry, effects and HUD all reach pixels. That is the part
+no unit test and no compile check can speak for.
+
+Given an output directory it writes the frames as indexed PNGs so the layout
+can be looked at rather than only asserted about. They are dumped through the
+palette the frame was actually drawn with, when there is one: dumping through
+the mode's fallback regardless is what made these previews lie, since retail
+tiles and effect frames are drawn in the retail palette's indices and showed
+as noise for surfaces that were fine on screen.
+
+## TEST-02 — assertions that must be one-directional
+
+Two places where the obvious two-way assertion is wrong:
+
+- **Palette coverage** is checked forwards, from the constants, not backwards
+  from the frame. `shadow_poly` emits indices out of the shade table that the
+  mode never chose, so "everything on screen is one of ours" is false and
+  asserting it only produces failures.
+- **The HUD's colours** are only the mode's while the mode is choosing all of
+  them. The retail font brings its own indices, so with it loaded that
+  assertion says nothing — and would amount to asserting the font failed to
+  load.
+
+## TEST-03 — the blast is measured differently on each path
+
+Drawn from the game's own texture bank, the blast paints none of the flat
+path's palette index, so a count of that index is legitimately zero and the
+size bound belongs to the other path. Without the bank — a checkout with no
+retail data, which is how CI runs — the flat particles are what is on screen
+and their size is what is worth pinning.
+
+What proves the bank frames reached the screen is the opposite test: the
+bank's tiles are drawn in retail palette indices, mostly ones this mode never
+paints with, so pixels the mode's own palette does not define can only have
+come from a sprite. It is also why the dumped PNGs look empty on that path —
+written through the fallback palette, those indices resolve to neutral fill.
+
+The flat path's colour is not required to vanish either: the machine's visor
+is painted in it, so counting that index was only ever an upper bound on
+blast size.
+
+The bound itself: the explosion is an opaque billboard whose scale is a
+half-extent, so an over-large figure paints a slab across the middle of the
+screen on the frame the player most needs to read. Measured against a
+recorded match, the original covered 17% of the play area at its widest.
+
+## TEST-04 — the numbered panel render
+
+The plan's fifty polygons are the first fifty quads the mesh puts out, one
+from each, so a quad's place in the list is the polygon's number.
+
+Only panels facing the camera are numbered, or the far side of the car writes
+over the near side. Which those are is read off the sign of the projected
+screen area: all fifty share the plan's winding, so those turned towards the
+camera come out one sign and those turned away the other. That needs no view
+on how the normals ended up pointing in this frame.
+
+Nearest panel wins the space. Without that the roof and the tail, whose
+middles project into the same corner of the screen as the windscreen, write
+their numbers over the panels being asked about.
+
+Shots are named for what the camera looks at, which is the far side of the
+car from where it stands: the nose points +Z, so the camera out at +Z sees
+the front. Flanks are named for the axis they face — which is the driver's
+right is not something the geometry says.
+
+## TEST-05 — the briefing has to fit in 320x200
+
+The footer is the last thing drawn, so anything running off the bottom took
+it first, and the exit row sits just above it. Twenty-five lines of this font
+is the entire buffer. See [REND-10].
+
+## TEST-06 — what the AI duel probes can and cannot assert
+
+**Lock-held fraction is bounded loosely, on purpose.** Both halves have to be
+true: the pilot must lose a lock sometimes, or the mechanic does not exist in
+its hands and it is quietly privileged over the player; and it must hold one
+for most of a fight, or it has no idea how to fight and the skill levels
+measure noise. Everything that fights at range holds a lock better than nine
+tenths of a fight. Kira sits near two thirds and belongs there — the close
+quarters machine, spending the fight at the distance where anything moving
+sideways leaves the cone. Asserting the rangefighters' figure would assert
+that every machine fights the same way.
+
+**The stand-in player has to steer.** It did not used to: a locked machine
+squared itself up at any range for free. With the auto-turn confined to knife
+range, a scripted opponent that never touches the stick spins away from the
+fight, and the probe then measures how often the computer pilot wandered into
+the fixed cone of someone who cannot turn — which ranks a decisive pilot as
+the one that takes the most fire.
+
+**Damage absorbed is deliberately not asserted on.** It reads as a skill
+measure and is not one: what a pilot takes depends on how long it leaves its
+target alive, so a better pilot ending rounds faster cuts its exposure and a
+worse one wandering out of the fight cuts its exposure too — the two ends
+meet in the middle. Measured across twelve duels the three come out within a
+few per cent in no reliable order. An assertion that passes by one per cent
+is a future failure. Still printed, because it is worth seeing.
+
+**Recent-shove memory, not instantaneous stagger.** Asking whether stagger
+was above zero on the exact tick a machine crossed the line is a different
+question: stagger bleeds off at fifty-five a second, so a machine hit hard at
+the far end of a slide arrives with none left and books itself down as having
+strolled. Two of six seeds did exactly that, each after being shot the whole
+way across the roof.
+
+**The rooftop bound is a rate, not zero.** See [AI-05] for the three states
+in which the pilot has no steering left to decline anything with.
+
+## TEST-07 — measure along the motion, not along a world axis
+
+A machine faces whatever it has locked, so "forward" is wherever the fight
+put it. Measuring against +Z reported zero for all three machines and looked
+for a moment like the physics had stopped working.
+
+The two mass levers are measured separately. Grip decides how much of the old
+direction survives being asked for a new one, so it is measured by turning
+*across* the motion — never by reversing along it, where the sideways
+component is zero and grip is never consulted. Drive acceleration decides how
+long obeying takes, and reversing is what measures that.
+
+Orderings rather than figures, since the walk speeds these play out at move
+whenever the roster is tuned.
+
+## TEST-08 — the inward-facing car body is the check on the axis negation
+
+The race game's frame is right-handed and this one is not, so swapping the
+three axes without negating one builds the car's mirror image: same
+silhouette, wheel arches and exhausts and both flanks of the livery on the
+wrong sides. Negating the lateral axis puts it right, and a reflection
+reverses a winding — so a correctly reflected body is one whose panels all
+face inwards. Drop the negation and all fifty turn round, which is what this
+catches, because nothing about the car's outline would. See [MESH-09].
+
+Silhouette is asserted as an aspect ratio rather than an absolute size,
+because size alone is not silhouette: a machine that is merely bigger still
+reads as the same machine. See [TYPE-02].

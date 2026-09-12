@@ -1255,6 +1255,30 @@ static void mecha_add_zizin_body(tMechaQuadList *pList,
 
       mecha_quads_add(pList, afVert, (uint8_t)(uiTex & 0xFFu),
                       MECHA_QUAD_TWO_SIDED | MECHA_QUAD_TEX_FLIP);
+      /*
+       * The flanks and the horizontal panels do not agree about which way
+       * round their artwork goes.
+       *
+       * POLYTEX takes its texture coordinates from the projected polygon,
+       * so a panel's orientation follows the order its corners arrive in,
+       * and the plan does not wind its roof and bonnet the same way round
+       * as its sides. One rule for all fifty put ZIZIN the right way round
+       * on the doors and NIZIZ on the roof, the bonnet and the glass at
+       * both ends. Which of the two a panel wants is readable off the
+       * panel itself: the ones lying flat want the other one.
+       *
+       * Done after the add because the normal is worked out in there, and
+       * it is the normal that says a panel is lying flat.
+       */
+      if (pList->iCount > 0) {
+        tMechaQuad *pQuad = &pList->paQuads[pList->iCount - 1];
+        float fUp = pQuad->afNormal[1];
+
+        if (fUp < 0.0f)
+          fUp = -fUp;
+        if (fUp > MECHA_ZIZIN_ROOF_FACING)
+          pQuad->byFlags &= (uint8_t)~MECHA_QUAD_TEX_FLIP;
+      }
       if ((uiTex & SURFACE_FLAG_APPLY_TEXTURE) != 0)
         mecha_tag_texture(pList, MECHA_TEX_CAR, (int)(uiTex & 0xFFu));
     } else {

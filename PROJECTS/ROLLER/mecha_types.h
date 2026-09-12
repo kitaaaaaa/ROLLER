@@ -30,7 +30,7 @@
  * per cell. Coarse on purpose. [ARENA-04] */
 /* The array size, not any arena's own division -- each carries its own
  * count in iTerrainCells, and a bigger arena needs more. */
-#define MECHA_TERRAIN_CELLS 24
+#define MECHA_TERRAIN_CELLS 28
 #define MECHA_TERRAIN_NODES (MECHA_TERRAIN_CELLS + 1)
 /* What an arena gets when it does not ask for anything else. */
 #define MECHA_TERRAIN_CELLS_DEFAULT 12
@@ -324,6 +324,16 @@ typedef struct
    * footprint and eased rather than snapped. [SIM-10] */
   int   iContourPitch;
   int   iContourRoll;
+
+  /*
+   * A car launched off a cambered surface rolls in the air, and lands on
+   * its roof if it has gone far enough over. iRollSpin is the rate the
+   * camber under the wheels would impart at the current speed; iAirRoll is
+   * what has accumulated since the wheels left the ground. [SIM-18]
+   */
+  int   iRollSpin;
+  int   iAirRoll;
+  bool  bWasAirborne;   /* to catch the tick the wheels touch down */
   /* What is left of the last landing: a damped cosine about both axes,
    * seeded from the attitude held at contact. [TYPE-04] */
   float fWobblePitchAmp;

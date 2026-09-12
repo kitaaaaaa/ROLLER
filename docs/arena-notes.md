@@ -1416,3 +1416,49 @@ catches, because nothing about the car's outline would. See [MESH-09].
 Silhouette is asserted as an aspect ratio rather than an absolute size,
 because size alone is not silhouette: a machine that is merely bigger still
 reads as the same machine. See [TYPE-02].
+
+## SIM-18 — a car rolls off a cambered launch, and may land on its roof
+
+Whiplash's own mechanic, in three parts (`control.c`):
+
+- **At launch** (6473): `iRollMomentum += chunk.iRoll * fFinalSpeed / 720`.
+  360 is that game's reference speed, so at full speed the momentum is half
+  the camber per tick at 36 Hz. The same rotation per second at 60 Hz is
+  three tenths of the camber against the machine's own top speed, which is
+  `MECHA_CAMBER_SPIN_GAIN`.
+- **In the air** (2501): `nRoll += iRollMomentum` every tick.
+- **At landing** (3216): roll inside `4096..12288` — a quarter turn either
+  side of level — is an ordinary touchdown and the roll is zeroed. Anything
+  else sets `iStunned = -1`, zeroes the steering and parks the car at
+  `0x2000`. Here that is a knockdown.
+
+The arena has no track chunks, so the camber is the ground-contour roll
+already sampled under the wheels. The spin is kept up to date while the
+wheels are down rather than computed at the moment of launch, so what carries
+into the air is the figure from the surface actually left.
+
+The landing is judged on the tick the wheels touch, not off `byMove`: the
+wheeled path sets the car back to `MECHA_MOVE_STAND` before the shared
+landing code runs, so there is no JUMP state left to key on by then.
+
+## AI-08 — the pilot presses forward and takes the high ground
+
+Three changes, all because the pilots read as hiding:
+
+- **The station-keeping band is narrow and sits inside the preferred range**,
+  and its neutral case walks forward rather than holding position. A pilot
+  parked at exactly the range its weapon likes never arrives, and never makes
+  the other one move.
+- **The guard-and-refill clause needs the gauge to be nearly spent**, not
+  merely low. At a third of a gauge it fired constantly, which is what put
+  these pilots behind a box for most of a fight.
+- **Height is taken on purpose rather than at random.** A box or a building
+  answers the ground query at its roof, so something to stand on is ground
+  ahead that is well above the ground here and within jumping reach. Looking
+  along the line to the target means the thing it climbs is the thing between
+  them, which is the one worth being on top of.
+
+The lock-held assertion in the tests moved with this: a pilot that presses
+forward keeps the enemy in front of it, so an archetype that never breaks
+lock is doing its job. Breaking lock is now asserted across the roster rather
+than per machine. [TEST-06]

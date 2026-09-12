@@ -157,6 +157,11 @@
  * before pressing boost, and only as far as a cancel needs once it is under
  * way. [AI-05]
  */
+/* How far ahead a pilot looks for something to climb onto, and the smallest
+ * step worth jumping for. [AI-08] */
+#define MECHA_AI_CLIMB_LOOK  MECHA_M(7.0f)
+#define MECHA_AI_CLIMB_MIN   MECHA_M(4.0f)
+
 #define MECHA_AI_FOOTING_WALK   MECHA_M(16.0f)
 #define MECHA_AI_FOOTING_LEAD   0.35f
 #define MECHA_AI_FOOTING_CANCEL 0.60f
@@ -440,6 +445,18 @@
 /* Sampling the terrain is only right while the machine is on the terrain;
  * up on the roof of a box it is standing on something flat that the height
  * field underneath knows nothing about. */
+/*
+ * Rolling off a cambered launch, the way the race game does it. Whiplash
+ * sets iRollMomentum to chunk camber * speed / 720 per tick at 36 Hz
+ * (control.c), and 360 is its reference speed -- so at full speed that is
+ * half the camber a tick, and the same rotation per second at 60 Hz is
+ * three tenths of it against the machine's own top speed.
+ * A landing more than a quarter turn from level is a landing on the roof.
+ * [SIM-18]
+ */
+#define MECHA_CAMBER_SPIN_GAIN 0.30f
+#define MECHA_CAMBER_UPRIGHT   MECHA_ANGLE_QUARTER
+
 #define MECHA_CONTOUR_CONTACT   MECHA_M(0.6f)
 /* Suspension, more or less: fast enough to follow ground crossed at speed,
  * slow enough that a gradient changing between grid cells does not snap. */

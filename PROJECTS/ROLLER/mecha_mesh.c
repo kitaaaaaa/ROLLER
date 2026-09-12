@@ -1006,7 +1006,7 @@ static void mecha_mesh_attitude(const tMechaMech *pMech, int *piYaw,
   *piPitch += pAtt->iContourPitch + pAtt->iAirPitch + pAtt->iPitchDrive
               + pAtt->iPitchWobble + pAtt->iPitchShake;
   *piRoll += pAtt->iContourRoll + pAtt->iRollSteer + pAtt->iRollWobble
-             + pAtt->iRollShake;
+             + pAtt->iRollShake + pAtt->iAirRoll;
 }
 
 //-------------------------------------------------------------------------------------------------

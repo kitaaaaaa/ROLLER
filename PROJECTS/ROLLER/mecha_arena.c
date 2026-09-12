@@ -263,48 +263,48 @@ void mecha_arena_init(tMechaArena *pArena, int iArenaIdx)
     /* Four tall pillars around the middle and four low blocks further out:
      * enough to break a lock at close range without ever letting either mech
      * disappear for long. */
-    pArena->fHalfExtent = 110.0f * m;
+    pArena->fHalfExtent = 130.0f * m;
     pArena->fWallHeight = 22.0f * m;
-    mecha_arena_add_box(pArena, -45.0f * m, -45.0f * m, 4.5f * m, 4.5f * m,
+    mecha_arena_add_box(pArena, -53.2f * m, -53.2f * m, 4.5f * m, 4.5f * m,
                         20.0f * m, MECHA_PAL_BLOCK, MECHA_PAL_BLOCK_TOP);
-    mecha_arena_add_box(pArena,  45.0f * m, -45.0f * m, 4.5f * m, 4.5f * m,
+    mecha_arena_add_box(pArena, 53.2f * m, -53.2f * m, 4.5f * m, 4.5f * m,
                         20.0f * m, MECHA_PAL_BLOCK, MECHA_PAL_BLOCK_TOP);
-    mecha_arena_add_box(pArena, -45.0f * m,  45.0f * m, 4.5f * m, 4.5f * m,
+    mecha_arena_add_box(pArena, -53.2f * m, 53.2f * m, 4.5f * m, 4.5f * m,
                         20.0f * m, MECHA_PAL_BLOCK, MECHA_PAL_BLOCK_TOP);
-    mecha_arena_add_box(pArena,  45.0f * m,  45.0f * m, 4.5f * m, 4.5f * m,
+    mecha_arena_add_box(pArena, 53.2f * m, 53.2f * m, 4.5f * m, 4.5f * m,
                         20.0f * m, MECHA_PAL_BLOCK, MECHA_PAL_BLOCK_TOP);
-    mecha_arena_add_box(pArena,   0.0f * m, -78.0f * m, 15.0f * m, 5.0f * m,
+    mecha_arena_add_box(pArena, 0.0f * m, -92.2f * m, 15.0f * m, 5.0f * m,
                         7.0f * m, MECHA_PAL_BLOCK, MECHA_PAL_BLOCK_TOP);
-    mecha_arena_add_box(pArena,   0.0f * m,  78.0f * m, 15.0f * m, 5.0f * m,
+    mecha_arena_add_box(pArena, 0.0f * m, 92.2f * m, 15.0f * m, 5.0f * m,
                         7.0f * m, MECHA_PAL_BLOCK, MECHA_PAL_BLOCK_TOP);
-    mecha_arena_add_box(pArena, -78.0f * m,   0.0f * m, 5.0f * m, 15.0f * m,
+    mecha_arena_add_box(pArena, -92.2f * m, 0.0f * m, 5.0f * m, 15.0f * m,
                         7.0f * m, MECHA_PAL_BLOCK, MECHA_PAL_BLOCK_TOP);
-    mecha_arena_add_box(pArena,  78.0f * m,   0.0f * m, 5.0f * m, 15.0f * m,
+    mecha_arena_add_box(pArena, 92.2f * m, 0.0f * m, 5.0f * m, 15.0f * m,
                         7.0f * m, MECHA_PAL_BLOCK, MECHA_PAL_BLOCK_TOP);
     break;
 
   case 1:
     /* Long, open, and split down the middle by two staggered walls, so the
      * fight is mostly at range and closing costs boost. */
-    pArena->fHalfExtent = 140.0f * m;
+    pArena->fHalfExtent = 165.0f * m;
     pArena->fWallHeight = 26.0f * m;
     pArena->byFloorPalette = MECHA_PAL_FLOOR_B;
     pArena->byFloorTile = MECHA_TILE_GRASS_A;
     pArena->byGridTile = MECHA_TILE_GRASS_B;
     pArena->byWallTile = MECHA_TILE_BRICK;
-    mecha_arena_add_box(pArena, -30.0f * m, -20.0f * m, 3.0f * m, 46.0f * m,
+    mecha_arena_add_box(pArena, -35.4f * m, -23.6f * m, 3.0f * m, 46.0f * m,
                         12.0f * m, MECHA_PAL_BLOCK, MECHA_PAL_HAZARD);
-    mecha_arena_add_box(pArena,  30.0f * m,  20.0f * m, 3.0f * m, 46.0f * m,
+    mecha_arena_add_box(pArena, 35.4f * m, 23.6f * m, 3.0f * m, 46.0f * m,
                         12.0f * m, MECHA_PAL_BLOCK, MECHA_PAL_HAZARD);
-    mecha_arena_add_box(pArena, -90.0f * m,  70.0f * m, 9.0f * m, 9.0f * m,
+    mecha_arena_add_box(pArena, -106.1f * m, 82.5f * m, 9.0f * m, 9.0f * m,
                         9.0f * m, MECHA_PAL_BLOCK, MECHA_PAL_BLOCK_TOP);
-    mecha_arena_add_box(pArena,  90.0f * m, -70.0f * m, 9.0f * m, 9.0f * m,
+    mecha_arena_add_box(pArena, 106.1f * m, -82.5f * m, 9.0f * m, 9.0f * m,
                         9.0f * m, MECHA_PAL_BLOCK, MECHA_PAL_BLOCK_TOP);
-    mecha_arena_add_box(pArena,  90.0f * m,  70.0f * m, 9.0f * m, 9.0f * m,
+    mecha_arena_add_box(pArena, 106.1f * m, 82.5f * m, 9.0f * m, 9.0f * m,
                         9.0f * m, MECHA_PAL_BLOCK, MECHA_PAL_BLOCK_TOP);
-    mecha_arena_add_box(pArena, -90.0f * m, -70.0f * m, 9.0f * m, 9.0f * m,
+    mecha_arena_add_box(pArena, -106.1f * m, -82.5f * m, 9.0f * m, 9.0f * m,
                         9.0f * m, MECHA_PAL_BLOCK, MECHA_PAL_BLOCK_TOP);
-    mecha_arena_add_box(pArena,   0.0f * m,   0.0f * m, 11.0f * m, 11.0f * m,
+    mecha_arena_add_box(pArena, 0.0f * m, 0.0f * m, 11.0f * m, 11.0f * m,
                         5.0f * m, MECHA_PAL_BLOCK, MECHA_PAL_BLOCK_TOP);
     break;
 
@@ -317,14 +317,14 @@ void mecha_arena_init(tMechaArena *pArena, int iArenaIdx)
     int iTree;
 
     pArena->byShape = MECHA_ARENA_OCTAGON;
-    pArena->fHalfExtent = 260.0f * m;
+    pArena->fHalfExtent = 305.0f * m;
     pArena->fWallHeight = 0.0f;
-    pArena->iFloorTiles = 40;
+    pArena->iFloorTiles = 47;
     /* Twice the arena, twice the grid: the hills are the same size they
      * always were, and a grid stretched to cover twice the ground would
      * have rounded them off into bumps. */
-    pArena->iTerrainCells = 24;
-    pArena->fOuterReach = 560.0f * m;
+    pArena->iTerrainCells = 28;
+    pArena->fOuterReach = 640.0f * m;
     pArena->iBillboards = 420;
     pArena->byFloorPalette = MECHA_PAL_GRASS_A;
     pArena->byGridPalette = MECHA_PAL_GRASS_B;
@@ -474,7 +474,7 @@ void mecha_arena_init(tMechaArena *pArena, int iArenaIdx)
      * block in each corner. The edge runs a long way down. [ARENA-09]
      */
     pArena->byShape = MECHA_ARENA_OPEN;
-    pArena->fHalfExtent = 78.0f * m;
+    pArena->fHalfExtent = 92.0f * m;
     pArena->fWallHeight = 0.0f;
     pArena->byFloorTile = MECHA_TILE_PLATE_A;
     pArena->byGridTile = MECHA_TILE_PLATE_B;
@@ -485,13 +485,13 @@ void mecha_arena_init(tMechaArena *pArena, int iArenaIdx)
     pArena->fMesaTop = 20.0f * m;
     pArena->fMesaBase = 30.0f * m;
     pArena->fMesaHeight = 9.0f * m;
-    mecha_arena_add_box(pArena, -52.0f * m, -52.0f * m, 9.0f * m, 9.0f * m,
+    mecha_arena_add_box(pArena, -61.3f * m, -61.3f * m, 9.0f * m, 9.0f * m,
                         14.0f * m, MECHA_PAL_BLOCK, MECHA_PAL_BLOCK_TOP);
-    mecha_arena_add_box(pArena,  52.0f * m, -52.0f * m, 9.0f * m, 9.0f * m,
+    mecha_arena_add_box(pArena, 61.3f * m, -61.3f * m, 9.0f * m, 9.0f * m,
                         14.0f * m, MECHA_PAL_BLOCK, MECHA_PAL_BLOCK_TOP);
-    mecha_arena_add_box(pArena, -52.0f * m,  52.0f * m, 9.0f * m, 9.0f * m,
+    mecha_arena_add_box(pArena, -61.3f * m, 61.3f * m, 9.0f * m, 9.0f * m,
                         14.0f * m, MECHA_PAL_BLOCK, MECHA_PAL_BLOCK_TOP);
-    mecha_arena_add_box(pArena,  52.0f * m,  52.0f * m, 9.0f * m, 9.0f * m,
+    mecha_arena_add_box(pArena, 61.3f * m, 61.3f * m, 9.0f * m, 9.0f * m,
                         14.0f * m, MECHA_PAL_BLOCK, MECHA_PAL_BLOCK_TOP);
     break;
 
@@ -502,17 +502,17 @@ void mecha_arena_init(tMechaArena *pArena, int iArenaIdx)
     /* Small and vertical. The centre block is low enough to jump onto and
      * wide enough to fight on, which turns the whole round into a scrap over
      * high ground. */
-    pArena->fHalfExtent = 85.0f * m;
+    pArena->fHalfExtent = 100.0f * m;
     pArena->fWallHeight = 18.0f * m;
     mecha_arena_add_box(pArena, 0.0f, 0.0f, 20.0f * m, 20.0f * m,
                         10.0f * m, MECHA_PAL_BLOCK, MECHA_PAL_HAZARD);
-    mecha_arena_add_box(pArena, -58.0f * m, -58.0f * m, 8.0f * m, 8.0f * m,
+    mecha_arena_add_box(pArena, -68.4f * m, -68.4f * m, 8.0f * m, 8.0f * m,
                         16.0f * m, MECHA_PAL_BLOCK, MECHA_PAL_BLOCK_TOP);
-    mecha_arena_add_box(pArena,  58.0f * m, -58.0f * m, 8.0f * m, 8.0f * m,
+    mecha_arena_add_box(pArena, 68.4f * m, -68.4f * m, 8.0f * m, 8.0f * m,
                         16.0f * m, MECHA_PAL_BLOCK, MECHA_PAL_BLOCK_TOP);
-    mecha_arena_add_box(pArena, -58.0f * m,  58.0f * m, 8.0f * m, 8.0f * m,
+    mecha_arena_add_box(pArena, -68.4f * m, 68.4f * m, 8.0f * m, 8.0f * m,
                         16.0f * m, MECHA_PAL_BLOCK, MECHA_PAL_BLOCK_TOP);
-    mecha_arena_add_box(pArena,  58.0f * m,  58.0f * m, 8.0f * m, 8.0f * m,
+    mecha_arena_add_box(pArena, 68.4f * m, 68.4f * m, 8.0f * m, 8.0f * m,
                         16.0f * m, MECHA_PAL_BLOCK, MECHA_PAL_BLOCK_TOP);
     break;
   }

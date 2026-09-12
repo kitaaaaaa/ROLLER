@@ -1332,6 +1332,10 @@ static void mecha_update_attitude(tMechaWorld *pWorld, int iMechIdx,
     pAtt->iAirPitch = 0;
   }
 
+  /* A car off a cambered launch keeps rolling until it lands. [SIM-18] */
+  if (pDef->bWheeled && bAirborne)
+    pAtt->iAirRoll = mecha_angle_wrap(pAtt->iAirRoll + pAtt->iRollSpin);
+
   /* --- the shape of the ground it is standing on -------------------------
    * The machine asks what the ground does across its own footprint and sits
    * on the answer. Wheels only, and terrain only. [SIM-10] */
@@ -1378,6 +1382,19 @@ static void mecha_update_attitude(tMechaWorld *pWorld, int iMechIdx,
                                       (int)(MECHA_CONTOUR_RATE * MECHA_DT));
     pAtt->iContourRoll = mecha_stepi(pAtt->iContourRoll, iWantRoll,
                                      (int)(MECHA_CONTOUR_RATE * MECHA_DT));
+
+    /*
+     * What the camber underneath would spin the car at if it left the
+     * ground now. Kept up to date while the wheels are down rather than
+     * worked out at the moment of launch, so the value that carries into
+     * the air is the one from the surface actually left. [SIM-18]
+     */
+    pAtt->iRollSpin = pDef->fWalkSpeed > 0.0f
+      ? (int)((float)iWantRoll
+              * (mecha_length2(pMech->fVelX, pMech->fVelZ) / pDef->fWalkSpeed)
+              * MECHA_CAMBER_SPIN_GAIN)
+      : 0;
+    pAtt->iAirRoll = 0;
   } else {
     /* In the air there is no ground to follow; the nose follows the fall
      * instead, and the two must not both be describing the attitude. */
@@ -1742,6 +1759,34 @@ integrate:
       pMech->fY = fGround;
   }
 
+  /*
+   * A car that has been rolling in the air lands on whatever face it has
+   * come round to. Judged on the tick the wheels touch, not off byMove: the
+   * wheeled path has already put the car back to STAND by the time the
+   * shared landing below runs. The race game's own bound -- roll inside a
+   * quarter turn of level is an ordinary touchdown, anything else zeroes
+   * the steering and stuns (control.c). [SIM-18]
+   */
+  if (pDef->bWheeled && pMech->attitude.bWasAirborne && pMech->fY <= fGround) {
+    int iAirRoll = mecha_angle_signed(pMech->attitude.iAirRoll);
+
+    if (iAirRoll > MECHA_CAMBER_UPRIGHT || iAirRoll < -MECHA_CAMBER_UPRIGHT) {
+      pMech->byMove = MECHA_MOVE_DOWN;
+      pMech->iDownTick = pWorld->iTick;
+      pMech->iStateTicks = 0;
+      pMech->iStunTicks = MECHA_DOWN_TICKS;
+      pMech->iRecovery = 0;
+      pMech->fVelX = 0.0f;
+      pMech->fVelZ = 0.0f;
+      mecha_sim_spawn_effect(pWorld, MECHA_FX_DUST, pMech->fX, fGround,
+                             pMech->fZ, pDef->fRadius * 1.6f,
+                             pDef->abyPalette[2], MECHA_SEC(0.45f));
+    }
+    pMech->attitude.iAirRoll = 0;
+    pMech->attitude.iRollSpin = 0;
+  }
+  pMech->attitude.bWasAirborne = pMech->fY > fGround;
+
   if (pMech->fY <= fGround) {
     bool bWasFalling = pMech->fVelY < 0.0f;
     /* How hard it arrived. Taken now because the contact rules below are
@@ -1796,6 +1841,7 @@ integrate:
          || pMech->byMove == MECHA_MOVE_CANCEL) && bWasFalling) {
       bool bCancelled = pMech->byMove == MECHA_MOVE_CANCEL;
 
+      {
       pMech->byMove = MECHA_MOVE_LAND;
       /* A cancelled touchdown is the short one. Rather than carry a second
        * recovery length on every machine, start its clock partway through
@@ -1810,6 +1856,7 @@ integrate:
                              pMech->fZ,
                              pDef->fRadius * (bCancelled ? 3.0f : 2.4f),
                              pDef->abyPalette[2], MECHA_SEC(0.45f));
+      }
     }
   }
 

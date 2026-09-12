@@ -1568,9 +1568,19 @@ static bool mecha_tint_build(GameRenderer *pRenderer, int iBank)
     float fLevel = (0.30f * (float)palette[i].byR
                     + 0.59f * (float)palette[i].byG
                     + 0.11f * (float)palette[i].byB);
-    float fWantR = s_aTintHue[iTint].fR * fLevel;
-    float fWantG = s_aTintHue[iTint].fG * fLevel;
-    float fWantB = s_aTintHue[iTint].fB * fLevel;
+    /*
+     * The hue is normalised to unit luminance before it is applied, or the
+     * tint darkens as well as colours: violet as written weighs 0.57 and
+     * green 0.77, so every recoloured frame came out that much dimmer than
+     * the blue it replaced. [REND-13]
+     */
+    float fHueLevel = 0.30f * s_aTintHue[iTint].fR
+                      + 0.59f * s_aTintHue[iTint].fG
+                      + 0.11f * s_aTintHue[iTint].fB;
+    float fGain = fHueLevel > 0.01f ? 1.0f / fHueLevel : 1.0f;
+    float fWantR = s_aTintHue[iTint].fR * fLevel * fGain;
+    float fWantG = s_aTintHue[iTint].fG * fLevel * fGain;
+    float fWantB = s_aTintHue[iTint].fB * fLevel * fGain;
     float fBest = 1e30f;
     int iBest = i;
     int j;

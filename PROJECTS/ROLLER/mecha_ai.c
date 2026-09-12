@@ -427,24 +427,35 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
     pOut->iMoveX = (iPhase & 1) ? 100 : -100;
   }
 
-  if (fDistance > fPreferred * 1.25f) {
+  /*
+   * Forward by default. The band it will sit in is narrow and its middle is
+   * inside its preferred range rather than on it, so a pilot with nothing
+   * else to do closes rather than orbits: holding station at exactly the
+   * range the weapon likes reads as hiding, and a pilot that never arrives
+   * never makes the other one move. [AI-08]
+   */
+  if (fDistance > fPreferred * 1.05f) {
     pOut->iMoveZ = 100;
     pOut->iMoveX /= 2;
     /* Closing a long gap is what the boost is for. */
-    if (fDistance > fPreferred * 1.8f && fBoost > 0.45f)
+    if (fDistance > fPreferred * 1.5f && fBoost > 0.35f)
       pOut->bDash = true;
-  } else if (fDistance < fPreferred * 0.55f) {
+  } else if (fDistance < fPreferred * 0.40f) {
     pOut->iMoveZ = -100;
     pOut->iMoveX /= 2;
     if (fBoost > 0.6f)
       pOut->bDash = true;
   } else {
-    pOut->iMoveZ = (fDistance < fPreferred) ? -25 : 25;
+    pOut->iMoveZ = 45;
   }
 
-  /* Out of everything, or blind behind cover with only direct-fire weapons:
-   * sit down and refill, which is one of the things guard is for. * */
-  if ((!bAmmoLeft || (!bHasLine && fBoost < 0.35f))
+  /*
+   * Out of everything, or genuinely spent behind cover: sit down and refill.
+   * The boost floor is deliberately low -- a pilot that guards whenever it
+   * is merely short of gauge spends most of a fight crouched behind a box,
+   * which is what made these look like they were hiding. [AI-08]
+   */
+  if ((!bAmmoLeft || (!bHasLine && fBoost < 0.15f))
       && fDistance > fPreferred * 0.8f) {
     pOut->bGuard = true;
     pOut->iMoveX = 0;
@@ -452,12 +463,36 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
     pOut->bDash = false;
   }
 
-  /* Take the high ground now and then, or hop a wall that is in the way. */
-  if (!pOut->bGuard && fBoost > 0.7f
-      && mecha_rng_range(&pWorld->rng, 240) == 0)
-    pOut->bJump = true;
-  if (!bHasLine && fBoost > 0.5f && fDistance < fPreferred
-      && mecha_rng_range(&pWorld->rng, 90) == 0)
+  /*
+   * Take the high ground when there is some, rather than now and then.
+   *
+   * A box or a building answers the ground query at its roof height, so
+   * something to stand on is simply ground ahead that is well above the
+   * ground here and not so far above that the jump cannot reach it. Looking
+   * along the line to the target means the thing it climbs is the thing
+   * between them, which is the one worth being on top of. [AI-08]
+   */
+  if (!pOut->bGuard && !pDef->bWheeled && fBoost > 0.45f
+      && pSelf->byMove != MECHA_MOVE_JUMP
+      && pSelf->byMove != MECHA_MOVE_CANCEL) {
+    float fLook = pDef->fRadius + MECHA_AI_CLIMB_LOOK;
+    float fToX = pTarget->fX - pSelf->fX;
+    float fToZ = pTarget->fZ - pSelf->fZ;
+    float fLen = mecha_length2(fToX, fToZ);
+
+    if (fLen > 0.01f) {
+      float fAheadX = pSelf->fX + fToX / fLen * fLook;
+      float fAheadZ = pSelf->fZ + fToZ / fLen * fLook;
+      float fStep = mecha_arena_ground_height(&pWorld->arena, fAheadX,
+                                              fAheadZ, pSelf->fY)
+                    - pSelf->fGroundY;
+
+      if (fStep > MECHA_AI_CLIMB_MIN && fStep < pDef->fHeight * 1.6f)
+        pOut->bJump = true;
+    }
+  }
+  if (!bHasLine && fBoost > 0.4f && fDistance < fPreferred
+      && mecha_rng_range(&pWorld->rng, 60) == 0)
     pOut->bJump = true;
 
   /* --- evasion ---------------------------------------------------------- */

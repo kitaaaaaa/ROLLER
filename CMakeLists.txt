@@ -68,6 +68,7 @@ set(ROLLER_GAME_BASE_SOURCES
     PROJECTS/ROLLER/mecha_mode.c
     PROJECTS/ROLLER/mecha_render.c
     PROJECTS/ROLLER/mecha_sim.c
+    PROJECTS/ROLLER/mecha_sound.c
     PROJECTS/ROLLER/menu_render.c
     PROJECTS/ROLLER/menu_render_software.c
     PROJECTS/ROLLER/game_render.c

@@ -6,6 +6,7 @@
 #include "mecha_mesh.h"
 #include "mecha_render.h"
 #include "mecha_sim.h"
+#include "mecha_sound.h"
 #include "view.h"
 #include "roller.h"
 
@@ -477,6 +478,8 @@ static void mecha_mode_start_match(void)
     mecha_mode_free_camera_place();
   }
 
+  /* The briefing's music stops with the briefing. */
+  mecha_sound_match();
   s_ullResultHoldNs = 0;
   s_ullLastTimeNs = SDL_GetTicksNS();
   s_ullAccumulatorNs = 0;
@@ -506,6 +509,7 @@ static void mecha_mode_return_to_briefing(const char *szResult, bool bWin)
     g_bNoclip = false;
     noclip_camera_reset();
   }
+  mecha_sound_briefing();
   s_eScreen = MECHA_SCREEN_BRIEFING;
   s_iBriefSelection = MECHA_ROW_START;
   s_ullResultHoldNs = 0;
@@ -594,6 +598,8 @@ void mecha_mode_enter(void)
   }
 
   mecha_render_init_assets(g_pGameRenderer);
+  mecha_sound_enter();
+  mecha_sound_briefing();
 
   /* The briefing first, always. Coming straight in on --arena would
    * otherwise drop a player into a fight without ever having been told
@@ -803,6 +809,9 @@ void mecha_mode_update(void)
   else
     mecha_mode_free_camera_update();
 
+  /* After the camera: the listener stands where the frame is drawn from. */
+  mecha_sound_update(&s_World, &s_Camera);
+
   /* A decided match holds on VICTORY or DEFEAT long enough to be read, then
    * hands the player back to the briefing. The simulation keeps ticking
    * through it so the last blast plays out. */
@@ -885,6 +894,7 @@ void mecha_mode_exit(void)
     return;
 
   SDL_Log("arena: exiting");
+  mecha_sound_exit();
   /* The renderer stays: tearing it down nulls g_pGameRenderer, which is what
    * the menus and the race then reach for. [MODE-02] */
   s_bCreatedRenderer = false;

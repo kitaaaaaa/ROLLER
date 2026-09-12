@@ -36,6 +36,11 @@ void mecha_camera_reset(tMechaCamera *pCamera);
 
 /* Frames iViewMech and whatever it has locked. Call once per rendered frame,
  * before mecha_render_frame. */
+/* The camera's own axes in world space. The sound layer needs the same
+ * basis to place a machine left or right of the listener. */
+void mecha_camera_basis(const tMechaCamera *pCamera, float afRight[3],
+                        float afUp[3], float afForward[3]);
+
 void mecha_camera_update(tMechaCamera *pCamera, const tMechaWorld *pWorld,
                          int iViewMech);
 

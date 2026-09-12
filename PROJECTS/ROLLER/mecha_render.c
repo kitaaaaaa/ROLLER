@@ -529,9 +529,9 @@ void mecha_camera_update(tMechaCamera *pCamera, const tMechaWorld *pWorld,
 
 /* The camera's basis in world space. Column order matches what the software
  * renderer expects in GameRenderProjection::view: right, up, forward. */
-static void mecha_camera_basis(const tMechaCamera *pCamera,
-                               float afRight[3], float afUp[3],
-                               float afForward[3])
+void mecha_camera_basis(const tMechaCamera *pCamera,
+                        float afRight[3], float afUp[3],
+                        float afForward[3])
 {
   float fCosYaw = mecha_cos(pCamera->iYaw);
   float fSinYaw = mecha_sin(pCamera->iYaw);

@@ -1666,3 +1666,79 @@ same 1.7 m, and the maximum range works out at 261 m, which is the lock range
 The sim test that read `lance > shell * 4` was asserting a ratio rather than the
 intent; it now asserts the shell stays the slowest of the car's three weapons,
 which is the thing that must never stop being true.
+
+## SND-01 — the arena's sound reads the world, it is not told about it
+
+`mecha_sim.c` has no idea sound exists, and that is deliberate: the sim is the
+SDL-free half and `tests/mecha_sim_test.c` links it on its own. So
+`mecha_sound.c` works out what to play by looking at the world each frame rather
+than by the sim calling it.
+
+What it watches:
+
+- **Engine and skid** are loops, retuned every frame. There is nothing to
+  detect: a machine that is active has an engine.
+- **Blasts** are effect slots going from empty to full. `bActive` shadowed per
+  slot catches every explosion born since the last frame, however many ticks the
+  frame ran — which matters, because the mode runs catch-up ticks and an event
+  flag set during one of them would otherwise be missed.
+- **Collisions** are `iRamCooldown` going up, which is the sim saying a machine
+  just ran into something.
+- **Landings** are the airborne flag falling. The fall speed is read a frame
+  early: by the time the wheels are down it has already been spent.
+
+The alternative was an event mask on the mech that the sim sets and the sound
+layer clears. It would be exact, but it puts a field that only exists for sound
+into the structure the simulation is built on, and it has to survive being
+consumed by nobody when sound is off. Shadow state in the sound layer costs one
+array and nothing anywhere else.
+
+Nothing here needs a sound card: `loopsample`, `pannedsample` and `loadasample`
+all check `soundon` and `SamplePtr[]`, so with no device and no FATDATA every
+call is a no-op.
+
+## SND-02 — pan is the mixer's convention, not a guess
+
+`DIGISetPanLocation` computes `iPan / 0x8000 - 1` and hands that to the mixer,
+where `digi_pan` is documented as -1.0 full left to +1.0 full right. So 0 is
+hard left, 0x8000 is centre, 0xFFFF is hard right.
+
+That sign is worth the trouble of checking: getting it backwards puts every
+machine on the wrong side of the player, and it sounds plausible either way.
+Whiplash's own expression is `(1 - sin(getangle(...))) * 32768`, but
+`getangle(x, y)` is `atan2(y, x)` — the second argument drives the sine — while
+`mecha_atan2_angle(x, z)` is `atan2(x, z)`, where the first does. The two
+conventions cancel the minus sign, so the arena's version is
+`(1 + sin(...)) * 32768` and a machine off the camera's right pans right.
+Measured, not reasoned: a probe walked a source around the camera and read the
+numbers back.
+
+Distance attenuation is Whiplash's constant unchanged,
+`65536000 / (d^2 + 65536000)`. In arena units that is half volume at 32 m, which
+suits an arena about as well as it suited a track.
+
+## SND-03 — an engine is a pitched loop, and that is what makes a servo too
+
+Whiplash does not synthesise an engine. `enginesound()` plays one looped sample
+and rewrites its pitch and volume every frame:
+
+- pitch is `fRPMRatio * 100000 + 8192`, plus a wheelspin term, plus
+  `tsin[iEngineVibrateOffset] * (1 - health) * 10000` — which is why a damaged
+  car sounds rough, the vibration is a pitch wobble
+- volume is `258 * EngineVolume` scaled by engine state, then by distance
+- the whole thing is multiplied by a doppler factor of
+  `(listener + c) / (c - source)`
+
+The arena uses the same machinery: `MECHA_SND_PITCH_BASE` is Whiplash's 8192,
+and the span a machine rides up is its own speed over its walk speed. A walker
+gets a narrower span (`MECHA_SND_SERVO_SPAN`) than a car, which is the whole
+difference between a servo humming and an engine revving — the same sample, a
+different slice of pitch.
+
+That is the lever for weapon and servo sounds later: one sample, and the pitch
+says what it is. Nothing here needs a new asset.
+
+Skid follows the same idea. Whiplash decides a car is sliding by comparing the
+steered yaw against the one the car ended up with; the arena compares the
+machine's facing against the direction it is actually travelling, and folds the
+backwards half of the circle away so that reversing is not sliding.

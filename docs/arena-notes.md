@@ -458,3 +458,206 @@ blown sideways — wrong for something pointing straight down out of a
 jetpack. Two halves meeting down the middle, the right-hand copy mirrored,
 cost one extra quad and no overlap, so nothing is drawn twice into the same
 pixels and the painter's order has nothing to decide.
+
+---
+
+## REND-01 — the mode carries its own font
+
+ROLLER's HUD font lives in the retail sprite blocks, which the rest of this
+mode deliberately does without: mechs, arena and effects are all generated
+rather than loaded. A HUD that needed game data would be the one asset
+dependency in an otherwise self-contained mode, so the mode carries a
+five-by-seven face as a fallback. Each glyph is seven rows of five bits, most
+significant bit leftmost.
+
+`minitext.bm` is the small face the race HUD prints speed and gear with and
+is what the mode uses when it is present; `font6.bm` is the larger sprite
+face the game announces things in, and is what the title and round banners
+want. The two are not interchangeable.
+
+Two things about the retail path matter. Glyphs are indexed through
+`ascii_conv3` (or `font6_ascii` for the large face), where 255 means "no
+glyph" and costs a flat four pixels of advance. And `prt_letter` scales
+through the `scr_size` global rather than an argument, pre-multiplying the
+coordinates it is handed — so drawing at `iScale` means setting the global
+and passing coordinates that have *not* been scaled.
+
+## REND-02 — the camera does not dodge occlusion
+
+It used to: a segment trace to whatever it was looking at, and up to six
+three-metre steps upward until the line came clear. That was always eager —
+it swung the whole arena for one pillar — and it got much worse once the
+ground itself began blocking that trace, because then every hill the player
+drove behind heaved the camera into the air.
+
+Virtual-On does not move the camera for this at all. It leaves the camera
+where it belongs and turns whatever is in the way transparent, which keeps
+the frame still and tells the player exactly what is happening. That wants a
+renderer that can blend, so it is not written yet. Until it is, nothing
+happens, which is better than the wrong thing happening quickly.
+
+The floor clamp is not this and stays: keeping the camera out of the ground
+is not occlusion avoidance.
+
+## REND-03 — the chase rig scales with the machine
+
+The chase is written around a machine fourteen metres tall, which is most of
+the roster. The car is a sixth of that and would be a speck under a camera
+hung fourteen metres up, so the rig scales.
+
+Not all the way down: a car doing seventy metres a second needs to see
+further ahead than two metres of camera height gives it, and the floor clamp
+is what stops the view ending up in the bodywork.
+
+## REND-04 — the camera follows the player's heading, not the enemy's bearing
+
+It used to swing onto the bearing to the enemy at every range, so the view
+turned when the enemy moved rather than when the player did — and with the
+machine no longer squaring itself up outside knife range, the camera pointed
+somewhere the machine was not.
+
+## REND-05 — near-plane clipping keeps the polygon a quad
+
+`game_render_quad_world` accepts quads only, so a vertex behind the near
+plane is pulled forward along an edge that crosses it rather than the polygon
+being split. This is what stops a floor tile the camera is standing on from
+smearing across the screen when the rasteriser clamps its z.
+
+## REND-06 — banks are resolved before anything is built
+
+The mech mesh is the first thing to ask which banks are loaded, so answering
+with last frame's result left the car in flat paint for its first frame.
+
+The effect bank loads itself, because the first shot fired names it and the
+draw path loads whatever a quad names. The car's skin has no such trigger —
+the mesh will not name a bank it has been told is missing, and the bank stays
+missing because nothing named it — so it is asked for explicitly, and only
+when there is something in the fight to wear it.
+
+## REND-07 — how the banks load, and what the loaders get wrong
+
+Every bank is loaded by a routine the game already has; nothing here parses a
+`.DRH`. What this owns is the part those routines are careless about.
+
+Each calls `ErrorBoxExit` when its file is missing — taking the process down
+rather than returning a failure — so each is probed first, and a bank that is
+not there simply never becomes available. This matters most for
+`LoadGenericCarTextures`: on a checkout with no retail data it would kill the
+process instead of falling back, and falling back is the whole point. Every
+effect still carries a palette index, so a mode with no bank draws what it
+drew before.
+
+Each uploads through `g_pGameRenderer`, the global the race sets up, so a
+mode drawing on its own renderer gets the decompress and the sort but no
+upload. The pixels are left in a global either way, so they are handed to the
+renderer that is actually drawing.
+
+The engine's own numbering is not exposed past that table: the track bank is
+bank 0 while its tile count lives at `num_textures[19]`, and that is not a
+quirk worth spreading through the mesh.
+
+## REND-08 — the low byte means different things on different paths
+
+`POLYFLAT` takes its colour from the low byte of the surface flags and routes
+anything marked transparent through `shadow_poly`. On that path the low byte
+is a shade *level*, not a colour, and `shade_palette` holds only 16 blocks —
+so the value is masked. A bad colour is a visible bug; a bad read is not.
+
+On the textured path the low byte is a *tile index*, which is the easiest
+thing on it to get wrong: a colour left in those bits names a tile the bank
+does not have, the renderer rejects it, and the quad quietly comes out flat.
+
+`PARTIAL_TRANS` is what makes a frame a sprite rather than a black square: on
+that path index 0 is skipped instead of written, and every effect frame is
+drawn on index 0, with between a third and nine tenths of each tile
+background.
+
+## REND-09 — POLYTEX derives its own coordinates, so corner order is the API
+
+The legacy path works its texture coordinates out inside `POLYTEX` from the
+tile index and the projected polygon; the track renderer passes zeroes on
+every vertex and always has.
+
+So the order the four corners arrive in decides how the tile lies on them,
+and the arena winds its quads the other way round the face from the track.
+Nothing else in the mode noticed: this renderer rejects back faces off the
+stored normal rather than the projected winding, so a quad wound backwards
+still culls, sorts and fills correctly, and every texture it had worn —
+grass, tarmac, concrete, a plasma bolt — was near enough symmetrical to look
+right mirrored. Put lettering on one and it reads backwards.
+
+Geometry the mode builds itself is therefore handed over reversed. Geometry
+out of the game's own files is not: it arrived already reflected by the frame
+change that got it here. See [MESH-12] for the flags that decide the rest.
+
+## REND-10 — the briefing's line budget
+
+The game's smaller video mode gives this a 320x200 buffer, and at 200 pixels
+there is room for exactly twenty-five lines. Anything that does not fit is
+lost off the bottom, and the bottom is where the exit row lives.
+
+Besides the rows themselves: two lines for the double-height title, one for
+the result and a blank after it, a blank either side of the rows, the footer,
+and one more as the margin the footer's glyphs need.
+
+The controls used to be printed here, ten lines of them, which is most of why
+the rows had nowhere to grow. They are on a page of their own now — still one
+keypress away, no longer in the way.
+
+## REND-11 — the sky is DrawHorizon, and the clouds are off
+
+`DrawHorizon` paints the sky, the same routine the race uses: two flat fills
+split by a line through the projection, blue above and a haze colour below.
+The arena had a nine-band sunset gradient before this, which looked well
+enough on a still frame but was the mode inventing a sky the engine already
+had, and it could never carry clouds.
+
+What `DrawHorizon` reads, it reads from globals. Most are already written by
+the time this runs — `game_render_set_camera` and `set_projection` push
+`viewx`, the vk basis, `xbase`, `ybase`, `scr_size` and `VIEWDIST` through
+for exactly this kind of legacy path — so what is left is elevation, tilt and
+colour.
+
+The clouds are disabled. That dome is real geometry: forty quads placed ten
+million units out, in the track code's coordinate system where the up axis is
+Z rather than Y, submitted through the renderer's cloud subdivision path.
+Handing that path an arena camera makes it subdivide quads that size until
+the frame stops arriving — a run that takes a fifth of a second takes
+minutes. Getting them in wants the dome rebuilt against the arena's own scale
+and axes, rather than the basis swapped underneath it.
+
+## REND-12 — why these palette indices
+
+The names live next to the code that uses them; the palette table is where
+those indices get colours for the case where no palette has been loaded.
+
+The indices themselves were chosen by matching the intended colours against
+the retail palette, so a player with the game data sees roughly the same
+picture from their own `PALETTE.PAL` rather than whatever sits at an
+arbitrary index. That palette is mostly a grey ramp between 115 and 143 with
+saturated primaries higher up, which is why the arena reads as grey structure
+with coloured tracers. Some indices are deliberately shared — a tracer and a
+HUD accent — because the mode paints into a palette it does not own all of.
+
+The sky bands climb steadily in brightness whether resolved through the
+retail palette or the fallback: 221-230 is a dark-to-bright red ramp, 167-171
+orange, 204-207 the top of a yellow. **231 is deliberately unused.** It is
+the obvious brightest red to finish on, and it is also the low-armour
+warning: a sky matching the colour of "you are about to die" hides it.
+
+## REND-13 — the recoloured effect banks
+
+The game's plasma frames are blue and there is only one set, so every
+machine's fire came out the same colour. In a crossfire you could not tell
+whose shot was whose, which is the one thing a shot has to say.
+
+A tint is built by walking each frame's palette indices onto the nearest
+colour the palette has in the wanted hue at the same brightness, and
+uploading the result as a bank of its own — so the recolour is real pixels
+rather than a shading trick the rasteriser does not have. Index 0 stays index
+0: that is the transparent key and everything about these frames depends on
+it.
+
+Slots 20 and up are used. The engine's texture-count table only ever speaks
+for 0, 17, 18 and 19, so the rest are free for the arena to take, and the
+count is set alongside the upload.

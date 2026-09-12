@@ -31,12 +31,9 @@
 
 //-------------------------------------------------------------------------------------------------
 /*
- * ROLLER's own HUD font lives in the retail sprite blocks, which the rest of
- * this mode deliberately does without -- the mechs, the arena and the effects
- * are all generated rather than loaded. A HUD that needed game data would be
- * the one asset dependency in an otherwise self-contained mode, so the mode
- * carries its own five-by-seven face instead. Each glyph is seven rows of
- * five bits, most significant bit leftmost.
+ * The mode's own five-by-seven face, used when the retail sprite blocks are
+ * not there. Seven rows of five bits, most significant bit leftmost.
+ * [REND-01]
  */
 #define MECHA_GLYPH_W 5
 #define MECHA_GLYPH_H 7
@@ -128,34 +125,15 @@ static const uint8 s_aabyFont[][MECHA_GLYPH_H] = {
 #define MECHA_CAM_HEIGHT     14.0f
 
 /*
- * The camera does not dodge what it cannot see past.
- *
- * It used to: a segment trace to whatever it was looking at, and up to six
- * three-metre steps upward until the line came clear. That was always a
- * little eager -- it swung the whole arena for one pillar -- and it got a
- * great deal worse once the ground itself started blocking that trace,
- * because then every hill the player drove behind heaved the camera into
- * the air.
- *
- * Virtual-On does not move the camera for this at all. It leaves the
- * camera where it belongs and turns whatever is in the way transparent,
- * which keeps the frame still and tells the player exactly what is
- * happening. That wants a renderer that can blend, so it is not written
- * yet; until it is, nothing happens, which is better than the wrong thing
- * happening quickly.
- *
- * The floor clamp below is not this and stays: keeping the camera out of
- * the ground is not occlusion avoidance, it is not being underground.
+ * The camera does not dodge what it cannot see past; the right answer is to
+ * turn the obstruction transparent, which wants a renderer that can blend.
+ * The floor clamp below is not this and stays. [REND-02]
  */
 #define MECHA_CAM_FLOOR       2.5f
 /*
- * The chase is written around a machine fourteen metres tall, which is what
- * the roster mostly is. The one that is not -- a car a sixth of that -- would
- * be a speck under a camera hung fourteen metres over it, so the whole rig
- * scales with the machine it is behind. Not all the way down, though: a car
- * doing seventy metres a second needs to see further ahead of itself than
- * two metres of camera height would give it, and the floor below is what
- * stops the view ending up in the bodywork.
+ * The chase rig is written around a fourteen-metre machine and scales with
+ * whatever it is behind -- but not all the way down, or a fast car cannot
+ * see far enough ahead of itself. [REND-03]
  */
 #define MECHA_CAM_REF_HEIGHT 14.0f
 #define MECHA_CAM_MIN_SCALE   0.34f
@@ -351,17 +329,9 @@ int mecha_render_text(uint8 *pScrBuf, int iWidth, int iHeight,
     int iPen = iX;
 
     /*
-     * prt_letter scales through scr_size and pre-multiplies the coordinates
-     * it is handed by the same factor, so drawing at iScale means setting
-     * the global and passing coordinates that have not been scaled. Every
-     * position this HUD computes is a multiple of iScale, so dividing gives
-     * the original back exactly; the few that are centring arithmetic can
-     * land a pixel out, which is invisible at this size.
-     *
-     * The colour is the retail font's own -- these glyphs carry their
-     * palette with them and prt_letter has nowhere to put a tint. Colour
-     * coding on this HUD lives in the bars, which are drawn here rather
-     * than printed, so nothing that has to be read at a glance loses by it.
+     * prt_letter pre-multiplies by scr_size, so it is handed unscaled
+     * coordinates. The glyphs carry their own palette and cannot be tinted;
+     * this HUD's colour coding lives in the bars instead. [REND-01]
      */
     (void)byColour;
     screen_pointer = pScrBuf;
@@ -484,16 +454,8 @@ void mecha_camera_update(tMechaCamera *pCamera, const tMechaWorld *pWorld,
       fFocusZ = pTarget->fZ;
       fFocusY = mecha_mech_centre_height(pWorld, iTargetIdx);
     } else {
-      /*
-       * Everywhere else the camera chases the player and nothing else.
-       *
-       * It used to swing onto the bearing to the enemy at every range,
-       * which meant the view turned when the enemy moved rather than when
-       * the player did -- and with the machine no longer squaring itself
-       * up out here, the camera was pointing somewhere the machine was
-       * not. Following the player's own heading puts the view back behind
-       * the thing the player is steering.
-       */
+      /* Everywhere else the camera follows the player's own heading, so the
+       * view turns when the player does. [REND-04] */
       iWantYaw = pMech->iFacing;
       fFocusX = pMech->fX + mecha_sin(iWantYaw) * pDef->fHeight * 2.0f;
       fFocusZ = pMech->fZ + mecha_cos(iWantYaw) * pDef->fHeight * 2.0f;
@@ -647,11 +609,8 @@ static int mecha_sort_compare(const void *pLeft, const void *pRight)
 
 /*
  * Pulls any vertex behind the near plane forward along an edge that crosses
- * it. This keeps the polygon a quad -- which is all game_render_quad_world
- * accepts -- and it is what stops a floor tile the camera is standing on
- * from smearing across the screen when the rasteriser clamps its z.
- *
- * Returns false when the whole quad is behind the camera.
+ * it, keeping the polygon a quad. False when the whole quad is behind the
+ * camera. [REND-05]
  */
 static bool mecha_clip_near(float afWorld[4][3], const float afViewZ[4],
                             float fNear)
@@ -729,15 +688,9 @@ static void mecha_render_scene(GameRenderer *pRenderer,
     iScratchCapacity = MECHA_QUAD_CAPACITY;
 
   /*
-   * Which banks are there, before anything is built rather than after: the
-   * mech mesh is the first thing that asks, so answering it with last
-   * frame's result meant the car spent its first frame in flat paint.
-   *
-   * The effect bank loads itself, because the first shot fired names it and
-   * the draw path loads whatever a quad names. The car's skin has no such
-   * trigger -- the mesh will not name a bank it has been told is missing,
-   * and the bank stays missing because nothing named it -- so it is asked
-   * for here, and only when there is something in the fight to wear it.
+   * Which banks are there, before anything is built rather than after. The
+   * car's skin is asked for explicitly because nothing else would name it.
+   * [REND-06]
    */
   mecha_mesh_set_sprites(mecha_render_sprites_active());
   for (iMech = 0; iMech < MECHA_MAX_MECHS; iMech++) {
@@ -832,14 +785,9 @@ static void mecha_render_scene(GameRenderer *pRenderer,
       aVerts[iVert].v = 0.0f;
     }
 
-    /* POLYFLAT takes its colour from the low byte of the surface flags, and
-     * routes anything marked transparent through shadow_poly -- which is
-     * exactly the translucent pass mech shadows and ground dust want.
-     *
-     * For that path the low byte is a shade LEVEL, not a colour: shadow_poly
-     * indexes shade_palette[256 * level], and shade_palette holds only 16
-     * such blocks. The mask keeps a mislabelled quad from reading past the
-     * end of it -- a bad colour is a visible bug, a bad read is not. */
+    /* POLYFLAT routes transparent quads through shadow_poly, where the low
+     * byte is a shade level rather than a colour. Masked, because a bad
+     * colour is a visible bug and a bad read is not. [REND-08] */
     iSurfaceFlags = (int)pQuad->byPalette;
     if (pQuad->byFlags & MECHA_QUAD_SHADOW)
       iSurfaceFlags = SURFACE_FLAG_TRANSPARENT | (iSurfaceFlags & 0x0F);
@@ -854,16 +802,9 @@ static void mecha_render_scene(GameRenderer *pRenderer,
         && mecha_bank_ensure(pRenderer, (int)pQuad->byTexBank)
         && mecha_bank_has_tile((int)pQuad->byTexBank, (int)pQuad->byTile)) {
       /*
-       * Which tile of the bank to draw lives in the low byte of the surface
-       * type -- it is not a palette index here, which is the one thing about
-       * this path that is easy to get wrong: a colour left in those bits
-       * names a tile the bank does not have, the renderer rejects it, and
-       * the quad quietly comes out flat instead of textured.
-       *
+       * The low byte is a tile index here, not a palette index.
        * PARTIAL_TRANS is what makes the frame a sprite rather than a black
-       * square. On that path index 0 is skipped instead of written, and
-       * every one of these frames is drawn on index 0 -- between a third and
-       * nine tenths of each tile is background.
+       * square. [REND-08]
        */
       int iSprite = ((int)pQuad->byTile & SURFACE_MASK_TEXTURE_INDEX)
                   | SURFACE_FLAG_APPLY_TEXTURE;
@@ -879,24 +820,13 @@ static void mecha_render_scene(GameRenderer *pRenderer,
         iSprite |= SURFACE_FLAG_PARTIAL_TRANS;
 
       /*
-       * The legacy path works its own texture coordinates out inside
-       * POLYTEX, from the tile index and the projected polygon -- the track
-       * renderer passes zeroes on every vertex and always has.
+       * POLYTEX derives its own texture coordinates from the projected
+       * polygon, so the order the corners arrive in is the whole interface.
+       * The mode's own geometry is wound the opposite way from the track's
+       * and is handed over reversed. [REND-09]
        *
-       * Which means the order the four corners arrive in is what decides
-       * how the tile lies on them, and the arena winds its quads the other
-       * way round the face from the way the track winds its own. Nothing
-       * else in the mode ever noticed: this renderer rejects back faces off
-       * the stored normal rather than off the projected winding, so a quad
-       * wound backwards still culls, sorts and fills correctly, and every
-       * texture it had worn until now -- grass, tarmac, concrete, a plasma
-       * bolt -- was near enough symmetrical to look right mirrored. Put
-       * lettering on one and it reads backwards. Handing them over
-       * reversed is what puts the artwork the right way round.
-       *
-       * Rasterise directly rather than subdividing, for the same reason the
-       * flat geometry does: subdivision exists for large perspective
-       * surfaces, and a billboard is neither.
+       * Rasterised directly rather than subdivided: subdivision exists for
+       * large perspective surfaces, and a billboard is not one.
        */
       GameRenderVertex aTexVerts[4];
       int iCorner;
@@ -1304,27 +1234,14 @@ static const char *const s_aaszControls[][2] = {
 #define MECHA_BRIEF_VALUE_CHARS 24
 
 /*
- * Lines the screen occupies besides the rows, which vary: two for the
- * double-height title, one for the result and a blank after it, a blank
- * either side of the rows, the footer, and one more as the margin the
- * footer's own glyphs need.
- *
- * The budget matters because the game's smaller video mode gives this a
- * 320x200 buffer, and at 200 pixels there is room for exactly twenty-five
- * lines. Anything that does not fit is lost off the bottom, and the bottom
- * is where the exit row lives. The controls used to be printed here, ten
- * lines of them, which is most of why the rows had nowhere to grow.
+ * Lines the screen occupies besides the rows. The budget is tight: 320x200
+ * leaves room for twenty-five lines, and the exit row is at the bottom.
+ * [REND-10]
  */
 #define MECHA_BRIEF_FIXED_LINES 7
 
-/*
- * The controls, on a page of their own.
- *
- * They used to be printed down the middle of the briefing, where they were
- * ten lines a returning player had already read and the setup rows had
- * nowhere to grow past. Here they are still one keypress away and no longer
- * in the way of anything.
- */
+/* The controls, on a page of their own rather than ten lines down the
+ * middle of the briefing. [REND-10] */
 void mecha_render_controls(uint8 *pScrBuf, int iWidth, int iHeight)
 {
   int iScale = iWidth / 320;
@@ -1474,16 +1391,8 @@ void mecha_render_briefing(const tMechaBriefing *pBrief, uint8 *pScrBuf,
 /* The game's own HUD font */
 
 /*
- * minitext.bm is the small font the race HUD prints its speed and gear with,
- * and it is what this mode's HUD should be using when it is there. The
- * built-in five-by-seven stays as the fallback, because the arena has to
- * come up with no retail data at all.
- *
- * Two things about the retail path are worth knowing. Glyphs are indexed
- * through ascii_conv3, where 255 means "no glyph" and costs a fixed four
- * pixels of advance; and prt_letter scales through the scr_size global
- * rather than through an argument, so drawing at twice size means setting
- * scr_size and handing it coordinates that have not been scaled yet.
+ * minitext.bm when it is there, the built-in face when it is not -- the
+ * arena has to come up with no retail data at all. [REND-01]
  */
 static bool s_bFontTried;
 
@@ -1495,14 +1404,8 @@ static bool mecha_font_ensure(GameRenderer *pRenderer)
     return false;
   s_bFontTried = true;
 
-  /*
-   * Two fonts, because the game has two and they are not
-   * interchangeable. minitext.bm is the restricted set the race HUD prints
-   * driver names and speed with -- right for a row of small labels, wrong
-   * for anything that has to carry a screen. font6.bm is the larger sprite
-   * face the game announces things in, and it is what the title and the
-   * round banners want.
-   */
+  /* Two fonts, because the game has two and they are not interchangeable:
+   * minitext.bm for small labels, font6.bm to carry a screen. [REND-01] */
   s_pFont = (tBlockHeader *)try_load_picture("minitext.bm");
   s_pFontBig = (tBlockHeader *)try_load_picture("font6.bm");
   if (pRenderer) {
@@ -1517,12 +1420,8 @@ static bool mecha_font_ensure(GameRenderer *pRenderer)
 }
 
 /*
- * Advance of one character in the large font, unscaled.
- *
- * prt_letter reaches for a different mapping depending on the font type it
- * is handed -- font6_ascii for the large face, ascii_conv3 for the small one
- * -- so measuring has to use the same table the drawing will. The 255
- * sentinel means no glyph and costs a flat four either way.
+ * Advance of one character in the large font, unscaled. Measuring has to use
+ * the same mapping the drawing will. [REND-01]
  */
 static int mecha_font_big_advance(char cChar)
 {
@@ -1548,36 +1447,16 @@ static int mecha_font_advance(char cChar)
 /* Effect sprites */
 
 /*
- * The game's own explosion, flame and smoke frames.
- *
- * They live in the generic texture bank -- gentex.drh -- as 64x64 indexed
- * tiles, and the engine already knows how to decompress that bank and upload
- * it as a 256-pixel-wide atlas. So the mode does not parse anything: it
- * checks the file is there, lets the existing loader do the work, and keeps
- * the handle.
- *
- * The check matters. LoadGenericCarTextures calls ErrorBoxExit when the file
- * is missing, which on a checkout with no retail data would take the process
- * down instead of falling back -- and falling back is the whole point. Every
- * effect still carries a palette index, so a mode with no bank draws exactly
- * what it drew before.
+ * The game's own explosion, flame and smoke frames, out of gentex.drh. The
+ * mode parses nothing: it probes the file, lets the existing loader work,
+ * and keeps the handle. The probe matters, because the loader exits the
+ * process on a missing file. [REND-07]
  */
 /*
- * The banks this mode draws from, and how each one gets loaded.
- *
- * Every one is loaded by a routine the game already has, which is the point:
- * nothing here parses a .DRH. What this owns is the part those routines are
- * careless about. Each calls ErrorBoxExit when its file is missing -- taking
- * the process down rather than returning a failure -- so each is probed
- * first, and a bank that is not there simply never becomes available. And
- * each uploads through g_pGameRenderer, the global the race sets up, so a
- * mode drawing on its own renderer gets the decompress and the sort but no
- * upload; the pixels are left in a global either way, so they are handed to
- * the renderer that is actually drawing.
- *
- * The engine's own numbering is not exposed past this table. The track bank
- * is bank 0 while its tile count lives at num_textures[19], and that is not
- * a quirk worth spreading through the mesh.
+ * The banks this mode draws from, each loaded by a routine the game already
+ * has. What this owns is probing first, and re-uploading to the renderer
+ * that is actually drawing. The engine's own numbering stops here.
+ * [REND-07]
  */
 typedef struct
 {
@@ -1595,22 +1474,9 @@ static const char *const s_szWorldFile = "track1.drh";
 #define MECHA_CARTEX_CAR  CAR_ZIZIN
 
 /*
- * The recoloured effect banks.
- *
- * The game's plasma frames are blue, and there is only one set of them, so
- * every machine's fire came out the same colour: in a crossfire you could
- * not tell whose shot was whose, which is the one thing a shot has to say.
- *
- * A tint is built by walking each of the frames' palette indices onto the
- * nearest colour the palette has in the wanted hue at the same brightness,
- * and uploading the result as a bank of its own -- so the recolour is real
- * pixels rather than a shading trick the rasteriser does not have. Index 0
- * stays index 0: that is the transparent key, and everything about these
- * frames depends on it.
- *
- * Slots 20 and up: the engine's texture-count table only ever speaks for 0,
- * 17, 18 and 19, so the ones above that are free for the arena to take, and
- * the count for them is set alongside the upload.
+ * The recoloured effect banks, so a crossfire says whose shot is whose. Real
+ * pixels rather than a shading trick, walked onto the nearest colour of the
+ * wanted hue. Index 0 stays the transparent key. [REND-13]
  */
 #define MECHA_TINT_SLOT_FIRST 20
 /* Enough rows to hold every frame up to the last plasma one. */
@@ -1919,18 +1785,9 @@ bool mecha_render_car_skin_active(void)
 /* Sky */
 
 /*
- * The sky is the game's own: DrawHorizon paints it, the same routine the
- * race uses. It is two flat fills split by a line through the projection --
- * blue above, a haze colour below -- and then the cloud dome on top. The
- * arena had a nine-band sunset gradient before this, which looked well
- * enough on a still frame but was the mode inventing a sky the engine
- * already had, and it could never carry clouds.
- *
- * What DrawHorizon reads, it reads from globals. Most of them the renderer
- * has already written by the time this runs -- game_render_set_camera and
- * set_projection push viewx, the vk basis, xbase, ybase, scr_size and
- * VIEWDIST through for exactly this kind of legacy path -- so what is left
- * is the elevation, the tilt, and the colour.
+ * The sky is the game's own DrawHorizon. What it reads, it reads from
+ * globals, most of which the renderer has already written; what is left is
+ * elevation, tilt and colour. [REND-11]
  */
 
 /* Below the horizon. The floor covers most of it, but not the gap past the
@@ -1970,17 +1827,9 @@ static void mecha_render_sky(uint8 *pScrBuf, int iWidth, int iHeight,
   HorizonColour[0] = MECHA_SKY_GROUND;
   front_sec = 0;
 
-  /*
-   * Clouds off, for now, and this is why. DrawHorizon finishes by drawing
-   * the cloud dome, and that dome is real geometry: forty quads placed ten
-   * million units out, in the coordinate system the track code works in --
-   * where the up axis is Z, not Y -- and submitted through the renderer's
-   * cloud subdivision path. Handing that path an arena camera makes it
-   * subdivide quads that size until the frame stops arriving; a run that
-   * takes a fifth of a second takes minutes. Getting them in wants the
-   * dome rebuilt against the arena's own scale and axes rather than the
-   * basis swapped underneath it, which is a piece of work in its own right.
-   */
+  /* Clouds off: the dome is forty quads ten million units out in the track
+   * code's axes, and the subdivision path never finishes on them.
+   * [REND-11] */
   uiSavedTex = textures_off;
   textures_off |= TEX_OFF_CLOUDS;
   DrawHorizon(pScrBuf);
@@ -2063,20 +1912,9 @@ void mecha_render_frame(GameRenderer *pRenderer, const tMechaWorld *pWorld,
 /* Palette */
 
 /*
- * Every index the arena mode paints with, and the colour it means.
- *
- * The names live next to the code that uses them (mecha_arena.c,
- * mecha_defs.c, mecha_mesh.c and the HUD block above); this is where those
- * indices get colours for the case where no palette has been loaded at all.
- *
- * The indices themselves were chosen by matching these intended colours
- * against the retail palette, so that a player who has the game data sees
- * roughly the same picture from their own PALETTE.PAL rather than whatever
- * happened to sit at an arbitrary index. That palette is mostly a grey ramp
- * between 115 and 143 with saturated primaries higher up, which is why the
- * arena reads as grey structure with coloured tracers. Some indices are
- * deliberately shared -- a tracer and a HUD accent -- because the mode is
- * painting into a palette it does not own the whole of.
+ * Every index the arena paints with, and the colour it means when no palette
+ * has been loaded. The indices were matched against the retail palette, so
+ * a player with the game data sees roughly the same picture. [REND-12]
  */
 static const struct
 {
@@ -2121,16 +1959,9 @@ static const struct
   { 249,  0, 34,  0 },   /* meadow grass, the lighter check             */
   { 252,  0, 48,  0 },   /* canopy                                      */
 
-  /*
-   * The sky, deepest first. These indices are not arbitrary: in the game's
-   * own PALETTE.PAL 221-230 is a dark-to-bright red ramp, 167-171 a
-   * dark-to-bright orange one and 204-207 the top of a yellow one, so the
-   * band list below climbs steadily in brightness whether it is resolved
-   * through the retail palette or through this table. 231 was the obvious
-   * brightest red to finish the reds on and is deliberately not used: it is
-   * the low-armour warning, and a sky that matches the colour of "you are
-   * about to die" is a sky that hides it.
-   */
+  /* The sky, deepest first. The bands climb in brightness through the
+   * retail palette as well as this one. 231 is deliberately skipped: it is
+   * the low-armour warning. [REND-12] */
   { 221, 15,  3, 10 },   /* zenith                                      */
   { 224, 27,  4,  9 },
   { 227, 39,  6,  8 },

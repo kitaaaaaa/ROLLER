@@ -1,13 +1,15 @@
 # ROLLER-X
 
 An experimental build of https://github.com/FatalDecomp/ROLLER created with Claude
-## Arena mode
 
-ROLLER-X ships an arena mode: a 3D mecha duel on the same software
-rasteriser, reached with `--arena`. It is an original game built on the engine's
+## Arena mode
+ROLLER-X ships an arena mode: a 3D mecha duel in the software
+rasteriser, reached with `--arena`. It is a clone of a certain mid-90s giant robot fighting game built on the engine's
 renderer and math rather than a track, and it needs no extra assets -- the
-machines, the arenas and the HUD font are all generated at runtime. See
+machines, projectiles, arenas and the HUD font are all generated at runtime and all textures come from Whiplash's FATDATA. See
 [docs/arena-mode.md](./docs/arena-mode.md) for the controls and the layout.
+
+## 
 
 ```bash
 zig build run -- --arena

@@ -26,6 +26,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -744,6 +745,68 @@ int main(int argc, char **argv)
                            FRAME_W, FRAME_H, s_aQuads, MECHA_QUAD_CAPACITY);
         histogram(s_aFrame, aiCounts);
         dump_frame(szOutDir, "arena_guncar.png");
+
+        /*
+         * And the same car walked round, so its painted panels can be
+         * looked at rather than guessed about. The body is retail artwork
+         * on a hand-made plan and the only way to tell whether a tile
+         * reads the right way up is to see it -- from one three-quarter
+         * shot most of the car is turned away, and the gun covers the
+         * glass.
+         *
+         * The car is parked nose along +Z with the gun swung off to one
+         * side, and the camera is walked round it at a fixed radius. Yaw
+         * zero looks along +Z, so a camera sitting in direction fPhi from
+         * the car has to look back the other way.
+         */
+        {
+            static const struct { const char *szName; int iPhi; } aOrbit[] = {
+                /*
+                 * Named for what the camera is looking at, which is the
+                 * opposite side of the car from where it stands: the nose
+                 * points +Z, so the camera out at +Z sees the front of it.
+                 * Flanks are named for the axis they face -- which of them
+                 * is the driver's right is not something the geometry
+                 * says, and it is not worth guessing at.
+                 */
+                { "arena_car_front.png",           0 },
+                { "arena_car_front_xpos.png",     45 },
+                { "arena_car_side_xpos.png",      90 },
+                { "arena_car_rear_xpos.png",     135 },
+                { "arena_car_rear.png",          180 },
+                { "arena_car_rear_xneg.png",     225 },
+                { "arena_car_side_xneg.png",     270 },
+                { "arena_car_front_xneg.png",    315 },
+            };
+            const float fRadius = MECHA_M(9.0f);
+            const float fHeight = MECHA_M(2.6f);
+            int iShot;
+
+            s_World.aMechs[0].iFacing = 0;
+            s_World.aMechs[0].iAimPitch = 0;
+            /* Park the foe straight off the nose so the gun lies along
+             * the car rather than across the glass. */
+            s_World.aMechs[1].fX = s_World.aMechs[0].fX;
+            s_World.aMechs[1].fZ = s_World.aMechs[0].fZ + MECHA_M(90.0f);
+
+            for (iShot = 0; iShot < (int)(sizeof(aOrbit) / sizeof(aOrbit[0]));
+                 iShot++) {
+                float fPhi = (float)aOrbit[iShot].iPhi * 3.14159265f / 180.0f;
+
+                s_Camera.fX = s_World.aMechs[0].fX + fRadius * sinf(fPhi);
+                s_Camera.fY = s_World.aMechs[0].fY + fHeight;
+                s_Camera.fZ = s_World.aMechs[0].fZ + fRadius * cosf(fPhi);
+                s_Camera.iYaw = MECHA_DEG(aOrbit[iShot].iPhi + 180);
+                s_Camera.iPitch = -MECHA_DEG(9);
+                s_Camera.bSettled = true;
+                mecha_render_frame(pRenderer, &s_World, &s_Camera, 0, s_aFrame,
+                                   FRAME_W, FRAME_H, s_aQuads,
+                                   MECHA_QUAD_CAPACITY);
+                dump_frame(szOutDir, aOrbit[iShot].szName);
+            }
+            printf("   ZIZIN KLR 330: walked round in %d shots\n",
+                   (int)(sizeof(aOrbit) / sizeof(aOrbit[0])));
+        }
         printf("   %s: %d colours, wearing %s\n",
                mecha_def_get(iCar)->szName, distinct_colours(aiCounts),
                mecha_render_car_skin_active() ? "its own skin"

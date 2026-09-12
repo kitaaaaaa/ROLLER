@@ -39,6 +39,12 @@ static bool s_bCarSkin = false;
  * and what firing does to it.
  */
 #define MECHA_ZIZIN_ROOF_FACING 0.55f
+
+/* Polygons of the Zizin plan whose artwork reads backwards under the
+ * body's usual orientation: the windscreen, and the rear quarter window
+ * on the passenger side. Indices into xzizin_pols, which is fixed data. */
+#define MECHA_ZIZIN_WINDSCREEN     3
+#define MECHA_ZIZIN_QUARTER_GLASS 10
 #define MECHA_GUN_YAW_LIMIT   MECHA_DEG(40)
 #define MECHA_GUN_ROLL        MECHA_DEG(84)
 /* How far across the bonnet it points on top of wherever it is aiming. */
@@ -1253,8 +1259,20 @@ static void mecha_add_zizin_body(tMechaQuadList *pList,
        */
       uint32_t uiTex = mecha_zizin_surface(iPoly);
 
-      mecha_quads_add(pList, afVert, (uint8_t)(uiTex & 0xFFu),
-                      MECHA_QUAD_TWO_SIDED | MECHA_QUAD_TEX_FLIP);
+      /*
+       * Two panels of the fifty want their artwork the other way round:
+       * the windscreen, and the passenger-side rear quarter window. The
+       * body is hand-made and its polygons are not wound to one
+       * convention, so this is a list of which ones, not a rule -- every
+       * attempt to derive it from the geometry got some other panel wrong.
+       */
+      uint8_t byFlags = MECHA_QUAD_TWO_SIDED | MECHA_QUAD_TEX_FLIP;
+
+      if (iPoly == MECHA_ZIZIN_WINDSCREEN
+          || iPoly == MECHA_ZIZIN_QUARTER_GLASS)
+        byFlags &= (uint8_t)~MECHA_QUAD_TEX_FLIP;
+
+      mecha_quads_add(pList, afVert, (uint8_t)(uiTex & 0xFFu), byFlags);
       if ((uiTex & SURFACE_FLAG_APPLY_TEXTURE) != 0)
         mecha_tag_texture(pList, MECHA_TEX_CAR, (int)(uiTex & 0xFFu));
     } else {

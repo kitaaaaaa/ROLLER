@@ -30,7 +30,7 @@
  * per cell. Coarse on purpose. [ARENA-04] */
 /* The array size, not any arena's own division -- each carries its own
  * count in iTerrainCells, and a bigger arena needs more. */
-#define MECHA_TERRAIN_CELLS 64
+#define MECHA_TERRAIN_CELLS 80
 #define MECHA_TERRAIN_NODES (MECHA_TERRAIN_CELLS + 1)
 /* What an arena gets when it does not ask for anything else. */
 #define MECHA_TERRAIN_CELLS_DEFAULT 12
@@ -561,7 +561,13 @@ typedef struct
 {
   float fX, fZ;             /* centre on the ground plane */
   float fHalfX, fHalfZ;
+  /* How tall it stands above the ground it is on, and where that ground is.
+   * The mesh always drew a box from the terrain under it while the collision
+   * read the height as absolute; on level ground those agree and on a slope
+   * they do not. fBaseY is filled in once the arena's ground is finished, and
+   * both sides use it. [ARENA-18] */
   float fHeight;
+  float fBaseY;
   uint8_t byKind;           /* eMechaPropKind */
   uint8_t byPalette;
   uint8_t byTrimPalette;

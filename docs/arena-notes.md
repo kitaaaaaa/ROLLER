@@ -1840,53 +1840,68 @@ After the Unreal Tournament map, built from a model of it the player supplied.
 Two keeps at the ends of two causeways, with a hole between the causeways on
 each side of the middle.
 
-- Five hundred metres end to end, the bases at the low ends and the middle 25 m
-  above them, so leaving a base is uphill and falling back to it is downhill.
-- Two lanes, 22 m wide, one either side of the hole. They touch only at the top
-  of the climb, where a platform joins them: that crossing is the one way from
-  one lane to the other without going back to a base. The hole is 28 m across,
-  which no machine on the roster clears from a standing lane -- measured, and
-  left that way. It is a hazard, not a shortcut.
-- A keep on each base: four walls with a pier in the middle of the one facing
-  the causeway, so there are two doorways and each opens onto a lane. A single
-  gate on the centreline opened onto the hole between them, and the machines
-  walked straight out into it -- half the field was gone inside ten seconds.
-  Open to the sky, because a box here is solid from the ground up and a roof
-  would be a lid with nothing able to get under it.
-- One block partway up each climb, on opposite lanes, for the only cover on the
-  run.
+- Seven hundred metres of arena, the keeps 504 m apart, at 6 cm to the unit.
+- The lanes are about 30 m wide and they bow: out to 47 m off the axis a quarter
+  of the way along, back in to 26 m at the middle, where they all but touch.
+  That pinch is the one crossing between them.
+- The bases sit at the low ends and the lanes climb 32 m to the middle, so
+  leaving a base is uphill and falling back to it is downhill.
+- A keep on each base, 90 m square, walls 34 m high. Four walls with a pier in
+  the middle of the one facing the causeway, so there are two doorways and each
+  opens onto a lane. A single gate on the centreline opened onto the hole
+  between them and half the field walked into it inside ten seconds. Open to the
+  sky, because a box here is solid from the ground up and a roof would be a lid
+  with nothing able to get under it.
+- Nothing out on the run. The original has no cover there either -- what it has
+  is a crest you cannot see over -- and a block standing near a lane's edge puts
+  a wall of terrain quads inside its own footprint, which is a mesh with no
+  right answer.
 
 Machines start inside the keeps, which is how the original starts a match.
-Across eight duels not one machine went over the edge; in a sixteen-way one or
-two do, and the rest are shot.
 
-## ARENA-17 — reading the model
+## ARENA-17 — reading the model, and what it says
 
-The model is Z-up, and the first reading of it took Y for up. Everything
-followed from that: the causeway came out as one bowed strip rather than two,
-the climb came out as a W, and the plan was measured across the map's height
-instead of its width.
+The model is Z-up, and the first reading took Y for up. Everything followed from
+that: the causeway came out as one bowed strip rather than two, the climb came
+out as a W, and the plan was measured across the map's height instead of its
+width.
 
 What settles it is the area of the flat faces. Sorting every triangle by which
-axis its normal points along and totalling the area: +Z has the most of it and
--Z the least, which is a model with floors facing up and its underside cut away.
-Y-up would have put nearly equal area on +Y and -Y, which is what walls do, not
-floors.
+axis its normal points along and totalling the area, +Z has the most and -Z the
+least -- floors facing up, underside cut away. Y-up would have put nearly equal
+area on +Y and -Y, which is what walls do, not floors.
 
-Read the right way up, at 4.5 cm to the unit:
+Read the right way up, the arena is built from a station every 15 m along the
+run. Each station carries where the centre of each lane sits, how wide it is
+there, and how high, straight off the model; `mecha_arena_lane` interpolates all
+three between stations, so a run of them follows the curve instead of stepping
+along it. The table is in `mecha_arena.c` beside the arena it builds.
 
-- two lanes, each 480 to 540 units wide, centred about 500 units either side of
-  the axis
-- the hole between them, widest about a third of the way in from each base and
-  closing to nothing at the middle, where the lanes meet
-- the floor of a base at about -1030, the middle of the causeway at -465: the
-  climb is 570 units, and it is a climb from both ends
-- bases about 2800 by 3400 units, centres 8000 apart
+Two things the measurements do not give and the arena has to:
 
-The arena keeps the proportions and rounds the shapes: the lanes are straight
-rather than bowed and the holes rectangular rather than lens shaped, which reads
-the same from inside a cockpit and costs a table of measurements nobody would be
-able to check.
+- **The crossing.** Where the lanes pinch, the model leaves six metres between
+  them, which is narrower than the machines that have to use it. It is widened
+  to something two of them can pass on: the crossing is the only way from one
+  lane to the other, and one nobody can take is a hole with extra steps.
+- **The last stretch.** The measurements stop 24 m short of the bases, because
+  that is where the lanes merge into them and the sampling can no longer tell
+  one from the other. The arena runs the end station out to the base itself.
+
+## ARENA-18 — a box knows what it is standing on
+
+`mecha_mesh_arena` has always drawn a box up from the terrain under its centre.
+`mecha_arena_ground_height` read the same `fHeight` as an absolute Y. On level
+ground those agree, which is why it never mattered; on a slope the drawn box and
+the solid box are in different places.
+
+It showed up as soon as cover stood on a climbing causeway: passing the
+collision an absolute height made the mesh draw the box at the terrain height
+twice over.
+
+`tMechaObstacle` now carries `fBaseY`, filled in at the end of
+`mecha_arena_init` where the ground is finished, and the mesh, the ground query,
+the cylinder push and the segment trace all read it. Box heights are plain
+heights above their own ground again, everywhere.
 
 ## SIM-24 — a spawn stands on the ground, not under it
 

@@ -139,13 +139,16 @@ static void mecha_arena_void(tMechaArena *pArena, float fDepth)
 //-------------------------------------------------------------------------------------------------
 
 /*
- * A lane of ground running along X, sloping between two heights. Anything
- * off its width is left as it was, which on this kind of arena is nothing at
- * all -- so two lanes painted apart from each other leave a hole down the
- * middle without anybody having to carve one. [ARENA-15]
+ * A length of lane. The centre, the width and the height are all given at
+ * both ends and interpolated between, so a run of these follows a curve
+ * instead of stepping along it -- which is what a causeway measured off a
+ * real map needs. Anything off the lane is left as it was, so two lanes
+ * painted apart from each other leave a hole between them without anybody
+ * carving one. [ARENA-15]
  */
 static void mecha_arena_lane(tMechaArena *pArena, float fX0, float fX1,
-                             float fZ, float fHalfZ, float fY0, float fY1)
+                             float fZ0, float fHalf0, float fY0,
+                             float fZ1, float fHalf1, float fY1)
 {
   int iCells = mecha_arena_cells(pArena);
   float fCell = pArena->fHalfExtent * 2.0f / (float)iCells;
@@ -155,18 +158,23 @@ static void mecha_arena_lane(tMechaArena *pArena, float fX0, float fX1,
 
   if (fCell <= 0.0f || fabsf(fSpan) < 1e-3f)
     return;
-  for (iRow = 0; iRow <= iCells; iRow++) {
-    for (iCol = 0; iCol <= iCells; iCol++) {
-      float fNodeX = -pArena->fHalfExtent + fCell * (float)iCol;
-      float fNodeZ = -pArena->fHalfExtent + fCell * (float)iRow;
-      float fT;
+  for (iCol = 0; iCol <= iCells; iCol++) {
+    float fNodeX = -pArena->fHalfExtent + fCell * (float)iCol;
+    float fT = (fNodeX - fX0) / fSpan;
+    float fZ;
+    float fHalf;
+    float fY;
 
-      if (fabsf(fNodeZ - fZ) > fHalfZ)
-        continue;
-      fT = (fNodeX - fX0) / fSpan;
-      if (fT < 0.0f || fT > 1.0f)
-        continue;
-      pArena->afNode[iRow][iCol] = fY0 + (fY1 - fY0) * fT;
+    if (fT < 0.0f || fT > 1.0f)
+      continue;
+    fZ = fZ0 + (fZ1 - fZ0) * fT;
+    fHalf = fHalf0 + (fHalf1 - fHalf0) * fT;
+    fY = fY0 + (fY1 - fY0) * fT;
+    for (iRow = 0; iRow <= iCells; iRow++) {
+      float fNodeZ = -pArena->fHalfExtent + fCell * (float)iRow;
+
+      if (fabsf(fNodeZ - fZ) <= fHalf)
+        pArena->afNode[iRow][iCol] = fY;
     }
   }
 }
@@ -585,24 +593,42 @@ void mecha_arena_init(tMechaArena *pArena, int iArenaIdx)
      * drive into rather than one they would wear.
      */
     /*
-     * Measured off the model the player supplied, at 4.5 cm to the unit.
-     * Two lanes run the length of the map, one either side of a hole, and
-     * they touch only at the very middle. The bases sit at the low ends and
-     * the lanes climb the whole way in, so leaving a base is uphill and
-     * falling back to it is downhill. [ARENA-17]
+     * Measured off the model the player supplied, at 6 cm to the unit: one
+     * station every 15 m along the run, each giving where the centre of each
+     * lane sits, how wide it is there, and how high. The lanes bulge out to
+     * either side a quarter of the way along and pinch back in at the
+     * middle, where they all but touch -- that pinch is the one crossing
+     * between them, and everywhere else what lies between is the hole.
+     * [ARENA-17]
      */
-    const float fRun = 180.0f * m;      /* base centre to the middle */
-    const float fBaseX = 63.0f * m;     /* and half a base, each way */
-    const float fBaseZ = 76.0f * m;
-    const float fNeck = 117.0f * m;     /* where the causeway leaves a base */
-    const float fLaneZ = 25.0f * m;     /* how far out each lane runs */
-    const float fLaneW = 11.0f * m;     /* and half its width */
-    const float fCrest = 25.0f * m;     /* the middle stands above the bases */
-    const float fJoin = 20.0f * m;      /* half the platform joining them */
-    const float fKeep = 34.0f * m;      /* half a keep, wall to wall */
-    const float fSkin = 2.5f * m;       /* half the thickness of a wall */
-    const float fTall = 30.0f * m;      /* how high the walls stand */
-    const float fGate = 14.0f * m;      /* half the pier the doors flank */
+    static const float aafLane[17][5] = {
+      /*  A centre  A half   B centre  B half   height */
+      { -33.0f, 15.0f,  35.4f, 15.0f,  3.2f },   /* -120 m, off the base */
+      { -37.8f, 15.0f,  40.2f, 15.0f,  9.4f },
+      { -43.2f, 15.6f,  45.0f, 15.0f, 15.3f },
+      { -47.4f, 15.0f,  48.0f, 15.6f, 21.2f },
+      { -42.6f, 15.0f,  41.4f, 17.4f, 25.0f },
+      { -37.2f, 15.6f,  34.8f, 19.2f, 28.6f },
+      { -31.8f, 16.2f,  28.8f, 21.6f, 32.1f },
+      { -26.4f, 16.8f,  22.2f, 23.4f, 35.5f },
+      { -26.4f, 16.8f,  21.0f, 24.6f, 35.3f },   /* the middle */
+      { -30.6f, 16.2f,  28.2f, 22.2f, 31.1f },
+      { -34.8f, 15.6f,  36.0f, 20.4f, 26.8f },
+      { -39.0f, 15.0f,  43.2f, 18.0f, 22.4f },
+      { -43.2f, 14.4f,  49.8f, 15.0f, 18.0f },
+      { -41.4f, 13.8f,  46.2f, 13.8f, 13.6f },
+      { -38.4f, 14.4f,  40.2f, 13.8f,  9.2f },
+      { -34.8f, 14.4f,  33.6f, 14.4f,  4.8f },
+      { -31.8f, 15.0f,  36.6f, 24.6f,  2.1f },   /* +120 m, onto the base */
+    };
+    const float fStation = 15.0f * m;   /* how far apart those stations are */
+    const float fRun = 252.0f * m;      /* base centre to the middle */
+    const float fBaseX = 108.0f * m;    /* and half a base, each way */
+    const float fBaseZ = 95.0f * m;
+    const float fKeep = 45.0f * m;      /* half a keep, wall to wall */
+    const float fSkin = 3.0f * m;       /* half the thickness of a wall */
+    const float fTall = 34.0f * m;      /* how high the walls stand */
+    const float fPier = 20.0f * m;      /* half the pier the doorways flank */
     /* Walls meet at the corners without touching: two quads in one place
      * have nothing to decide which is in front. [MESH-11] */
     const float fJoint = 0.5f * m;
@@ -610,11 +636,11 @@ void mecha_arena_init(tMechaArena *pArena, int iArenaIdx)
     int iStep;
 
     pArena->byShape = MECHA_ARENA_OPEN;
-    pArena->fHalfExtent = 250.0f * m;
+    pArena->fHalfExtent = 350.0f * m;
     pArena->fWallHeight = 0.0f;
-    pArena->iTerrainCells = 64;
-    pArena->iFloorTiles = 48;
-    pArena->fSkirt = 240.0f * m;
+    pArena->iTerrainCells = 80;
+    pArena->iFloorTiles = 56;
+    pArena->fSkirt = 260.0f * m;
     pArena->fKillY = -30.0f * m;
     pArena->byFloorPalette = MECHA_PAL_FLOOR_B;
     pArena->byGridPalette = MECHA_PAL_GRID;
@@ -623,36 +649,70 @@ void mecha_arena_init(tMechaArena *pArena, int iArenaIdx)
     pArena->byWallTile = MECHA_TILE_CONCRETE;
 
     /*
-     * Nothing, and then the map painted back onto it: a base at each end,
-     * two lanes between them, and a platform where they meet in the middle.
-     * What is left between the lanes is the hole -- one on each side of that
-     * platform, which is the shape of the original and the reason a fight
-     * here is fought along one side or the other. [ARENA-16]
+     * Nothing, and then the map painted back onto it: a base at each end and
+     * the two lanes between them, laid a station at a time so they follow
+     * the curve they were measured on. The lanes climb the whole way in, so
+     * leaving a base is uphill and falling back to it is downhill.
+     * [ARENA-16]
      */
-    mecha_arena_void(pArena, 260.0f * m);
+    mecha_arena_void(pArena, 300.0f * m);
     mecha_arena_pad(pArena, -fRun, 0.0f, fBaseX, fBaseZ, 0.0f);
     mecha_arena_pad(pArena, fRun, 0.0f, fBaseX, fBaseZ, 0.0f);
     for (iStep = 0; iStep < 16; iStep++) {
-      float fX0 = -fNeck + 2.0f * fNeck * (float)iStep / 16.0f;
-      float fX1 = -fNeck + 2.0f * fNeck * (float)(iStep + 1) / 16.0f;
-      float fY0 = fCrest * (1.0f - fabsf(fX0) / fNeck);
-      float fY1 = fCrest * (1.0f - fabsf(fX1) / fNeck);
+      const float *pA = aafLane[iStep];
+      const float *pB = aafLane[iStep + 1];
+      float fX0 = (-8.0f + (float)iStep) * fStation;
+      float fX1 = (-7.0f + (float)iStep) * fStation;
 
-      mecha_arena_lane(pArena, fX0, fX1, -fLaneZ, fLaneW, fY0, fY1);
-      mecha_arena_lane(pArena, fX0, fX1, fLaneZ, fLaneW, fY0, fY1);
+      mecha_arena_lane(pArena, fX0, fX1,
+                       pA[0] * m, pA[1] * m, pA[4] * m,
+                       pB[0] * m, pB[1] * m, pB[4] * m);
+      mecha_arena_lane(pArena, fX0, fX1,
+                       pA[2] * m, pA[3] * m, pA[4] * m,
+                       pB[2] * m, pB[3] * m, pB[4] * m);
     }
-    /* And the crossing at the top of the climb, the only way from one lane
-     * to the other without jumping the hole. */
-    mecha_arena_pad(pArena, 0.0f, 0.0f, fJoin, fLaneZ + fLaneW, fCrest);
 
     /*
-     * The keeps, one to a base. Four walls apiece with the one facing the
-     * causeway split either side of a gateway, so each is a hollow building
-     * a machine drives into rather than a block it drives round.
-     *
-     * Open to the sky, because a box here is solid from the ground up: a
-     * roof would be a lid with no way under it. What the walls give instead
-     * is a courtyard to fight in and a wall top to fight from. [ARENA-16]
+     * And the last stretch at each end, from where the measurements stop out
+     * to the base itself. Without it the causeway ends 24 m short of the
+     * ground it is supposed to arrive on.
+     */
+    {
+      const float *pIn = aafLane[0];
+      const float *pOut = aafLane[16];
+      float fEdge = fRun - fBaseX;
+
+      mecha_arena_lane(pArena, -fEdge, -8.0f * fStation,
+                       pIn[0] * m, pIn[1] * m, 0.0f,
+                       pIn[0] * m, pIn[1] * m, pIn[4] * m);
+      mecha_arena_lane(pArena, -fEdge, -8.0f * fStation,
+                       pIn[2] * m, pIn[3] * m, 0.0f,
+                       pIn[2] * m, pIn[3] * m, pIn[4] * m);
+      mecha_arena_lane(pArena, 8.0f * fStation, fEdge,
+                       pOut[0] * m, pOut[1] * m, pOut[4] * m,
+                       pOut[0] * m, pOut[1] * m, 0.0f);
+      mecha_arena_lane(pArena, 8.0f * fStation, fEdge,
+                       pOut[2] * m, pOut[3] * m, pOut[4] * m,
+                       pOut[2] * m, pOut[3] * m, 0.0f);
+    }
+
+    /*
+     * Where the lanes pinch together the measurements leave six metres
+     * between them, which is narrower than the machines that have to use
+     * it. The crossing is widened to something two of them can pass on --
+     * it is the only way from one lane to the other, and a crossing nobody
+     * can take is a hole with extra steps. [ARENA-17]
+     */
+    mecha_arena_pad(pArena, 0.0f, -7.0f * m, 14.0f * m, 8.0f * m,
+                    aafLane[8][4] * m);
+
+    /*
+     * The keeps, one to a base. Four walls apiece, with a pier in the middle
+     * of the one facing the causeway so there is a doorway either side of it
+     * -- and the doorways come out where the lanes are. A single gate on the
+     * centreline would open onto the hole between them, which is where the
+     * machines went. Open to the sky, because a box here is solid from the
+     * ground up and a roof would be a lid with no way under it. [ARENA-16]
      */
     for (iEnd = 0; iEnd < 2; iEnd++) {
       float fCentre = iEnd ? fRun : -fRun;
@@ -672,35 +732,22 @@ void mecha_arena_init(tMechaArena *pArena, int iArenaIdx)
                             MECHA_PAL_BLOCK, MECHA_PAL_BLOCK_TOP);
         mecha_arena_face_stone(pArena);
       }
-      /*
-       * One pier in the middle of the wall facing the causeway, which leaves
-       * a doorway either side of it -- and the doorways come out where the
-       * lanes are. A single gate on the centreline would have opened onto
-       * the hole between them, which is where the machines went. [ARENA-16]
-       */
-      mecha_arena_add_box(pArena, fFront, 0.0f, fSkin, fGate, fTall,
+      mecha_arena_add_box(pArena, fFront, 0.0f, fSkin, fPier, fTall,
                           MECHA_PAL_BLOCK, MECHA_PAL_BLOCK_TOP);
       mecha_arena_face_stone(pArena);
     }
 
-    /* One block partway up each climb, on opposite lanes, for the only cover
-     * on the run. Box heights are absolute, so a block on a slope carries
-     * the ground under it as well as its own height. */
-    for (iEnd = 0; iEnd < 2; iEnd++) {
-      float fAt = iEnd ? 68.0f * m : -68.0f * m;
-      float fZ = iEnd ? -fLaneZ : fLaneZ;
-      float fUnder = mecha_arena_terrain_height(pArena, fAt, fZ);
-
-      mecha_arena_add_box(pArena, fAt, fZ, 4.5f * m, 4.5f * m,
-                          fUnder + 9.0f * m,
-                          MECHA_PAL_BLOCK, MECHA_PAL_BLOCK_TOP);
-      mecha_arena_face_stone(pArena);
-    }
+    /*
+     * No cover out on the run. The original has none either -- what it has
+     * is a crest you cannot see over and two lanes that only meet at it --
+     * and a block sitting near a lane's edge puts a wall of terrain quads
+     * inside its own footprint, which is a mesh nobody can sort. [ARENA-17]
+     */
 
     /* Inside the keeps, which is where this map starts a match. */
     pArena->bySpawnShape = MECHA_SPAWN_BASES;
     pArena->fSpawnHalfX = fRun;
-    pArena->fSpawnHalfZ = 17.0f * m;
+    pArena->fSpawnHalfZ = 30.0f * m;
     break;
   }
 
@@ -751,6 +798,23 @@ void mecha_arena_init(tMechaArena *pArena, int iArenaIdx)
     mecha_arena_add_box(pArena, 68.4f * m, 68.4f * m, 8.0f * m, 8.0f * m,
                         16.0f * m, MECHA_PAL_BLOCK, MECHA_PAL_BLOCK_TOP);
     break;
+  }
+
+  /*
+   * Every box now learns what it is standing on, here where the ground is
+   * finished. The mesh has always drawn a box up from the terrain under its
+   * centre while the collision read the same height as absolute: the two
+   * agree on level ground and part company on a slope. One value, read by
+   * both. [ARENA-18]
+   */
+  {
+    int iBox;
+
+    for (iBox = 0; iBox < pArena->iObstacleCount; iBox++) {
+      tMechaObstacle *pBox = &pArena->aObstacles[iBox];
+
+      pBox->fBaseY = mecha_arena_terrain_height(pArena, pBox->fX, pBox->fZ);
+    }
   }
 }
 
@@ -975,10 +1039,10 @@ float mecha_arena_ground_height(const tMechaArena *pArena,
       continue;
     /* Below the lip means the box is a wall from here, not a floor. Letting
      * it read as floor is what would teleport a walking mech onto the roof. */
-    if (fFeetY < pBox->fHeight - MECHA_ARENA_STEP_UP)
+    if (fFeetY < pBox->fBaseY + pBox->fHeight - MECHA_ARENA_STEP_UP)
       continue;
-    if (pBox->fHeight > fBest)
-      fBest = pBox->fHeight;
+    if (pBox->fBaseY + pBox->fHeight > fBest)
+      fBest = pBox->fBaseY + pBox->fHeight;
   }
   return fBest;
 }

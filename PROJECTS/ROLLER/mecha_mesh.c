@@ -696,7 +696,7 @@ void mecha_mesh_arena(tMechaQuadList *pList, const tMechaArena *pArena)
 
   for (i = 0; i < pArena->iObstacleCount; i++) {
     const tMechaObstacle *pBox = &pArena->aObstacles[i];
-    float fBase = mecha_arena_terrain_height(pArena, pBox->fX, pBox->fZ);
+    float fBase = pBox->fBaseY;   /* what the collision stands it on too */
 
     switch (pBox->byKind) {
     case MECHA_PROP_TREE: {

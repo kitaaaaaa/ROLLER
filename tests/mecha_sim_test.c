@@ -6545,41 +6545,55 @@ static int test_the_causeway_map_is_a_causeway(void)
     CHECK(strcmp(arena.szName, "FACING WORLDS") == 0);
     CHECK(arena.byShape == MECHA_ARENA_OPEN);
 
-    /* Both lanes run the length of the map, and both of them climb: the
-     * middle stands above the bases, so leaving a base is uphill and
-     * falling back to it is downhill. [ARENA-17] */
+    /*
+     * Both lanes run the length of the map and both of them climb: the
+     * middle stands above the bases, so leaving a base is uphill and falling
+     * back to it is downhill. The lanes bow, so they are followed by the
+     * same stations they were built from. [ARENA-17]
+     */
     {
-        float fMid = mecha_arena_ground_height(&arena, 0.0f, MECHA_M(25.0f),
-                                               fHigh);
-        float fEnd = mecha_arena_ground_height(&arena, MECHA_M(110.0f),
-                                               MECHA_M(25.0f), fHigh);
+        static const float afLaneZ[9] = {
+            -33.0f, -43.2f, -42.6f, -31.8f, -26.4f,
+            -34.8f, -43.2f, -38.4f, -31.8f
+        };
+        float fLow = 0.0f;
+        float fTop = 0.0f;
+        int i;
 
-        printf("   the lane climbs %.0f m from the base to the crest\n",
-               (fMid - fEnd) / MECHA_METRE);
-        CHECK(fMid > fEnd + MECHA_M(15.0f));
-        for (fX = -MECHA_M(110.0f); fX <= MECHA_M(110.0f); fX += MECHA_M(10.0f)) {
-            CHECK(mecha_arena_ground_height(&arena, fX, MECHA_M(25.0f), fHigh)
-                  > -MECHA_M(1.0f));
-            CHECK(mecha_arena_ground_height(&arena, fX, -MECHA_M(25.0f), fHigh)
-                  > -MECHA_M(1.0f));
+        for (i = 0; i < 9; i++) {
+            float fAt = MECHA_M(-120.0f + 30.0f * (float)i);
+            float fGround = mecha_arena_ground_height(&arena, fAt,
+                                                      MECHA_M(afLaneZ[i]),
+                                                      fHigh);
+
+            CHECK(fGround > -MECHA_M(1.0f));
+            if (i == 0)
+                fLow = fGround;
+            if (i == 4)
+                fTop = fGround;
         }
+        printf("   the lane climbs %.0f m from the base to the crest\n",
+               (fTop - fLow) / MECHA_METRE);
+        CHECK(fTop > fLow + MECHA_M(20.0f));
     }
 
     /*
-     * And there is a hole between the lanes on each side of the middle. Not
+     * And there is a hole between the lanes, either side of the middle. Not
      * a pit flag -- a pit kills a machine standing on one, which is being
      * deleted rather than falling -- but ground far below the kill plane, so
      * a machine that goes in falls. [ARENA-15]
      */
-    for (fX = MECHA_M(30.0f); fX <= MECHA_M(95.0f); fX += MECHA_M(5.0f)) {
+    for (fX = MECHA_M(45.0f); fX <= MECHA_M(95.0f); fX += MECHA_M(5.0f)) {
         CHECK(mecha_arena_ground_height(&arena, fX, 0.0f, fHigh) < arena.fKillY);
         CHECK(mecha_arena_ground_height(&arena, -fX, 0.0f, fHigh) < arena.fKillY);
         CHECK((mecha_arena_surface(&arena, fX, 0.0f) & MECHA_SURF_PIT) == 0);
     }
-    /* The two lanes meet at the top of the climb, and nowhere else. */
-    CHECK(mecha_arena_ground_height(&arena, 0.0f, 0.0f, fHigh) > MECHA_M(20.0f));
+    /* The lanes pinch together at the top of the climb, and that crossing is
+     * the only way between them. [ARENA-17] */
+    CHECK(mecha_arena_ground_height(&arena, 0.0f, -MECHA_M(7.0f), fHigh)
+          > MECHA_M(25.0f));
     /* Nor is there anything off the outer side of either lane. */
-    for (fZ = MECHA_M(60.0f); fZ <= MECHA_M(200.0f); fZ += MECHA_M(10.0f)) {
+    for (fZ = MECHA_M(80.0f); fZ <= MECHA_M(140.0f); fZ += MECHA_M(10.0f)) {
         CHECK(mecha_arena_ground_height(&arena, 0.0f, fZ, fHigh) < arena.fKillY);
         CHECK(mecha_arena_ground_height(&arena, 0.0f, -fZ, fHigh) < arena.fKillY);
     }
@@ -6589,7 +6603,7 @@ static int test_the_causeway_map_is_a_causeway(void)
      * wall facing the causeway, and solid wall everywhere else.
      */
     {
-        const float fKeep = MECHA_M(180.0f);
+        const float fKeep = MECHA_M(252.0f);
         const float fEye = MECHA_M(8.0f);    /* head height in the courtyard */
 
         CHECK(mecha_arena_ground_height(&arena, -fKeep, 0.0f, fHigh)
@@ -6597,19 +6611,19 @@ static int test_the_causeway_map_is_a_causeway(void)
         CHECK(mecha_arena_ground_height(&arena, fKeep, 0.0f, fHigh)
               > -MECHA_M(1.0f));
         /* In through a doorway, which is where a lane arrives... */
-        CHECK(!mecha_arena_trace_segment(&arena, -MECHA_M(140.0f), fEye,
-                                         -MECHA_M(25.0f), -fKeep, fEye,
-                                         -MECHA_M(25.0f), NULL, NULL, NULL));
-        CHECK(!mecha_arena_trace_segment(&arena, MECHA_M(140.0f), fEye,
-                                         MECHA_M(25.0f), fKeep, fEye,
-                                         MECHA_M(25.0f), NULL, NULL, NULL));
+        CHECK(!mecha_arena_trace_segment(&arena, -MECHA_M(190.0f), fEye,
+                                         -MECHA_M(33.0f), -fKeep, fEye,
+                                         -MECHA_M(33.0f), NULL, NULL, NULL));
+        CHECK(!mecha_arena_trace_segment(&arena, MECHA_M(190.0f), fEye,
+                                         MECHA_M(33.0f), fKeep, fEye,
+                                         MECHA_M(33.0f), NULL, NULL, NULL));
         /* ...and not through the pier between them, which is what stops a
          * machine walking out of the gate into the hole. [ARENA-16] */
-        CHECK(mecha_arena_trace_segment(&arena, -MECHA_M(140.0f), fEye, 0.0f,
+        CHECK(mecha_arena_trace_segment(&arena, -MECHA_M(190.0f), fEye, 0.0f,
                                         -fKeep, fEye, 0.0f, NULL, NULL, NULL));
-        CHECK(mecha_arena_trace_segment(&arena, -fKeep, fEye, MECHA_M(60.0f),
+        CHECK(mecha_arena_trace_segment(&arena, -fKeep, fEye, MECHA_M(80.0f),
                                         -fKeep, fEye, 0.0f, NULL, NULL, NULL));
-        CHECK(mecha_arena_trace_segment(&arena, fKeep, fEye, -MECHA_M(60.0f),
+        CHECK(mecha_arena_trace_segment(&arena, fKeep, fEye, -MECHA_M(80.0f),
                                         fKeep, fEye, 0.0f, NULL, NULL, NULL));
     }
 
@@ -6637,7 +6651,7 @@ static int test_the_causeway_map_is_a_causeway(void)
                fX0 / MECHA_METRE, fZ0 / MECHA_METRE,
                fX1 / MECHA_METRE, fZ1 / MECHA_METRE);
         /* One in each keep. */
-        CHECK(mecha_length2(fX1 - fX0, fZ1 - fZ0) > MECHA_M(300.0f));
+        CHECK(mecha_length2(fX1 - fX0, fZ1 - fZ0) > MECHA_M(450.0f));
         CHECK(fX0 * fX1 < 0.0f);
     }
 
@@ -6654,7 +6668,7 @@ static int test_the_causeway_map_is_a_causeway(void)
 
         start_duel(&world, iIdx, 0, 0, 0x5A1Du, 1);
         memset(aInputs, 0, sizeof(aInputs));
-        world.aMechs[0].fX = MECHA_M(60.0f);      /* straight over a hole */
+        world.aMechs[0].fX = MECHA_M(70.0f);      /* straight over a hole */
         world.aMechs[0].fZ = 0.0f;
         world.aMechs[0].fY = MECHA_M(2.0f);
         world.aMechs[0].fVelY = 0.0f;

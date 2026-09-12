@@ -1081,7 +1081,7 @@ static int test_guard_turns_melee_aside(void)
         switch (iMeleeSlot) {
         case MECHA_SLOT_LEFT:   aInputs[0].bFireLeft = true; break;
         case MECHA_SLOT_CENTER: aInputs[0].bFireCenter = true; break;
-        default:                aInputs[0].bFireRight = true; break;
+        default:                aInputs[0].bFireLeft = true; break;
         }
         mecha_sim_tick(&world, aInputs, 2);
         aInputs[0].bFireLeft = false;
@@ -3926,6 +3926,87 @@ static int test_a_cambered_launch_rolls_the_car(void)
  * Reverse steers the other way round, and nothing else does: a brake at
  * speed is not reverse, and neither is a backwards slide out of a drift.
  */
+/*
+ * Firing across an enemy turns the body, not the travel. A machine crossing
+ * in front of someone and pulling a trigger keeps going the way it was
+ * going: the shoulders come round to aim, the burst does not.
+ */
+static int test_firing_turns_the_body_not_the_travel(void)
+{
+    tMechaWorld world;
+    tMechaInput aInputs[2];
+    int iLegs = -1;
+    int iFacingBefore;
+    int iFacingAfter;
+    float fDirX;
+    float fDirZ;
+    float fDot;
+    int i;
+
+    for (i = 0; i < mecha_def_count(); i++)
+        if (!mecha_def_get(i)->bWheeled) {
+            iLegs = i;
+            break;
+        }
+    CHECK(iLegs >= 0);
+
+    start_duel(&world, 0, iLegs, iLegs, 0xC405u, 1);
+    memset(aInputs, 0, sizeof(aInputs));
+    CHECK(clear_runway(&world, 0));
+
+    /* Enemy straight ahead in +Z; the machine faces +X, so dashing forward
+     * takes it square across them. */
+    world.aMechs[1].fX = world.aMechs[0].fX;
+    world.aMechs[1].fZ = world.aMechs[0].fZ + MECHA_M(40.0f);
+    world.aMechs[0].iFacing = MECHA_ANGLE_QUARTER;
+    world.aMechs[0].iStickYaw = MECHA_ANGLE_QUARTER;
+    world.aMechs[0].byLock = MECHA_LOCK_HELD;
+    world.aMechs[0].iTargetIdx = 1;
+
+    aInputs[0].iMoveZ = 100;
+    aInputs[0].bDash = true;
+    mecha_sim_tick(&world, aInputs, 2);
+    aInputs[0].bDash = false;
+    CHECK(world.aMechs[0].byMove == MECHA_MOVE_DASH);
+
+    fDirX = world.aMechs[0].fVelX;
+    fDirZ = world.aMechs[0].fVelZ;
+    {
+        float fLen = mecha_length2(fDirX, fDirZ);
+        CHECK(fLen > 0.0f);
+        fDirX /= fLen;
+        fDirZ /= fLen;
+    }
+    iFacingBefore = world.aMechs[0].iFacing;
+
+    /* Now shoot, holding the same stick, and stay inside the burst. */
+    aInputs[0].bFireLeft = true;
+    for (i = 0; i < 8 && world.aMechs[0].byMove == MECHA_MOVE_DASH; i++)
+        mecha_sim_tick(&world, aInputs, 2);
+    iFacingAfter = world.aMechs[0].iFacing;
+
+    {
+        float fNowX = world.aMechs[0].fVelX;
+        float fNowZ = world.aMechs[0].fVelZ;
+        float fLen = mecha_length2(fNowX, fNowZ);
+
+        CHECK(fLen > 0.0f);
+        fDot = (fDirX * fNowX + fDirZ * fNowZ) / fLen;
+    }
+    printf("   firing across: body turned %d degrees, travel held %.3f\n",
+           abs(mecha_angle_delta(iFacingBefore, iFacingAfter)) * 360
+             / MECHA_ANGLE_FULL, fDot);
+
+    /* The shoulders came round to aim. */
+    CHECK(abs(mecha_angle_delta(iFacingBefore, iFacingAfter))
+          > MECHA_DEG(10));
+    /* The travel is the one it left on. */
+    CHECK(fDot > 0.99f);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static int test_only_reverse_swaps_the_steering(void)
 {
     tMechaWorld world;
@@ -6238,7 +6319,7 @@ static int test_lobbed_shots_reach_their_target(void)
     run_ticks(&world, aInputs, 2, 4);
 
     fArmourBefore = world.aMechs[1].fArmour;
-    aInputs[0].bFireRight = true;
+    aInputs[0].bFireLeft = true;
     mecha_sim_tick(&world, aInputs, 2);
     memset(aInputs, 0, sizeof(aInputs));
     run_ticks(&world, aInputs, 2, MECHA_TICK_HZ * 4);
@@ -6525,6 +6606,8 @@ int main(void)
           test_a_cambered_launch_rolls_the_car },
         { "machines are solid to each other",
           test_machines_are_solid_to_each_other },
+        { "firing turns the body not the travel",
+          test_firing_turns_the_body_not_the_travel },
         { "only reverse swaps the steering",
           test_only_reverse_swaps_the_steering },
         { "a spread is a cone not a fan",

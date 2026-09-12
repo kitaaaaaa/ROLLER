@@ -436,6 +436,11 @@ typedef struct
   /* While this runs the machine squares itself up on its lock whatever the
    * range. Set by the moves that are supposed to put the enemy back in
    * front of you -- a jump cancel, and firing while boosting or airborne. */
+  /*
+   * The heading the stick is read against, which is the machine's own
+   * except while a move is swinging the body onto its lock. [SIM-21]
+   */
+  int   iStickYaw;
   int   iRecentreTicks;
 
   /* Angular error added to the firing solution, in the shared 14-bit

@@ -110,6 +110,10 @@
  * enemy instead: a car is small, fast and rarely pointing where it is going.
  * [REND-03]
  */
+/* How much of the usual camera lift is kept once the swing pivots on the
+ * middle of the machine rather than on its feet. [REND-14] */
+#define MECHA_CAM_CLOSE_LIFT 0.45f
+
 #define MECHA_CAM_CAR_RANGE    1.5f
 
 /* How long a move that re-centres holds the machine on its lock: a move,

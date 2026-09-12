@@ -1501,3 +1501,36 @@ square root of the index — which fills the circle evenly and puts the first
 one straight down the middle.
 
 The half-angle is unchanged; only the arrangement inside it is.
+
+## SIM-21 — the body turns to aim, the travel stays the player's
+
+The stick is body-relative. Firing off a boost or out of the air swings the
+machine onto its lock, so a machine crossing in front of its enemy and
+pulling a trigger had "left" quietly become a different direction in the
+world — and since the airborne and walking velocities are driven straight
+from the stick, the whole burst came round with the shoulders.
+
+The stick is now read against `iStickYaw`, the heading the player last chose.
+It tracks the facing normally and is held while a recentre is swinging the
+body. The body turns to aim; the travel is the player's.
+
+Two things came out of this that were wrong before:
+
+- **The recentre was only counted down when the machine had a lock.** A jump
+  sets it regardless, so a machine with nothing locked carried it for the
+  rest of the round — which, among other things, kept the air dash at a
+  quarter of its speed and let it sink five metres over a burst. It now runs
+  down unconditionally.
+- **A melee swing still drags the machine into it**, deliberately: the lunge
+  *is* the attack, and it sets the dash direction from the swing. That is the
+  one case where firing moves the travel.
+
+## REND-14 — the close camera pivots on the machine, not on its feet
+
+At knife range the camera swings round to look along the lock. Orbiting the
+machine's origin puts the pivot at its feet, so the body is carried across
+the frame and tipped as the camera comes round. Pivoting on the middle of the
+machine keeps it where it is on screen and turns it in place.
+
+The usual camera lift is scaled back once the pivot has moved up, or the
+view ends up looking down on the fight from the height of two offsets stacked.

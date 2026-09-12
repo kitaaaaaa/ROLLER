@@ -410,6 +410,8 @@ void mecha_camera_update(tMechaCamera *pCamera, const tMechaWorld *pWorld,
   float fBack;
   float fWantX;
   float fWantY;
+  float fPivotY;
+  bool  bClose = false;
   float fWantZ;
   float fGround;
   float fFlat;
@@ -440,8 +442,9 @@ void mecha_camera_update(tMechaCamera *pCamera, const tMechaWorld *pWorld,
             + (MECHA_CAM_BACK_FAR - MECHA_CAM_BACK_NEAR)
               * mecha_clampf(fRange / (90.0f * MECHA_METRE), 0.0f, 1.0f);
 
-    if (fRange <= MECHA_CLOSE_QUARTERS
-                  * (pDef->bWheeled ? MECHA_CAM_CAR_RANGE : 1.0f)) {
+    bClose = fRange <= MECHA_CLOSE_QUARTERS
+                       * (pDef->bWheeled ? MECHA_CAM_CAR_RANGE : 1.0f);
+    if (bClose) {
       /*
        * Knife range: look along the lock and centre the enemy. This is the
        * one distance where the two machines are close enough that framing
@@ -472,9 +475,21 @@ void mecha_camera_update(tMechaCamera *pCamera, const tMechaWorld *pWorld,
                       MECHA_CAM_MIN_SCALE, 1.0f);
   fBack *= MECHA_METRE * fRig;
 
+  /*
+   * The swing is about the machine itself, not about the point it stands
+   * on. Orbiting the origin puts the pivot at the feet, so a camera coming
+   * round at knife range carries the body across the frame and tips it as
+   * it goes; pivoting on the middle of the machine keeps it where it is on
+   * screen and turns it in place, which is what a lock-on camera is for.
+   * [REND-14]
+   */
+  fPivotY = bClose ? mecha_mech_centre_height(pWorld, iViewMech)
+                   : pMech->fY;
+
   fWantX = pMech->fX - mecha_sin(iWantYaw) * fBack;
   fWantZ = pMech->fZ - mecha_cos(iWantYaw) * fBack;
-  fWantY = pMech->fY + MECHA_CAM_HEIGHT * MECHA_METRE * fRig;
+  fWantY = fPivotY + MECHA_CAM_HEIGHT * MECHA_METRE * fRig
+           * (bClose ? MECHA_CAM_CLOSE_LIFT : 1.0f);
 
   if (!pCamera->bSettled) {
     pCamera->fX = fWantX;

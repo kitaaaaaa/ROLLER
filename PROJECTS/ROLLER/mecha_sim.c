@@ -769,6 +769,7 @@ static float mecha_stick_direction(const tMechaMech *pMech,
   float fForwardZ;
   float fRightX;
   float fRightZ;
+  int   iRef;
 
   *pfDirX = 0.0f;
   *pfDirZ = 0.0f;
@@ -780,8 +781,17 @@ static float mecha_stick_direction(const tMechaMech *pMech,
     fMag = 1.0f;
   }
 
-  fForwardX = mecha_sin(pMech->iFacing);
-  fForwardZ = mecha_cos(pMech->iFacing);
+  /*
+   * Read against the heading the player last chose, not against the one the
+   * machine is being swung to. Firing off a boost turns the body onto its
+   * lock, and the stick is body-relative -- so a machine crossing in front
+   * of its enemy and pulling a trigger had "left" quietly become a
+   * different direction in the world and took its whole burst round with
+   * it. The body turns to aim; the travel is the player's. [SIM-21]
+   */
+  iRef = pMech->iRecentreTicks > 0 ? pMech->iStickYaw : pMech->iFacing;
+  fForwardX = mecha_sin(iRef);
+  fForwardZ = mecha_cos(iRef);
   fRightX = fForwardZ;
   fRightZ = -fForwardX;
 
@@ -861,11 +871,20 @@ static void mecha_update_facing(tMechaWorld *pWorld, int iMechIdx,
       pMech->iFacing = mecha_angle_approach(pMech->iFacing, iBearing,
                                             iMaxStep);
     }
-    if (pMech->iRecentreTicks > 0)
-      pMech->iRecentreTicks--;
   } else {
     pMech->iAimPitch = 0;
   }
+
+  /*
+   * The recentre runs down whether or not there is a lock to follow -- a
+   * jump sets it and a machine with nothing locked would otherwise carry it
+   * for the rest of the round. While it runs, the heading the stick is read
+   * against is held where the player left it. [SIM-21]
+   */
+  if (pMech->iRecentreTicks > 0)
+    pMech->iRecentreTicks--;
+  else
+    pMech->iStickYaw = pMech->iFacing;
 
   /* Manual turn rides on top, for shaking a lock loose or for lining one up
    * again once it has gone. */
@@ -3031,6 +3050,7 @@ static void mecha_reset_mech_for_round(tMechaWorld *pWorld, int iMechIdx,
   pMech->iLockSlipTicks = 0;
   pMech->iFreeTurnTicks = 0;
   pMech->iRecentreTicks = 0;
+  pMech->iStickYaw = pMech->iFacing;
 
   for (i = 0; i < MECHA_WEAPON_SLOTS; i++) {
     /* Magazines are per slot, not per stance: the standing loadout is what a
@@ -3367,6 +3387,7 @@ int mecha_sim_add_mech(tMechaWorld *pWorld, int iDefIdx,
   pMech->iLockSlipTicks = 0;
   pMech->iFreeTurnTicks = 0;
   pMech->iRecentreTicks = 0;
+  pMech->iStickYaw = pMech->iFacing;
     pMech->iLastFiredSlot = -1;
     pMech->fArmour = mecha_def_get(pMech->byDefIdx)->fArmour;
     pWorld->iMechCount++;

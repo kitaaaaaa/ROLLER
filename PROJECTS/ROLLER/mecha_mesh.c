@@ -37,9 +37,9 @@ static bool s_bCarSkin = false;
 #define MECHA_GUN_YAW_LIMIT   MECHA_DEG(40)
 /* Where the mount sits on the car -- out over the right wing, forward of
  * the screen -- and how long the gun is against the car's own length. */
-#define MECHA_GUN_MOUNT_X     1.02f
+#define MECHA_GUN_MOUNT_X     0.825f
 #define MECHA_GUN_MOUNT_Y     0.66f
-#define MECHA_GUN_MOUNT_Z     0.85f
+#define MECHA_GUN_MOUNT_Z     1.03f
 #define MECHA_GUN_LENGTH      0.27f
 /* How far across the bonnet it points on top of wherever it is aiming. */
 #define MECHA_GUN_ACROSS      MECHA_DEG(9)
@@ -1209,6 +1209,7 @@ static void mecha_add_zizin_gun(tMechaQuadList *pList,
                   : 0.0f;
   int iYaw = mecha_clampi(mecha_angle_delta(pMech->iFacing, iAimYaw),
                           -MECHA_GUN_YAW_LIMIT, MECHA_GUN_YAW_LIMIT);
+  tMechaPose mount;
   tMechaPose gun;
   /* The whole weapon, nose to backplate. A heavy machine gun is a little
    * over a quarter the length of the car it is bolted to. */
@@ -1224,10 +1225,18 @@ static void mecha_add_zizin_gun(tMechaQuadList *pList,
    * whole thing back and tips the muzzle up as the recovery runs down.
    * [MESH-13]
    */
-  mecha_pose_child(&gun, pCar,
+  /*
+   * The mount is bolted to the car and the gun turns on it, so they are two
+   * poses rather than one: the pylon is built from the mount and does not
+   * move when the gun tracks, which is what a pintle looks like. The recoil
+   * shove belongs to the gun for the same reason.
+   */
+  mecha_pose_child(&mount, pCar,
                    pDef->fRadius * MECHA_GUN_MOUNT_X,
                    fMount,
-                   pDef->fRadius * MECHA_GUN_MOUNT_Z - fGun * 0.18f * fKick,
+                   pDef->fRadius * MECHA_GUN_MOUNT_Z,
+                   0, 0, 0);
+  mecha_pose_child(&gun, &mount, 0.0f, 0.0f, -fGun * 0.18f * fKick,
                    iYaw - MECHA_GUN_ACROSS,
                    -iAimPitch + (int)((float)MECHA_GUN_KICK_PITCH * fKick),
                    0);
@@ -1247,7 +1256,7 @@ static void mecha_add_zizin_gun(tMechaQuadList *pList,
 
     if (fDrop < fBore)
       fDrop = fBore;
-    mecha_add_box(pList, &gun, 0.0f, -fDrop * 0.5f, -fGun * 0.04f,
+    mecha_add_box(pList, &mount, 0.0f, -fDrop * 0.5f, -fGun * 0.04f,
                   fBore * 0.90f, fDrop * 0.5f, fBore * 1.30f,
                   byTrim, byTrim, 0);
   }

@@ -419,6 +419,11 @@ typedef struct
    * on the hold, and the AI produces the same held-button struct a pad does,
    * so the previous frame's state has to live with the mech. */
   bool  abFireHeld[MECHA_WEAPON_SLOTS];
+  /* An outer trigger waiting to see whether the other one is coming: the
+   * two together are the centre weapon. byPairMask is 1 for left, 2 for
+   * right. [SIM-23] */
+  int   iPairTicks;
+  uint8_t byPairMask;
   bool  bJumpHeld;
   bool  bDashHeld;
   bool  bGuardHeld;

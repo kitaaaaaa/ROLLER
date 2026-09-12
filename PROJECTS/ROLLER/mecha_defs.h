@@ -466,6 +466,11 @@
  * evenly instead of in arms. [SIM-20] */
 #define MECHA_SPREAD_GOLDEN 2.39996323f
 
+/* How long an outer trigger waits for the other one before it gives up and
+ * fires on its own. Both together are the centre weapon, and a pad's
+ * triggers are never pulled on the same tick. [SIM-23] */
+#define MECHA_FIRE_PAIR_TICKS 4
+
 #define MECHA_CAMBER_SPIN_GAIN 0.30f
 #define MECHA_CAMBER_UPRIGHT   MECHA_ANGLE_QUARTER
 

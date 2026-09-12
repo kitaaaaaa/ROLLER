@@ -1609,3 +1609,60 @@ player's slot empty, so a spectated duel had one machine in it — and
 so that match could never finish. The seat is now filled with the player's
 chosen machine under a computer pilot, which is also what makes the COLOURS row
 still mean something from the free camera.
+
+## SIM-22 — computer pilots paint themselves off the match seed
+
+Sixteen machines in one paint is unreadable, so every machine that is not under
+a player's hands takes a scheme of its own in `mecha_sim_add_mech`.
+
+The draw uses a `tMechaRng` seeded on `uiSeed ^ (slot + 1) * 0x9E3779B9` rather
+than `pWorld->rng`. The world's stream decides how the fight goes, and a match
+has to replay exactly from its seed: taking paint draws out of it would mean
+adding a machine — or changing how many colours exist — silently changed the
+fight. A private RNG keyed on the same seed gives colours that are stable for a
+given match and independent of everything else.
+
+Scheme 0 is the machine's own palette (`mecha_scheme_get(0)` is NULL), so it is
+one of the outcomes rather than a special case. The briefing's own choice still
+wins for the player's seat: the mode writes `byScheme` after adding.
+
+## SIM-23 — both triggers together, within a window
+
+Left and right together is the centre weapon. On a pad those are analogue
+triggers and they never break their thresholds on the same tick, so the
+same-tick test made the centre weapon effectively unreachable.
+
+An outer press now waits `MECHA_FIRE_PAIR_TICKS` (4, so 67 ms) for its partner;
+if the partner arrives the centre weapon fires and both outer presses are
+dropped, and if it does not the press fires as the outer weapon it was.
+`byPairMask` is 1 for left and 2 for right, and 3 is the pair.
+
+Three things the shape of it is protecting against:
+
+- **The window starts once and is never extended.** Pumping one trigger faster
+  than the window is long would otherwise hold its own shot forever, since each
+  press would restart the wait.
+- **It only runs when the centre weapon could actually fire.** No ammo, mid
+  reload, still recovering, or no centre weapon at all, and the outer press goes
+  off immediately — the 67 ms is only spent when it could buy something. If the
+  centre goes away mid-wait, whatever is held back fires at once.
+- **Only for a machine under a player's hands.** The computer fires one slot per
+  tick and picks each deliberately; pairing its shots turned two aimed outer
+  shots into a centre shot it never asked for, which measurably moved the skill
+  ladder.
+
+## DEF-07 — the KLR mortar, faster but still a mortar
+
+The shell was 92 m/s under 32 m/s² of its own gravity. `mecha_arc_pitch` solves
+the launch angle for whatever speed the weapon has, so raising speed alone keeps
+it on target — but it also flattens the arc, and the arc is the entire point of
+a weapon that does not need line of sight.
+
+Raising both together keeps the shape and buys the speed: 140 m/s under 75 m/s².
+At 60 m the shell now flies 0.43 s instead of 0.66 s and still apexes at the
+same 1.7 m, and the maximum range works out at 261 m, which is the lock range
+(260 m) it has to cover.
+
+The sim test that read `lance > shell * 4` was asserting a ratio rather than the
+intent; it now asserts the shell stays the slowest of the car's three weapons,
+which is the thing that must never stop being true.

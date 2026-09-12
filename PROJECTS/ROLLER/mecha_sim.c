@@ -2303,6 +2303,7 @@ static void mecha_update_weapons(tMechaWorld *pWorld, int iMechIdx,
   tMechaMech *pMech = &pWorld->aMechs[iMechIdx];
   const tMechaMechDef *pDef = mecha_mech_def(pMech);
   bool abWanted[MECHA_WEAPON_SLOTS];
+  bool abFire[MECHA_WEAPON_SLOTS];
   int iSlot;
 
   if (pMech->iRecovery > 0)
@@ -2327,10 +2328,59 @@ static void mecha_update_weapons(tMechaWorld *pWorld, int iMechIdx,
   abWanted[MECHA_SLOT_CENTER] = pInput->bFireCenter;
   abWanted[MECHA_SLOT_RIGHT] = pInput->bFireRight;
 
-  for (iSlot = 0; iSlot < MECHA_WEAPON_SLOTS; iSlot++) {
-    bool bPressed = abWanted[iSlot] && !pMech->abFireHeld[iSlot];
+  for (iSlot = 0; iSlot < MECHA_WEAPON_SLOTS; iSlot++)
+    abFire[iSlot] = abWanted[iSlot] && !pMech->abFireHeld[iSlot];
 
-    if (bCanAct && bPressed && pMech->iRecovery <= 0
+  /*
+   * Both outer triggers at once is the centre weapon, and on a pad they are
+   * never pulled on the same tick -- so an outer press waits a few ticks for
+   * its partner before it goes off alone. The wait only happens when the
+   * centre weapon could actually fire, which keeps it off the common case of
+   * a machine whose centre is empty or reloading.
+   *
+   * Only for a machine somebody is holding the controls of: the computer
+   * fires one slot per tick and picks each one deliberately, so pairing its
+   * shots would turn two aimed outer shots into a centre shot it never asked
+   * for. [SIM-23]
+   */
+  if (bCanAct && pMech->byController == MECHA_CONTROL_HUMAN
+      && !abFire[MECHA_SLOT_CENTER]
+      && mecha_mech_weapon(pWorld, iMechIdx, MECHA_SLOT_CENTER) != NULL
+      && pMech->iRecovery <= 0 && pMech->aiAmmo[MECHA_SLOT_CENTER] > 0
+      && pMech->aiReload[MECHA_SLOT_CENTER] <= 0) {
+    uint8_t byPressed = (uint8_t)((abFire[MECHA_SLOT_LEFT] ? 1 : 0)
+                                  | (abFire[MECHA_SLOT_RIGHT] ? 2 : 0));
+
+    if (byPressed != 0) {
+      pMech->byPairMask |= byPressed;
+      abFire[MECHA_SLOT_LEFT] = false;
+      abFire[MECHA_SLOT_RIGHT] = false;
+      if (pMech->byPairMask == 3) {
+        abFire[MECHA_SLOT_CENTER] = true;
+        pMech->byPairMask = 0;
+        pMech->iPairTicks = 0;
+      } else if (pMech->iPairTicks == 0) {
+        /* Started, never extended: pumping one trigger faster than the
+         * window is long must not hold its own shot back forever. */
+        pMech->iPairTicks = MECHA_FIRE_PAIR_TICKS;
+      }
+    }
+    if (pMech->byPairMask != 0 && pMech->iPairTicks > 0
+        && --pMech->iPairTicks == 0) {
+      /* Nobody came: the press fires as the outer weapon it was. */
+      abFire[pMech->byPairMask == 1 ? MECHA_SLOT_LEFT : MECHA_SLOT_RIGHT] = true;
+      pMech->byPairMask = 0;
+    }
+  } else if (pMech->iPairTicks > 0) {
+    /* The centre weapon went away mid-wait -- fired, emptied, or the machine
+     * was knocked out of acting. Whatever is held back goes off now. */
+    abFire[pMech->byPairMask == 1 ? MECHA_SLOT_LEFT : MECHA_SLOT_RIGHT] = true;
+    pMech->iPairTicks = 0;
+    pMech->byPairMask = 0;
+  }
+
+  for (iSlot = 0; iSlot < MECHA_WEAPON_SLOTS; iSlot++) {
+    if (bCanAct && abFire[iSlot] && pMech->iRecovery <= 0
         && pMech->aiAmmo[iSlot] > 0 && pMech->aiReload[iSlot] <= 0)
       mecha_fire_weapon(pWorld, iMechIdx, iSlot);
     pMech->abFireHeld[iSlot] = abWanted[iSlot];
@@ -3060,6 +3110,8 @@ static void mecha_reset_mech_for_round(tMechaWorld *pWorld, int iMechIdx,
     pMech->aiReload[i] = 0;
     pMech->abFireHeld[i] = false;
   }
+  pMech->iPairTicks = 0;
+  pMech->byPairMask = 0;
   pMech->bJumpHeld = false;
   pMech->bDashHeld = false;
   pMech->bGuardHeld = false;
@@ -3382,6 +3434,19 @@ int mecha_sim_add_mech(tMechaWorld *pWorld, int iDefIdx,
                                 : (iDefIdx % mecha_def_count()));
     pMech->byController = byController;
     pMech->byTeam = byTeam;
+    if (byController != MECHA_CONTROL_HUMAN) {
+      /*
+       * A colour each, so a crowded arena is not sixteen machines in the
+       * same paint. Drawn off the match seed through an RNG of its own
+       * rather than the world's, because the world's stream decides how the
+       * fight goes and adding a machine must not shift it. [SIM-22]
+       */
+      tMechaRng paint;
+
+      mecha_rng_seed(&paint,
+                     pWorld->uiSeed ^ (uint32_t)((i + 1) * 0x9E3779B9u));
+      pMech->byScheme = (uint8_t)mecha_rng_range(&paint, mecha_scheme_count());
+    }
     pMech->iTargetIdx = -1;
   pMech->byLock = MECHA_LOCK_NONE;
   pMech->iLockSlipTicks = 0;

@@ -647,39 +647,40 @@ static const tMechaMechDef s_aMechDefs[] = {
         .fMuzzleHeight = 0.62f, .fMuzzleSide = 0.85f },
     },
     [MECHA_SLOT_RIGHT] = {
-      /* And a shell lobbed over whatever is in the way. Slow enough to
-       * be dodged if it is seen coming, which is the price of it not
-       * needing line of sight, and it does not care whether it hits --
-       * twelve metres of blast finds people behind cover. */
+      /* And a shell lobbed over whatever is in the way. It does not care
+       * whether it hits -- twelve metres of blast finds people behind
+       * cover -- and the speed and the gravity are raised together so it
+       * arrives in two thirds the time while keeping the arc it had and
+       * the reach to match the lock. [DEF-07] */
       [MECHA_STANCE_STAND] = { .szName = "KLR MORTAR", .byKind = MECHA_PROJ_ARC,
         .byCount = 1, .byPalette = PAL_TRACER_ORANGE,
-        .fSpeed = MECHA_MPS(92.0f), .fDamage = 74.0f,
+        .fSpeed = MECHA_MPS(140.0f), .fDamage = 74.0f,
         .fRadius = MECHA_M(1.3f),
-        .fBlastRadius = MECHA_M(12.0f), .fArcGravity = MECHA_MPS(32.0f),
+        .fBlastRadius = MECHA_M(12.0f), .fArcGravity = MECHA_MPS(75.0f),
         .iLifeTicks = 200, .iAmmo = MECHA_CAR_MAGAZINE, .iReloadTicks = MECHA_SEC(2.4f),
         .iRecoveryTicks = 42, .fStagger = 40.0f,
         .fMuzzleHeight = 0.62f, .fMuzzleSide = 0.85f },
       [MECHA_STANCE_GUARD] = { .szName = "KLR MORTAR", .byKind = MECHA_PROJ_ARC,
         .byCount = 1, .byPalette = PAL_TRACER_ORANGE,
-        .fSpeed = MECHA_MPS(92.0f), .fDamage = 74.0f,
+        .fSpeed = MECHA_MPS(140.0f), .fDamage = 74.0f,
         .fRadius = MECHA_M(1.3f),
-        .fBlastRadius = MECHA_M(12.0f), .fArcGravity = MECHA_MPS(32.0f),
+        .fBlastRadius = MECHA_M(12.0f), .fArcGravity = MECHA_MPS(75.0f),
         .iLifeTicks = 200, .iAmmo = MECHA_CAR_MAGAZINE, .iReloadTicks = MECHA_SEC(2.4f),
         .iRecoveryTicks = 42, .fStagger = 40.0f,
         .fMuzzleHeight = 0.62f, .fMuzzleSide = 0.85f },
       [MECHA_STANCE_DASH] = { .szName = "KLR MORTAR", .byKind = MECHA_PROJ_ARC,
         .byCount = 1, .byPalette = PAL_TRACER_ORANGE,
-        .fSpeed = MECHA_MPS(92.0f), .fDamage = 74.0f,
+        .fSpeed = MECHA_MPS(140.0f), .fDamage = 74.0f,
         .fRadius = MECHA_M(1.3f),
-        .fBlastRadius = MECHA_M(12.0f), .fArcGravity = MECHA_MPS(32.0f),
+        .fBlastRadius = MECHA_M(12.0f), .fArcGravity = MECHA_MPS(75.0f),
         .iLifeTicks = 200, .iAmmo = MECHA_CAR_MAGAZINE, .iReloadTicks = MECHA_SEC(2.4f),
         .iRecoveryTicks = 42, .fStagger = 40.0f,
         .fMuzzleHeight = 0.62f, .fMuzzleSide = 0.85f },
       [MECHA_STANCE_JUMP] = { .szName = "KLR MORTAR", .byKind = MECHA_PROJ_ARC,
         .byCount = 1, .byPalette = PAL_TRACER_ORANGE,
-        .fSpeed = MECHA_MPS(92.0f), .fDamage = 74.0f,
+        .fSpeed = MECHA_MPS(140.0f), .fDamage = 74.0f,
         .fRadius = MECHA_M(1.3f),
-        .fBlastRadius = MECHA_M(12.0f), .fArcGravity = MECHA_MPS(32.0f),
+        .fBlastRadius = MECHA_M(12.0f), .fArcGravity = MECHA_MPS(75.0f),
         .iLifeTicks = 200, .iAmmo = MECHA_CAR_MAGAZINE, .iReloadTicks = MECHA_SEC(2.4f),
         .iRecoveryTicks = 42, .fStagger = 40.0f,
         .fMuzzleHeight = 0.62f, .fMuzzleSide = 0.85f },

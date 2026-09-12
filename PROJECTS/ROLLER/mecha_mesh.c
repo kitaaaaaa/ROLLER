@@ -40,7 +40,7 @@ static bool s_bCarSkin = false;
 #define MECHA_GUN_MOUNT_X     0.825f
 #define MECHA_GUN_MOUNT_Y     0.66f
 #define MECHA_GUN_MOUNT_Z     1.03f
-#define MECHA_GUN_LENGTH      0.27f
+#define MECHA_GUN_LENGTH      0.33f
 /* How far across the bonnet it points on top of wherever it is aiming. */
 #define MECHA_GUN_ACROSS      MECHA_DEG(9)
 #define MECHA_GUN_GRIP_RAKE   MECHA_DEG(22)
@@ -1211,10 +1211,11 @@ static void mecha_add_zizin_gun(tMechaQuadList *pList,
                           -MECHA_GUN_YAW_LIMIT, MECHA_GUN_YAW_LIMIT);
   tMechaPose mount;
   tMechaPose gun;
-  /* The whole weapon, nose to backplate. A heavy machine gun is a little
-   * over a quarter the length of the car it is bolted to. */
+  /* The whole weapon, nose to backplate, and the calibre everything else on
+   * it is measured in. A third of the car's length and thick with it, so the
+   * gun still reads as a gun from the far side of an arena. */
   float fGun = fLength * MECHA_GUN_LENGTH;
-  float fBore = fGun * 0.055f;
+  float fBore = fGun * 0.068f;
   float fMount = pDef->fHeight * MECHA_GUN_MOUNT_Y;
 
   /*

@@ -404,8 +404,11 @@ static int test_firing_and_reload(void)
     iStartAmmo = world.aMechs[0].aiAmmo[MECHA_SLOT_LEFT];
     CHECK(iStartAmmo > 0);
 
+    /* An outer press waits out the pairing window before it fires alone. */
     aInputs[0].bFireLeft = true;
     mecha_sim_tick(&world, aInputs, 2);
+    CHECK(world.aMechs[0].aiAmmo[MECHA_SLOT_LEFT] == iStartAmmo);
+    run_ticks(&world, aInputs, 2, MECHA_FIRE_PAIR_TICKS);
     CHECK(world.aMechs[0].aiAmmo[MECHA_SLOT_LEFT] == iStartAmmo - 1);
     CHECK(world.aMechs[0].iRecovery > 0);
     CHECK(count_projectiles(&world) >= (int)pWeapon->byCount);
@@ -420,7 +423,7 @@ static int test_firing_and_reload(void)
     memset(aInputs, 0, sizeof(aInputs));
     mecha_sim_tick(&world, aInputs, 2);
     aInputs[0].bFireLeft = true;
-    mecha_sim_tick(&world, aInputs, 2);
+    run_ticks(&world, aInputs, 2, MECHA_FIRE_PAIR_TICKS + 1);
     CHECK(world.aMechs[0].aiAmmo[MECHA_SLOT_LEFT] == 0);
     CHECK(world.aMechs[0].aiReload[MECHA_SLOT_LEFT] > 0);
 
@@ -3071,7 +3074,7 @@ static int test_the_gun_car_has_one_gun_and_a_bumper(void)
         CHECK(world.aMechs[0].aiAmmo[iSlot] == MECHA_CAR_MAGAZINE);
 
     aInputs[0].bFireLeft = true;
-    mecha_sim_tick(&world, aInputs, 2);
+    run_ticks(&world, aInputs, 2, MECHA_FIRE_PAIR_TICKS + 1);
     printf("   one trigger costs all three: %d %d %d rounds left\n",
            world.aMechs[0].aiAmmo[0], world.aMechs[0].aiAmmo[1],
            world.aMechs[0].aiAmmo[2]);
@@ -3134,7 +3137,10 @@ static int test_the_gun_car_has_one_gun_and_a_bumper(void)
         /* The lance: one round, no spread, and the fastest of the three. */
         CHECK(pLance->byCount == 1 && pLance->iSpreadAngle == 0);
         CHECK(pLance->fSpeed > pShot->fSpeed * 2.0f);
-        CHECK(pLance->fSpeed > pShell->fSpeed * 4.0f);
+        /* However the shell is tuned it stays the slowest of the three: it
+         * is the one that arcs over cover, and a shell as quick as the
+         * pellets would just be a worse lance. */
+        CHECK(pShell->fSpeed < pShot->fSpeed);
         /* Reach: the pellets die long before the lance does. */
         CHECK(pShot->fSpeed * (float)pShot->iLifeTicks
               < pLance->fSpeed * (float)pLance->iLifeTicks * 0.2f);
@@ -4227,6 +4233,45 @@ static int test_paint_schemes_repaint_the_machine(void)
         printf("   %s: %d of %d quads repainted\n",
                mecha_def_get(iDef)->szName, iDiffer, plain.iCount);
         CHECK(iDiffer > 0);
+    }
+
+    /*
+     * A computer pilot picks its own colour off the match seed, so a crowded
+     * arena is not sixteen machines in one paint. Two things have to hold:
+     * the same seed paints the same grid twice, and one seed's grid is not
+     * all one colour. [SIM-22]
+     */
+    {
+        tMechaWorld other;
+        int aiSeen[256];          /* byScheme is a byte */
+        int iDistinct = 0;
+        int iSlot;
+
+        memset(aiSeen, 0, sizeof(aiSeen));
+        mecha_sim_init(&world, 0, 0x1234u, 1);
+        mecha_sim_init(&other, 0, 0x1234u, 1);
+        for (iSlot = 0; iSlot < MECHA_MAX_MECHS; iSlot++) {
+            mecha_sim_add_mech(&world, iSlot % mecha_def_count(),
+                               MECHA_CONTROL_AI, (uint8_t)(iSlot + 1));
+            mecha_sim_add_mech(&other, iSlot % mecha_def_count(),
+                               MECHA_CONTROL_AI, (uint8_t)(iSlot + 1));
+        }
+        for (iSlot = 0; iSlot < MECHA_MAX_MECHS; iSlot++) {
+            uint8_t byScheme = world.aMechs[iSlot].byScheme;
+
+            CHECK(byScheme == other.aMechs[iSlot].byScheme);
+            CHECK(byScheme < (uint8_t)iSchemes);
+            if (aiSeen[byScheme]++ == 0)
+                iDistinct++;
+        }
+        printf("   %d machines wearing %d different paints\n",
+               MECHA_MAX_MECHS, iDistinct);
+        CHECK(iDistinct >= 4);
+
+        /* A player's machine is left alone: the briefing chose that one. */
+        mecha_sim_init(&world, 0, 0x1234u, 1);
+        CHECK(mecha_sim_add_mech(&world, 0, MECHA_CONTROL_HUMAN, 0) == 0);
+        CHECK(world.aMechs[0].byScheme == 0);
     }
     return 0;
 }
@@ -6264,6 +6309,89 @@ static void measure_handling(int iDefIdx, float *pfSkidMetres,
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * Both outer triggers inside the window is the centre weapon, and outside it
+ * is two separate shots. [TEST-11]
+ */
+static int test_both_triggers_make_the_centre_shot(void)
+{
+    tMechaWorld world;
+    tMechaInput aInputs[2];
+    int iCar = wheeled_def();
+    int aiStart[MECHA_WEAPON_SLOTS];
+    int iSlot;
+
+    CHECK(iCar >= 0);
+
+    /* --- right follows left inside the window ---------------------------- */
+    start_duel(&world, iCar, iCar, 0, 0x2B71u, 1);
+    memset(aInputs, 0, sizeof(aInputs));
+    for (iSlot = 0; iSlot < MECHA_WEAPON_SLOTS; iSlot++)
+        aiStart[iSlot] = world.aMechs[0].aiAmmo[iSlot];
+
+    aInputs[0].bFireLeft = true;
+    mecha_sim_tick(&world, aInputs, 2);
+    /* Nothing yet: the press is waiting for its partner. */
+    CHECK(count_projectiles(&world) == 0);
+    aInputs[0].bFireRight = true;
+    mecha_sim_tick(&world, aInputs, 2);
+    CHECK(world.aMechs[0].iLastFiredSlot == MECHA_SLOT_CENTER);
+
+    /* --- and a lone press still goes off, a few ticks later -------------- */
+    start_duel(&world, iCar, iCar, 0, 0x2B72u, 1);
+    memset(aInputs, 0, sizeof(aInputs));
+    aInputs[0].bFireLeft = true;
+    run_ticks(&world, aInputs, 2, MECHA_FIRE_PAIR_TICKS + 1);
+    CHECK(world.aMechs[0].iLastFiredSlot == MECHA_SLOT_LEFT);
+
+    /*
+     * --- pumping one trigger is not a way to hold its own shot hostage ----
+     *
+     * A press every other tick is faster than the window is long, so a
+     * window that restarted on each press would never let the shot go.
+     */
+    start_duel(&world, iCar, iCar, 0, 0x2B73u, 1);
+    memset(aInputs, 0, sizeof(aInputs));
+    {
+        int iTick;
+
+        for (iTick = 0; iTick < MECHA_FIRE_PAIR_TICKS * 4; iTick++) {
+            aInputs[0].bFireLeft = (iTick & 1) == 0;
+            mecha_sim_tick(&world, aInputs, 2);
+        }
+    }
+    CHECK(world.aMechs[0].iLastFiredSlot == MECHA_SLOT_LEFT);
+
+    /*
+     * --- the computer is never paired ------------------------------------
+     *
+     * It fires one slot a tick and means each one, so nothing of its is ever
+     * held back. A whole fight without the window ever opening is the check:
+     * the pilots there shoot constantly.
+     */
+    start_duel(&world, iCar, iCar, 0, 0x2B74u, 1);
+    memset(aInputs, 0, sizeof(aInputs));
+    world.aMechs[0].byController = MECHA_CONTROL_AI;
+    {
+        int iTick;
+        int iShots = 0;
+
+        for (iTick = 0; iTick < MECHA_TICK_HZ * 20; iTick++) {
+            mecha_sim_tick(&world, NULL, 0);
+            CHECK(world.aMechs[0].iPairTicks == 0);
+            CHECK(world.aMechs[1].iPairTicks == 0);
+            if (world.aMechs[0].iRecovery == 1)
+                iShots++;
+        }
+        /* And they really were shooting, or the check above proves nothing. */
+        CHECK(iShots > 0);
+    }
+    (void)aiStart;
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static int test_machines_carry_their_weight(void)
 {
     float afSkid[3];
@@ -6761,6 +6889,8 @@ int main(void)
         { "shots carry plasma frames", test_shots_carry_plasma_frames },
         { "death throws debris", test_death_throws_debris },
         { "machines carry their weight", test_machines_carry_their_weight },
+        { "both triggers make the centre shot",
+          test_both_triggers_make_the_centre_shot },
     };
     size_t i;
 

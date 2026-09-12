@@ -2806,7 +2806,10 @@ static int test_the_gun_car_is_a_car_with_a_gun(void)
     mecha_mesh_mech(&list, &world, 0);
     CHECK(list.iCount > 40);
 
-    for (i = 0; i < list.iCount; i++) {
+    /* The body's own proportions, so the gun -- which is not attached to it
+     * and is carried differently once it has been fired -- does not answer
+     * the question of whether the car came out car-shaped. */
+    for (i = 0; i < MECHA_ZIZIN_BODY_QUADS && i < list.iCount; i++) {
         int v;
 
         for (v = 0; v < 4; v++) {
@@ -3259,6 +3262,13 @@ static int lean_side(tMechaWorld *pWorld, int iMechIdx)
 
     mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
     mecha_mesh_mech(&list, pWorld, iMechIdx);
+    /* The body, not what it is carrying. The gun car's weapon is as long as
+     * the car and floats clear of it, so it reaches lower than either flank
+     * and answers a question about how the gun is held rather than how the
+     * body is sitting. */
+    if (mecha_def_get((int)pMech->byDefIdx)->bWheeled
+        && list.iCount > MECHA_ZIZIN_BODY_QUADS)
+        list.iCount = MECHA_ZIZIN_BODY_QUADS;
     for (i = 0; i < list.iCount; i++)
         for (c = 0; c < 4; c++) {
             float fSide = (list.paQuads[i].afVert[c][0] - pMech->fX) * fRightX
@@ -3697,6 +3707,10 @@ static int test_the_gun_car_spins_and_rolls(void)
         mecha_quads_reset(&list, aStorage, MECHA_QUAD_CAPACITY);
         mecha_mesh_mech(&list, &world, 0);
         CHECK(list.iCount > 0);
+        /* The body only: the gun is not attached to it and is carried
+         * differently depending on whether it has just been fired. */
+        if (list.iCount > MECHA_ZIZIN_BODY_QUADS)
+            list.iCount = MECHA_ZIZIN_BODY_QUADS;
         for (iQuad = 0; iQuad < list.iCount; iQuad++)
             for (c = 0; c < 4; c++) {
                 float fY = list.paQuads[iQuad].afVert[c][1];
@@ -3908,6 +3922,119 @@ static int test_a_cambered_launch_rolls_the_car(void)
  * Machines are solid to one another whatever they are doing -- two walkers,
  * a car and a walker, and one of them flat on its back.
  */
+/*
+ * Reverse steers the other way round, and nothing else does: a brake at
+ * speed is not reverse, and neither is a backwards slide out of a drift.
+ */
+static int test_only_reverse_swaps_the_steering(void)
+{
+    tMechaWorld world;
+    tMechaInput aInputs[2];
+    int iCar = wheeled_def();
+    const tMechaMechDef *pDef;
+    int iFwd;
+    int iRev;
+    int i;
+
+    CHECK(iCar >= 0);
+    pDef = mecha_def_get(iCar);
+
+    /* Forwards under power, full right lock. */
+    start_duel(&world, 3, iCar, 0, 0x5EE1u, 1);
+    memset(aInputs, 0, sizeof(aInputs));
+    CHECK(clear_runway(&world, 0));
+    world.aMechs[0].iFacing = 0;
+    world.aMechs[0].fVelX = 0.0f;
+    world.aMechs[0].fVelZ = pDef->fWalkSpeed * 0.5f;
+    aInputs[0].bDash = true;
+    aInputs[0].iTurn = 100;
+    for (i = 0; i < 20; i++)
+        mecha_sim_tick(&world, aInputs, 2);
+    iFwd = mecha_angle_delta(0, world.aMechs[0].iFacing);
+
+    /* Backing up under power, same lock: the wheels point the other way. */
+    start_duel(&world, 3, iCar, 0, 0x5EE1u, 1);
+    memset(aInputs, 0, sizeof(aInputs));
+    CHECK(clear_runway(&world, 0));
+    world.aMechs[0].iFacing = 0;
+    world.aMechs[0].fVelX = 0.0f;
+    world.aMechs[0].fVelZ = -pDef->fWalkSpeed * MECHA_CAR_REVERSE * 0.6f;
+    aInputs[0].bGuard = true;
+    aInputs[0].iTurn = 100;
+    for (i = 0; i < 20; i++)
+        mecha_sim_tick(&world, aInputs, 2);
+    iRev = mecha_angle_delta(0, world.aMechs[0].iFacing);
+
+    printf("   full right lock turns %d degrees forwards, %d reversing\n",
+           iFwd * 360 / MECHA_ANGLE_FULL, iRev * 360 / MECHA_ANGLE_FULL);
+    CHECK(iFwd != 0);
+    CHECK(iRev != 0);
+    /* Opposite hands, which is the whole point. */
+    CHECK((iFwd > 0) != (iRev > 0));
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * A spread is a cone rather than a row: the shot is scattered in both axes,
+ * so it covers what it is pointed at instead of a line through it.
+ */
+static int test_a_spread_is_a_cone_not_a_fan(void)
+{
+    tMechaWorld world;
+    int iCar = wheeled_def();
+    float fMinY = 1e9f;
+    float fMaxY = -1e9f;
+    float fMinX = 1e9f;
+    float fMaxX = -1e9f;
+    int iShots = 0;
+    int i;
+
+    CHECK(iCar >= 0);
+    {
+        tMechaInput aInputs[2];
+
+        start_duel(&world, 0, iCar, iCar, 0x5C0Eu, 1);
+        memset(aInputs, 0, sizeof(aInputs));
+        world.aMechs[0].iFacing = 0;
+        world.aMechs[0].byLock = MECHA_LOCK_HELD;
+        world.aMechs[0].iTargetIdx = 1;
+        aInputs[0].bFireLeft = true;
+        for (i = 0; i < 8; i++) {
+            mecha_sim_tick(&world, aInputs, 2);
+            if (world.aProjectiles[0].bActive)
+                break;
+        }
+    }
+
+    for (i = 0; i < MECHA_MAX_PROJECTILES; i++) {
+        const tMechaProjectile *pShot = &world.aProjectiles[i];
+        float fLen;
+
+        if (!pShot->bActive)
+            continue;
+        iShots++;
+        fLen = mecha_length3(pShot->fVelX, pShot->fVelY, pShot->fVelZ);
+        if (fLen <= 0.0f)
+            continue;
+        if (pShot->fVelY / fLen < fMinY) fMinY = pShot->fVelY / fLen;
+        if (pShot->fVelY / fLen > fMaxY) fMaxY = pShot->fVelY / fLen;
+        if (pShot->fVelX / fLen < fMinX) fMinX = pShot->fVelX / fLen;
+        if (pShot->fVelX / fLen > fMaxX) fMaxX = pShot->fVelX / fLen;
+    }
+    printf("   buckshot: %d pellets spanning %.4f across, %.4f up\n",
+           iShots, fMaxX - fMinX, fMaxY - fMinY);
+    CHECK(iShots > 3);
+    /* Spread both ways, not just sideways -- a fan has no vertical span at
+     * all, which is what this catches. */
+    CHECK(fMaxY - fMinY > 0.0f);
+    CHECK(fMaxX - fMinX > 0.0f);
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static int test_machines_are_solid_to_each_other(void)
 {
     tMechaWorld world;
@@ -6398,6 +6525,10 @@ int main(void)
           test_a_cambered_launch_rolls_the_car },
         { "machines are solid to each other",
           test_machines_are_solid_to_each_other },
+        { "only reverse swaps the steering",
+          test_only_reverse_swaps_the_steering },
+        { "a spread is a cone not a fan",
+          test_a_spread_is_a_cone_not_a_fan },
         { "a downed machine is not a target",
           test_a_downed_machine_is_not_a_target },
         { "damaged machines smoke and burn",

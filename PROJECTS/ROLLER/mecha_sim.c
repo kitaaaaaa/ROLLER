@@ -5,7 +5,10 @@
 #include "mecha_defs.h"
 
 #include <math.h>
+
 #include <string.h>
+
+static int mecha_car_throttle(const tMechaInput *pInput, bool bCanAct);
 
 //-------------------------------------------------------------------------------------------------
 
@@ -876,6 +879,7 @@ static void mecha_update_facing(tMechaWorld *pWorld, int iMechIdx,
     float fAlong = pMech->fVelX * mecha_sin(pMech->iFacing)
                    + pMech->fVelZ * mecha_cos(pMech->iFacing);
     int iSteer = pInput->iTurn + pInput->iMoveX;
+    int iThrottle = mecha_car_throttle(pInput, bCanAct);
 
     if (bCanAct && iSteer != 0 && fSpeed >= pDef->fSteerFloor
         && pDef->fWalkSpeed > 0.0f) {
@@ -891,7 +895,16 @@ static void mecha_update_facing(tMechaWorld *pWorld, int iMechIdx,
        * drift swings the velocity past a quarter turn off the nose and a dot
        * product alone calls that reversing. [SIM-06]
        */
-      if (fAlong < 0.0f
+      /*
+       * Backing up under power, which is all three of: the lever down, the
+       * car going backwards, and slow enough that it is reverse rather than
+       * a slide. Speed alone flipped the steering on any backwards drift --
+       * which is most of a handbrake turn -- so the wheels swapped hands
+       * halfway through and the car fought itself. The throttle alone is no
+       * better: braking and reversing are the same lever, and a brake at
+       * speed is not reverse. [SIM-06]
+       */
+      if (iThrottle < 0 && fAlong < 0.0f
           && fSpeed <= pDef->fWalkSpeed * MECHA_CAR_REVERSE)
         iStep = -iStep;
       pMech->iFacing = mecha_angle_wrap(pMech->iFacing + iStep);
@@ -937,6 +950,21 @@ static void mecha_wall_impact(tMechaWorld *pWorld, int iMechIdx,
   fSpeed = mecha_length2(pMech->fVelX, pMech->fVelZ);
   bFast = (pMech->byMove == MECHA_MOVE_DASH || pMech->iCoastTicks > 0)
           && fSpeed >= MECHA_BOUNCE_MIN_SPEED;
+
+  /*
+   * A car in the air comes off whatever it hits. Whiplash reflects the
+   * approach speed, charges damage for it and turns the roll the other way
+   * (control.c), so a car that clips a wall mid-flight arrives somewhere
+   * else spinning the other way rather than stopping dead against it.
+   * [SIM-19]
+   */
+  if (bAirborne && pDef->bWheeled) {
+    bFast = fSpeed >= MECHA_BOUNCE_MIN_SPEED;
+    pMech->attitude.iRollSpin = -pMech->attitude.iRollSpin;
+    if (-fInto > MECHA_BOUNCE_MIN_SPEED)
+      mecha_sim_damage(pWorld, iMechIdx, -1,
+                       -fInto * MECHA_AIR_BOUNCE_DAMAGE, 0.0f, 0.0f, 0.0f);
+  }
 
   pMech->fVelX -= (bFast ? 1.0f + MECHA_BOUNCE_RESTITUTION : 1.0f)
                   * fInto * fPushX;
@@ -1776,8 +1804,8 @@ integrate:
       pMech->iStateTicks = 0;
       pMech->iStunTicks = MECHA_DOWN_TICKS;
       pMech->iRecovery = 0;
-      pMech->fVelX = 0.0f;
-      pMech->fVelZ = 0.0f;
+      /* On its roof and still going: a car that lands upside down slides
+       * on what it arrived with rather than stopping dead. [SIM-18] */
       mecha_sim_spawn_effect(pWorld, MECHA_FX_DUST, pMech->fX, fGround,
                              pMech->fZ, pDef->fRadius * 1.6f,
                              pDef->abyPalette[2], MECHA_SEC(0.45f));
@@ -2192,10 +2220,8 @@ static void mecha_fire_weapon(tMechaWorld *pWorld, int iMechIdx, int iSlot)
 
   for (iShot = 0; iShot < (int)pWeapon->byCount; iShot++) {
     tMechaProjectile *pShot = mecha_alloc_projectile(pWorld);
-    /* Spread fans symmetrically about the aim: with one shot the offset is
-     * zero, with two it straddles, with three the middle one runs true. */
-    int iOffset = (2 * iShot - ((int)pWeapon->byCount - 1))
-                  * pWeapon->iSpreadAngle / 2;
+    int iYawOff = 0;
+    int iPitchOff = 0;
     float fDirX;
     float fDirY;
     float fDirZ;
@@ -2203,8 +2229,26 @@ static void mecha_fire_weapon(tMechaWorld *pWorld, int iMechIdx, int iSlot)
     if (!pShot)
       break;
 
-    mecha_direction_from_angles(mecha_angle_wrap(iBaseYaw + iOffset),
-                                iBasePitch, &fDirX, &fDirY, &fDirZ);
+    /*
+     * A cone, packed, rather than a row of shots side by side. A spread laid
+     * out along one axis is a fan: it misses above and below whatever it is
+     * pointed at and covers ground either side that nothing is standing on.
+     * Shots go on a sunflower spiral instead -- a golden angle apart, at a
+     * radius growing as the square root of the index -- which fills the
+     * circle evenly and puts the first one down the middle. [SIM-20]
+     */
+    if (pWeapon->byCount > 1 && pWeapon->iSpreadAngle > 0) {
+      float fStep = (float)iShot / (float)(pWeapon->byCount - 1);
+      float fRadius = (float)pWeapon->iSpreadAngle * 0.5f * sqrtf(fStep);
+      float fTheta = (float)iShot * MECHA_SPREAD_GOLDEN;
+
+      iYawOff = (int)(fRadius * cosf(fTheta));
+      iPitchOff = (int)(fRadius * sinf(fTheta));
+    }
+
+    mecha_direction_from_angles(mecha_angle_wrap(iBaseYaw + iYawOff),
+                                mecha_angle_wrap(iBasePitch + iPitchOff),
+                                &fDirX, &fDirY, &fDirZ);
 
     memset(pShot, 0, sizeof(*pShot));
     pShot->bActive = true;

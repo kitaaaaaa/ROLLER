@@ -310,7 +310,8 @@ static void mecha_add_ground_quad(tMechaQuadList *pList,
   afVert[1][1] = mecha_arena_terrain_height(pArena, fX0, fZ1);
   afVert[2][1] = mecha_arena_terrain_height(pArena, fX1, fZ1);
   afVert[3][1] = mecha_arena_terrain_height(pArena, fX1, fZ0);
-  mecha_quads_add(pList, afVert, byPalette, MECHA_QUAD_TWO_SIDED);
+  mecha_quads_add(pList, afVert, byPalette,
+                  MECHA_QUAD_TWO_SIDED | MECHA_QUAD_GROUND);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -454,7 +455,7 @@ static void mecha_add_tiled_box(tMechaQuadList *pList, float fX, float fZ,
                                    / (float)iCols,
                            fLowZ + 2.0f * fHalfZ * (float)(iRow + 1)
                                    / (float)iRows,
-                           fTopY, byTopPalette, 0);
+                           fTopY, byTopPalette, MECHA_QUAD_GROUND);
       mecha_tag_texture(pList, iBank, byTopTile);
     }
   }
@@ -679,7 +680,7 @@ void mecha_mesh_arena(tMechaQuadList *pList, const tMechaArena *pArena)
           mecha_quads_add(pList, afVert,
                           ((iRing + iSpan + iEdge) & 1)
                             ? pArena->byFloorPalette : pArena->byGridPalette,
-                          MECHA_QUAD_TWO_SIDED);
+                          MECHA_QUAD_TWO_SIDED | MECHA_QUAD_GROUND);
           mecha_tag_texture(pList, MECHA_TEX_WORLD,
                             ((iRing + iSpan + iEdge) & 1)
                               ? pArena->byFloorTile : pArena->byGridTile);
@@ -1207,15 +1208,20 @@ static void mecha_add_zizin_gun(tMechaQuadList *pList,
   float fBarrel = fLength * 0.52f;
   float fThick = fLength * 0.11f;
 
-  /* Beside the front right wheel and rolled onto its side; firing throws it
-   * up and back as the recovery runs down. [MESH-13] */
+  /*
+   * Beside the front right wheel, and turned over only to shoot: at rest it
+   * is carried upright like a pistol at the ready, and it rolls flat as the
+   * shot goes off so the slide works across the bonnet. The roll rides the
+   * same recovery clock the kick does, so it turns over with the shot and
+   * comes back up as the next round is chambered. [MESH-13]
+   */
   mecha_pose_child(&gun, pCar,
                    pDef->fRadius * (1.45f + 0.12f * fKick),
                    pDef->fHeight * (0.42f + 0.42f * fKick),
                    pDef->fRadius * (1.25f - 0.80f * fKick),
                    iYaw - MECHA_GUN_ACROSS,
                    -iAimPitch + (int)((float)MECHA_GUN_KICK_PITCH * fKick),
-                   MECHA_GUN_ROLL);
+                   (int)((float)MECHA_GUN_ROLL * fKick));
 
   /* Slide and barrel, out along the line of fire. */
   mecha_add_box(pList, &gun, 0.0f, 0.0f, fBarrel * 0.5f,
@@ -2136,7 +2142,8 @@ float mecha_quad_depth_key(const tMechaQuad *pQuad, const float afEye[3],
     return fMin - fReach;
   }
 
-  if (pQuad->afNormal[1] > 0.9f || pQuad->afNormal[1] < -0.9f) {
+  if ((pQuad->byFlags & MECHA_QUAD_GROUND) != 0
+      && (pQuad->afNormal[1] > 0.9f || pQuad->afNormal[1] < -0.9f)) {
     float fLowX = pQuad->afVert[0][0];
     float fHighX = fLowX;
     float fLowZ = pQuad->afVert[0][2];

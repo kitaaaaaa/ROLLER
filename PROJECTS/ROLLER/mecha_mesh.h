@@ -46,6 +46,16 @@
  * arrangements are reachable. [MESH-12] */
 #define MECHA_QUAD_TEX_ROT90  0x40
 
+/*
+ * Arena ground: a floor tile, the outer ring, the top of a block. Broad
+ * horizontal geometry a machine stands on, which has to be drawn before the
+ * machine standing on it -- so it is keyed by its far corner rather than its
+ * middle. Only the arena sets it. Machine panels are horizontal too, and a
+ * car's floor and roof taking the ground rule is what put the two halves of
+ * an upside-down car in the wrong order. [MESH-23]
+ */
+#define MECHA_QUAD_GROUND     0x80
+
 //-------------------------------------------------------------------------------------------------
 
 typedef struct

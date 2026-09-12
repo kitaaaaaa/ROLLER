@@ -385,6 +385,13 @@ which. Two cases it is not:
   floor tile stretching away under a machine standing on it has to be drawn
   first, and its far corner is what says so.
 
+That second rule applies only to quads carrying `MECHA_QUAD_GROUND`, which
+the arena sets and machines never do. Keyed on the normal alone it also
+caught a car's own floor and roof — both horizontal, both wider than the
+threshold — so the two halves of the body sorted against each other by
+whichever was broader. Upright that happens to look right; upside down the
+two swap and the error shows.
+
 ## MESH-24 — self-lit geometry is pulled forward in the sort
 
 A blast centred on a machine intersects it, and per-quad sorting then lets
@@ -921,6 +928,13 @@ but the stick fighting the spin halfway through it.
 Reverse is a third of forward top speed and a drift is fast, so the car's own
 reverse speed separates the two cleanly.
 
+That alone is not enough, though: it flips on any backwards drift, which is
+most of a handbrake turn, so the wheels swap hands halfway through and the
+car fights itself. The throttle alone is no better — braking and reversing
+are the same lever, and a brake at speed is not reverse. The condition is all
+three: the lever down, the car going backwards, and slow enough to be reverse
+rather than a slide.
+
 ## SIM-07 — hitting a wall
 
 The push the arena applied to get the machine back out is the surface normal,
@@ -1441,6 +1455,10 @@ The landing is judged on the tick the wheels touch, not off `byMove`: the
 wheeled path sets the car back to `MECHA_MOVE_STAND` before the shared
 landing code runs, so there is no JUMP state left to key on by then.
 
+A car that lands upside down keeps what it arrived with and slides on its
+roof. Zeroing the velocity made it stop dead, which reads as hitting a wall
+rather than going over.
+
 ## AI-08 — the pilot presses forward and takes the high ground
 
 Three changes, all because the pilots read as hiding:
@@ -1462,3 +1480,24 @@ The lock-held assertion in the tests moved with this: a pilot that presses
 forward keeps the enemy in front of it, so an archetype that never breaks
 lock is doing its job. Breaking lock is now asserted across the roster rather
 than per machine. [TEST-06]
+
+## SIM-19 — a car in the air bounces off what it hits
+
+Whiplash reflects the approach speed on contact, charges damage for it at
+`0.005` per unit, and negates `iRollMomentum` so the spin turns the other way
+(`control.c`, the airborne wall cases). A car that clips something mid-flight
+arrives somewhere else spinning the other way rather than stopping dead
+against it.
+
+On the ground the older rule still holds: walking pace leans on the wall, a
+boost comes off it. [SIM-07]
+
+## SIM-20 — a spread is a packed cone, not a fan
+
+Shots laid out along one axis miss above and below whatever they are pointed
+at, and cover ground either side that nothing is standing on. Pellets go on a
+sunflower spiral instead — a golden angle apart, at a radius growing as the
+square root of the index — which fills the circle evenly and puts the first
+one straight down the middle.
+
+The half-angle is unchanged; only the arrangement inside it is.

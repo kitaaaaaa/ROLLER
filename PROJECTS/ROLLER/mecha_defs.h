@@ -454,6 +454,14 @@
  * A landing more than a quarter turn from level is a landing on the roof.
  * [SIM-18]
  */
+/* Damage per unit of speed a car carries into something while airborne.
+ * Whiplash charges the reflected approach speed times 0.005. [SIM-19] */
+#define MECHA_AIR_BOUNCE_DAMAGE 0.005f
+
+/* The golden angle in radians, which is what spaces a packed cone of shot
+ * evenly instead of in arms. [SIM-20] */
+#define MECHA_SPREAD_GOLDEN 2.39996323f
+
 #define MECHA_CAMBER_SPIN_GAIN 0.30f
 #define MECHA_CAMBER_UPRIGHT   MECHA_ANGLE_QUARTER
 

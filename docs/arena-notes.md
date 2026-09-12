@@ -1911,3 +1911,44 @@ platform", and any ground above zero answers void -- so on the first arena with
 raised ground, every machine was placed at -4000 m and fell out of the world
 before the round started. It asks `mecha_arena_terrain_height` now, which is the
 ground itself with nothing standing on it.
+
+## SIM-25 — a round goes to a side, not to a machine
+
+`mecha_end_round` credited `iRoundsWon` to the one machine it named the winner.
+With one machine a side that is the same thing; with eight it is not, because
+the machine left standing at the end of one round is rarely the one left
+standing at the end of the next, so a match of sixteen could run for ever
+without anyone reaching the rounds it takes to win.
+
+The round is credited to every active machine on the winner's team instead, and
+`mecha_mech_allied` is the one place that answers "are these two on the same
+side" for everything outside the simulation — the banner and the mode's result
+line both ask it rather than comparing indices. Out-of-range indices are on
+nobody's side, which is what makes it safe to ask about a spectator's `-1`.
+
+## MODE-08 — team deathmatch is a duel with sixteen machines in it
+
+Survival's sixteen machines with survival's sixteen teams collapsed to two: the
+MECH row flies one side, the OPPONENT row the other, eight each.
+
+The seats alternate sides, and that is not cosmetic. `mecha_reset_round` hands
+out spawn points in seat order, and both arena spawn shapes split a duel by that
+order — `MECHA_SPAWN_BASES` puts even slots in one keep and odd slots in the
+other [ARENA-14], the ring puts consecutive slots opposite each other. Filling
+one side's seats first would therefore start half of each team inside the
+enemy's base.
+
+Paint is a side's, not a machine's, so `mecha_mode_paint_teams` overwrites what
+`mecha_sim_add_mech` drew per machine \[SIM-22\]: the player's side wears the
+scheme the briefing chose and the other side takes one draw of its own, stepped
+on by one if it lands on the player's, because two sides in one colour is the
+one thing this mode cannot have. The draw runs on a `tMechaRng` of its own
+seeded off the match seed — the world's stream decides how the fight goes, and
+paint must not move it.
+
+Measured with computer pilots on both sides and no round clock: MERIDIAN
+CROSSING wipes a side out in about 45 s, the small arenas in 20-25 s. FACING
+WORLDS does not finish at all — the last few machines sit in their own halves
+trading long-range shots, which a free-for-all on that map does too, so it is
+the map's size rather than the mode. With the round clock on (the briefing's
+default) it is decided on armour like any other round.

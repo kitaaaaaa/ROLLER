@@ -63,6 +63,10 @@ void mecha_sim_tick(tMechaWorld *pWorld, const tMechaInput *paInputs,
 /* Queries. Everything here is read-only and safe on a NULL or empty world. */
 
 bool mecha_mech_alive(const tMechaMech *pMech);
+/* Whether two machines are on the same side. Out-of-range indices are on
+ * nobody's side. [SIM-25] */
+bool mecha_mech_allied(const tMechaWorld *pWorld, int iMechIdx,
+                       int iOtherIdx);
 /* Which stance the mech's weapons fire from right now. */
 eMechaStance mecha_mech_stance(const tMechaMech *pMech);
 /* The weapon slot iSlot would fire this instant, or NULL if out of range. */

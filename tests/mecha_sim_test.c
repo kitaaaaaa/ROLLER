@@ -4131,6 +4131,79 @@ static int test_a_spread_is_a_cone_not_a_fan(void)
  * A full arena of machines, all on their own side, fights itself down to a
  * winner -- and the geometry it builds still fits in the buffer.
  */
+static int test_eight_a_side_is_won_by_a_side(void)
+{
+    tMechaWorld world;
+    tMechaInput aInputs[MECHA_MAX_MECHS];
+    /* A close map, so a side is wiped out rather than shot at across half a
+     * kilometre until the clock decides it. */
+    int iArena = arena_by_name("MERIDIAN CROSSING");
+    int aiSurvivors[2] = { 0, 0 };
+    int iWinner;
+    uint8_t byWon;
+    int i;
+    int t;
+
+    CHECK(iArena >= 0);
+    mecha_sim_init(&world, iArena, 0x8A51Du, 1);
+    /* No clock, so the round is decided by who is left rather than by who
+     * has the most armour when it runs out. */
+    mecha_sim_set_round_seconds(&world, 0);
+    /* Two sides, seated alternately the way the briefing seats them. */
+    for (i = 0; i < MECHA_MAX_MECHS; i++)
+        CHECK(mecha_sim_add_mech(&world, i % mecha_def_count(),
+                                 MECHA_CONTROL_AI, (uint8_t)(i & 1)) >= 0);
+    mecha_sim_begin_match(&world);
+
+    /* Allies are allies both ways round, and nobody else is. */
+    CHECK(mecha_mech_allied(&world, 0, 2));
+    CHECK(mecha_mech_allied(&world, 2, 0));
+    CHECK(!mecha_mech_allied(&world, 0, 1));
+    CHECK(!mecha_mech_allied(&world, 1, 0));
+    /* A machine is on its own side; nothing off the end of the world is. */
+    CHECK(mecha_mech_allied(&world, 3, 3));
+    CHECK(!mecha_mech_allied(&world, 0, -1));
+    CHECK(!mecha_mech_allied(&world, 0, MECHA_MAX_MECHS));
+
+    memset(aInputs, 0, sizeof(aInputs));
+    for (t = 0; t < MECHA_TICK_HZ * 180; t++) {
+        mecha_sim_tick(&world, aInputs, MECHA_MAX_MECHS);
+        /* No pilot ever points the reticle at one of its own. */
+        for (i = 0; i < MECHA_MAX_MECHS; i++) {
+            int iTarget = world.aMechs[i].iTargetIdx;
+
+            if (iTarget >= 0)
+                CHECK(!mecha_mech_allied(&world, i, iTarget));
+        }
+        if (world.match.byPhase == MECHA_PHASE_MATCH_OVER)
+            break;
+    }
+    CHECK(world.match.byPhase == MECHA_PHASE_MATCH_OVER);
+
+    iWinner = world.match.iWinnerIdx;
+    CHECK(iWinner >= 0);
+    byWon = world.aMechs[iWinner].byTeam;
+    for (i = 0; i < MECHA_MAX_MECHS; i++)
+        if (mecha_mech_alive(&world.aMechs[i]))
+            aiSurvivors[world.aMechs[i].byTeam & 1]++;
+    printf("   eight a side: team %d took it, %d left against %d\n",
+           (int)byWon, aiSurvivors[byWon & 1], aiSurvivors[!(byWon & 1)]);
+    /* The side that was wiped out lost; the side still standing won. */
+    CHECK(aiSurvivors[!(byWon & 1)] == 0);
+    CHECK(aiSurvivors[byWon & 1] > 0);
+
+    /*
+     * The round goes to the side, not to whoever happened to land the last
+     * shot: credit only the one machine and a match of eight can never be
+     * won, because the round that ends the match is rarely the same
+     * machine's. [SIM-25]
+     */
+    for (i = 0; i < MECHA_MAX_MECHS; i++)
+        CHECK(world.aMechs[i].iRoundsWon
+              == (world.aMechs[i].byTeam == byWon ? 1 : 0));
+    return 0;
+}
+
 static int test_a_full_arena_fights_itself_out(void)
 {
     tMechaWorld world;
@@ -7181,6 +7254,8 @@ int main(void)
           test_a_cambered_launch_rolls_the_car },
         { "a full arena fights itself out",
           test_a_full_arena_fights_itself_out },
+        { "eight a side is won by a side",
+          test_eight_a_side_is_won_by_a_side },
         { "paint schemes repaint the machine",
           test_paint_schemes_repaint_the_machine },
         { "machines are solid to each other",

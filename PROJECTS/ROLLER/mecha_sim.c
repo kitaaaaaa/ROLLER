@@ -30,6 +30,20 @@ static const tMechaMechDef *mecha_mech_def(const tMechaMech *pMech)
 
 //-------------------------------------------------------------------------------------------------
 
+bool mecha_mech_allied(const tMechaWorld *pWorld, int iMechIdx,
+                       int iOtherIdx)
+{
+  if (!pWorld)
+    return false;
+  if (iMechIdx < 0 || iMechIdx >= MECHA_MAX_MECHS)
+    return false;
+  if (iOtherIdx < 0 || iOtherIdx >= MECHA_MAX_MECHS)
+    return false;
+  return pWorld->aMechs[iMechIdx].byTeam == pWorld->aMechs[iOtherIdx].byTeam;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 bool mecha_mech_alive(const tMechaMech *pMech)
 {
   return pMech && pMech->bActive && pMech->byMove != MECHA_MOVE_DESTROYED
@@ -3209,9 +3223,23 @@ static void mecha_end_round(tMechaWorld *pWorld, int iWinnerIdx)
   pWorld->match.byPhase = MECHA_PHASE_ROUND_OVER;
   pWorld->match.iPhaseTicks = MECHA_ROUND_OVER_TICKS;
 
+  /*
+   * A round is won by a team, so every machine on it is credited, not just
+   * the one left holding the arena. With one machine to a team -- a duel, or
+   * a free-for-all where everybody is their own team -- that is the same
+   * thing it always was; with eight a side it is the difference between a
+   * match that can be won and one where the credit lands on a different
+   * machine every round and nobody ever reaches the total. [SIM-25]
+   */
   if (iWinnerIdx >= 0 && iWinnerIdx < MECHA_MAX_MECHS
-      && pWorld->aMechs[iWinnerIdx].bActive)
-    pWorld->aMechs[iWinnerIdx].iRoundsWon++;
+      && pWorld->aMechs[iWinnerIdx].bActive) {
+    uint8_t byTeam = pWorld->aMechs[iWinnerIdx].byTeam;
+    int i;
+
+    for (i = 0; i < MECHA_MAX_MECHS; i++)
+      if (pWorld->aMechs[i].bActive && pWorld->aMechs[i].byTeam == byTeam)
+        pWorld->aMechs[i].iRoundsWon++;
+  }
 }
 
 //-------------------------------------------------------------------------------------------------

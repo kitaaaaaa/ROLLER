@@ -1062,11 +1062,13 @@ static const char *mecha_phase_banner(const tMechaWorld *pWorld,
   case MECHA_PHASE_ROUND_OVER:
     if (pWorld->match.iWinnerIdx < 0)
       return "DRAW";
-    return pWorld->match.iWinnerIdx == iViewMech ? "ROUND WIN" : "ROUND LOST";
+    return mecha_mech_allied(pWorld, iViewMech, pWorld->match.iWinnerIdx)
+             ? "ROUND WIN" : "ROUND LOST";
   case MECHA_PHASE_MATCH_OVER:
     if (pWorld->match.iWinnerIdx < 0)
       return "DRAW";
-    return pWorld->match.iWinnerIdx == iViewMech ? "VICTORY" : "DEFEAT";
+    return mecha_mech_allied(pWorld, iViewMech, pWorld->match.iWinnerIdx)
+             ? "VICTORY" : "DEFEAT";
   default:
     /*
      * "FIGHT" only for the first moments of the round, then out of the way.

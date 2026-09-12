@@ -49,30 +49,6 @@ static bool s_bCarSkin = false;
  * xzizin_pols, which is fixed data, and are the numbers the render test
  * paints onto the panels themselves.
  */
-/*
- * How each panel wants its artwork laid on it: whether to drop the corner
- * reversal, and how many quarter turns to put on top. Dropping the reversal
- * alone is the vertical mirror -- measured, by marking panels 19 and 20 for
- * a horizontal flip and being told they came out flipped top to bottom --
- * so the horizontal mirror is that reversal plus two quarter turns.
- *
- * Spelled out rather than named, because naming the two reflections is what
- * went wrong: a table of turn counts cannot be read backwards.
- */
-static const struct {
-  uint8_t byPoly;
-  uint8_t bMirror;   /* drop the corner reversal */
-  uint8_t byTurn;    /* quarter turns after it, 0..3 */
-} s_aZizinTexFix[] = {
-  {  8, 1, 0 },   /* vertical */
-  { 15, 1, 2 },   /* horizontal */
-  { 18, 1, 2 },   /* horizontal */
-  { 19, 1, 2 },   /* horizontal */
-  { 20, 1, 2 },   /* horizontal */
-  { 35, 1, 2 },   /* horizontal */
-  { 39, 1, 2 },   /* horizontal */
-  { 41, 1, 2 },   /* horizontal */
-};
 #define MECHA_GUN_YAW_LIMIT   MECHA_DEG(40)
 #define MECHA_GUN_ROLL        MECHA_DEG(84)
 /* How far across the bonnet it points on top of wherever it is aiming. */
@@ -1287,21 +1263,34 @@ static void mecha_add_zizin_body(tMechaQuadList *pList,
        */
       uint32_t uiTex = mecha_zizin_surface(iPoly);
 
+      /*
+       * How the artwork sits is the plan's to say, not ours. Each polygon
+       * carries SURFACE_FLAG_FLIP_HORIZ and SURFACE_FLAG_FLIP_VERT beside
+       * its tile index, which is how the body wears one tile on a pair of
+       * mirrored panels -- the roof rails, the rear roof edge, the lower
+       * tail corners -- and it is why panel for panel out of the same file
+       * was still coming out back to front: those bits were being dropped
+       * and the orientation guessed at afterwards.
+       *
+       * Read off the surface the lookup settled on rather than off the
+       * polygon, which matters for the wheels: those four name an
+       * animation slot and carry no orientation of their own, while the
+       * frames behind them do -- the near-side pair flipped, the off-side
+       * pair not. Taking the polygon's word for it left all four wheels
+       * wearing the same face.
+       *
+       * Dropping the corner reversal is the vertical mirror, so horizontal
+       * is that reversal plus two quarter turns, and the two together are
+       * a half turn with no reflection at all.
+       */
+      bool bFlipH = (uiTex & SURFACE_FLAG_FLIP_HORIZ) != 0;
+      bool bFlipV = (uiTex & SURFACE_FLAG_FLIP_VERT) != 0;
       uint8_t byFlags = MECHA_QUAD_TWO_SIDED | MECHA_QUAD_TEX_FLIP;
-      int iFix;
 
-      for (iFix = 0; iFix < (int)(sizeof(s_aZizinTexFix)
-                                  / sizeof(s_aZizinTexFix[0])); iFix++) {
-        if (s_aZizinTexFix[iFix].byPoly != (uint8_t)iPoly)
-          continue;
-        if (s_aZizinTexFix[iFix].bMirror)
-          byFlags &= (uint8_t)~MECHA_QUAD_TEX_FLIP;
-        if ((s_aZizinTexFix[iFix].byTurn & 2u) != 0)
-          byFlags |= MECHA_QUAD_TEX_ROT180;
-        if ((s_aZizinTexFix[iFix].byTurn & 1u) != 0)
-          byFlags |= MECHA_QUAD_TEX_ROT90;
-        break;
-      }
+      if (bFlipH != bFlipV)
+        byFlags &= (uint8_t)~MECHA_QUAD_TEX_FLIP;
+      if (bFlipH)
+        byFlags |= MECHA_QUAD_TEX_ROT180;
 
       mecha_quads_add(pList, afVert, (uint8_t)(uiTex & 0xFFu), byFlags);
       if ((uiTex & SURFACE_FLAG_APPLY_TEXTURE) != 0)

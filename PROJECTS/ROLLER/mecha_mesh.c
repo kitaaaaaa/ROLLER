@@ -39,6 +39,40 @@ static bool s_bCarSkin = false;
  * and what firing does to it.
  */
 #define MECHA_ZIZIN_ROOF_FACING 0.55f
+
+/*
+ * How each panel of the body wants its artwork read.
+ *
+ * The plan is hand-made and its polygons are not wound to one convention,
+ * so this is a list of which ones, not a rule -- every attempt to derive it
+ * from the geometry got some other panel wrong. Indices are into
+ * xzizin_pols, which is fixed data, and are the numbers the render test
+ * paints onto the panels themselves.
+ */
+/*
+ * How each panel wants its artwork laid on it: whether to drop the corner
+ * reversal, and how many quarter turns to put on top. Dropping the reversal
+ * alone is the vertical mirror -- measured, by marking panels 19 and 20 for
+ * a horizontal flip and being told they came out flipped top to bottom --
+ * so the horizontal mirror is that reversal plus two quarter turns.
+ *
+ * Spelled out rather than named, because naming the two reflections is what
+ * went wrong: a table of turn counts cannot be read backwards.
+ */
+static const struct {
+  uint8_t byPoly;
+  uint8_t bMirror;   /* drop the corner reversal */
+  uint8_t byTurn;    /* quarter turns after it, 0..3 */
+} s_aZizinTexFix[] = {
+  {  8, 1, 0 },   /* vertical */
+  { 15, 1, 2 },   /* horizontal */
+  { 18, 1, 2 },   /* horizontal */
+  { 19, 1, 2 },   /* horizontal */
+  { 20, 1, 2 },   /* horizontal */
+  { 35, 1, 2 },   /* horizontal */
+  { 39, 1, 2 },   /* horizontal */
+  { 41, 1, 2 },   /* horizontal */
+};
 #define MECHA_GUN_YAW_LIMIT   MECHA_DEG(40)
 #define MECHA_GUN_ROLL        MECHA_DEG(84)
 /* How far across the bonnet it points on top of wherever it is aiming. */
@@ -1253,8 +1287,23 @@ static void mecha_add_zizin_body(tMechaQuadList *pList,
        */
       uint32_t uiTex = mecha_zizin_surface(iPoly);
 
-      mecha_quads_add(pList, afVert, (uint8_t)(uiTex & 0xFFu),
-                      MECHA_QUAD_TWO_SIDED | MECHA_QUAD_TEX_FLIP);
+      uint8_t byFlags = MECHA_QUAD_TWO_SIDED | MECHA_QUAD_TEX_FLIP;
+      int iFix;
+
+      for (iFix = 0; iFix < (int)(sizeof(s_aZizinTexFix)
+                                  / sizeof(s_aZizinTexFix[0])); iFix++) {
+        if (s_aZizinTexFix[iFix].byPoly != (uint8_t)iPoly)
+          continue;
+        if (s_aZizinTexFix[iFix].bMirror)
+          byFlags &= (uint8_t)~MECHA_QUAD_TEX_FLIP;
+        if ((s_aZizinTexFix[iFix].byTurn & 2u) != 0)
+          byFlags |= MECHA_QUAD_TEX_ROT180;
+        if ((s_aZizinTexFix[iFix].byTurn & 1u) != 0)
+          byFlags |= MECHA_QUAD_TEX_ROT90;
+        break;
+      }
+
+      mecha_quads_add(pList, afVert, (uint8_t)(uiTex & 0xFFu), byFlags);
       if ((uiTex & SURFACE_FLAG_APPLY_TEXTURE) != 0)
         mecha_tag_texture(pList, MECHA_TEX_CAR, (int)(uiTex & 0xFFu));
     } else {

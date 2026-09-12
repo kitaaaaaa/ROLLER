@@ -55,6 +55,27 @@
  */
 #define MECHA_QUAD_TEX_FLIP  0x10
 
+/*
+ * Turn this quad's artwork through half a turn as well.
+ *
+ * Reversing the corner order is one reflection and one only, and it is the
+ * vertical one -- measured, by marking two panels for a horizontal flip and
+ * being told they came out flipped top to bottom. Composing that reversal
+ * with a half turn gives the horizontal mirror; this flag on its own leaves
+ * the artwork the right way round but upside down and back to front.
+ * Between them the four corner orders a rectangle can be read in are all
+ * reachable, which is what a hand-made body needs: its panels were not
+ * wound to one convention and some of them want each.
+ */
+#define MECHA_QUAD_TEX_ROT180 0x20
+/*
+ * And a quarter turn. With ROT180 this is a two-bit count of quarter turns
+ * applied after the reversal above, so the two flags together reach all
+ * four rotations and, with TEX_FLIP, all eight ways a rectangle of artwork
+ * can be laid on a quad.
+ */
+#define MECHA_QUAD_TEX_ROT90  0x40
+
 //-------------------------------------------------------------------------------------------------
 
 typedef struct

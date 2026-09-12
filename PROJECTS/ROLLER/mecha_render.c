@@ -920,6 +920,14 @@ static void mecha_render_scene(GameRenderer *pRenderer,
         int iFrom = (pQuad->byFlags & MECHA_QUAD_TEX_FLIP) ? iCorner
                                                            : 3 - iCorner;
 
+        /* And a quarter turn count on top, which is what turns the
+         * reflection above from the vertical mirror into the horizontal
+         * one and reaches the two rotations between them. */
+        iFrom = (iFrom
+                 + (((pQuad->byFlags & MECHA_QUAD_TEX_ROT180) != 0) ? 2 : 0)
+                 + (((pQuad->byFlags & MECHA_QUAD_TEX_ROT90) != 0) ? 1 : 0))
+                & 3;
+
         aTexVerts[iCorner] = aVerts[iFrom];
         aTexVerts[iCorner].u = 0.0f;
         aTexVerts[iCorner].v = 0.0f;

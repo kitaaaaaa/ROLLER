@@ -77,6 +77,17 @@ static int check(int bCondition, int iLine)
 
 static uint8 s_aFrame[FRAME_W * FRAME_H];
 static tMechaQuad s_aQuads[MECHA_QUAD_CAPACITY];
+/* Built again purely to be measured: the numbered overlay needs the body's
+ * own quads, and the list the frame was drawn from has been sorted and has
+ * everything else in the arena in it too. */
+static tMechaQuad s_aBodyQuads[MECHA_QUAD_CAPACITY];
+
+/* One number waiting to be painted onto a panel, and the box a painted one
+ * has already taken. */
+typedef struct { int iPoly; int iX; int iY; float fDist; } tPolyLabel;
+typedef struct { int iX; int iY; int iW; } tPolyBox;
+static tPolyLabel aLabels[MECHA_ZIZIN_BODY_QUADS];
+static tPolyBox   aDrawn[MECHA_ZIZIN_BODY_QUADS];
 static tMechaWorld s_World;
 static tMechaCamera s_Camera;
 
@@ -806,6 +817,162 @@ int main(int argc, char **argv)
             }
             printf("   ZIZIN KLR 330: walked round in %d shots\n",
                    (int)(sizeof(aOrbit) / sizeof(aOrbit[0])));
+
+            /*
+             * And the same eight shots with every body panel wearing its
+             * own index, so a panel can be pointed at rather than argued
+             * about. The plan's fifty polygons are the first fifty quads
+             * the mesh puts out and one comes from each, so the quad's
+             * place in the list is the polygon's number.
+             *
+             * Only the panels facing the camera get a number, or the far
+             * side of the car writes over the near side. Which those are
+             * is read off the projected corners: all fifty share the
+             * plan's winding, so the ones turned towards the camera come
+             * out with one sign of screen area and the ones turned away
+             * with the other. That needs no view of how the normals in
+             * this frame ended up pointing.
+             */
+            for (iShot = 0; iShot < (int)(sizeof(aOrbit) / sizeof(aOrbit[0]));
+                 iShot++) {
+                float fPhi = (float)aOrbit[iShot].iPhi * 3.14159265f / 180.0f;
+                const float fNear = MECHA_M(6.2f);
+                tMechaQuadList body;
+                char szLabelled[64];
+                int iPoly;
+                int iLabels;
+                int iDrawn;
+
+                /* The gun is held out to the car's right and is big
+                 * enough to hide a whole flank, so on each shot the foe
+                 * goes to the far side of the car from the camera and the
+                 * gun swings away with it. */
+                s_World.aMechs[1].fX = s_World.aMechs[0].fX
+                                       - MECHA_M(90.0f) * sinf(fPhi);
+                s_World.aMechs[1].fZ = s_World.aMechs[0].fZ
+                                       - MECHA_M(90.0f) * cosf(fPhi);
+
+                s_Camera.fX = s_World.aMechs[0].fX + fNear * sinf(fPhi);
+                s_Camera.fY = s_World.aMechs[0].fY + MECHA_M(2.0f);
+                s_Camera.fZ = s_World.aMechs[0].fZ + fNear * cosf(fPhi);
+                s_Camera.iYaw = MECHA_DEG(aOrbit[iShot].iPhi + 180);
+                s_Camera.iPitch = -MECHA_DEG(6);
+                s_Camera.bSettled = true;
+                mecha_render_frame(pRenderer, &s_World, &s_Camera, 0, s_aFrame,
+                                   FRAME_W, FRAME_H, s_aQuads,
+                                   MECHA_QUAD_CAPACITY);
+
+                memset(&body, 0, sizeof(body));
+                body.paQuads   = s_aBodyQuads;
+                body.iCapacity = MECHA_QUAD_CAPACITY;
+                mecha_mesh_mech(&body, &s_World, 0);
+
+                /*
+                 * Nearest panel wins the space. Without that the roof and
+                 * the tail, whose middles project into the same corner of
+                 * the screen as the windscreen does, write their numbers
+                 * over the panels actually facing the camera and the ones
+                 * being asked about cannot be read.
+                 */
+                iLabels = 0;
+                for (iPoly = 0; iPoly < MECHA_ZIZIN_BODY_QUADS
+                                && iPoly < body.iCount; iPoly++) {
+                    const tMechaQuad *pQ = &s_aBodyQuads[iPoly];
+                    int aiX[4];
+                    int aiY[4];
+                    float fCx = 0.0f, fCy = 0.0f, fCz = 0.0f;
+                    float fArea = 0.0f;
+                    float fDx, fDy, fDz;
+                    int c;
+                    bool bOn = true;
+
+                    for (c = 0; c < 4; c++) {
+                        if (!mecha_render_project(&s_Camera, FRAME_W, FRAME_H,
+                                                  pQ->afVert[c][0],
+                                                  pQ->afVert[c][1],
+                                                  pQ->afVert[c][2],
+                                                  &aiX[c], &aiY[c]))
+                            bOn = false;
+                        fCx += pQ->afVert[c][0];
+                        fCy += pQ->afVert[c][1];
+                        fCz += pQ->afVert[c][2];
+                    }
+                    if (!bOn)
+                        continue;
+                    for (c = 0; c < 4; c++) {
+                        int d = (c + 1) & 3;
+                        fArea += (float)aiX[c] * (float)aiY[d]
+                                 - (float)aiX[d] * (float)aiY[c];
+                    }
+                    if (fArea >= 0.0f)
+                        continue;   /* turned away from the camera */
+
+                    fCx *= 0.25f; fCy *= 0.25f; fCz *= 0.25f;
+                    if (!mecha_render_project(&s_Camera, FRAME_W, FRAME_H,
+                                              fCx, fCy, fCz,
+                                              &aiX[0], &aiY[0]))
+                        continue;
+                    fDx = fCx - s_Camera.fX;
+                    fDy = fCy - s_Camera.fY;
+                    fDz = fCz - s_Camera.fZ;
+                    aLabels[iLabels].iPoly = iPoly;
+                    aLabels[iLabels].iX    = aiX[0];
+                    aLabels[iLabels].iY    = aiY[0];
+                    aLabels[iLabels].fDist = fDx * fDx + fDy * fDy
+                                             + fDz * fDz;
+                    iLabels++;
+                }
+
+                /* Nearest first, so the near panel claims the space and the
+                 * far one is the one dropped. */
+                for (iPoly = 1; iPoly < iLabels; iPoly++) {
+                    tPolyLabel keep = aLabels[iPoly];
+                    int iSlot = iPoly - 1;
+                    while (iSlot >= 0 && aLabels[iSlot].fDist > keep.fDist) {
+                        aLabels[iSlot + 1] = aLabels[iSlot];
+                        iSlot--;
+                    }
+                    aLabels[iSlot + 1] = keep;
+                }
+
+                iDrawn = 0;
+                for (iPoly = 0; iPoly < iLabels; iPoly++) {
+                    char szNum[8];
+                    int iW;
+                    int iPrev;
+                    bool bClash = false;
+
+                    snprintf(szNum, sizeof(szNum), "%d",
+                             aLabels[iPoly].iPoly);
+                    iW = mecha_render_text_width(2, szNum) + 4;
+                    for (iPrev = 0; iPrev < iDrawn; iPrev++) {
+                        if (aLabels[iPoly].iX - 2 < aDrawn[iPrev].iX + aDrawn[iPrev].iW
+                            && aDrawn[iPrev].iX < aLabels[iPoly].iX - 2 + iW
+                            && aLabels[iPoly].iY - 2 < aDrawn[iPrev].iY + 18
+                            && aDrawn[iPrev].iY < aLabels[iPoly].iY - 2 + 18) {
+                            bClash = true;
+                            break;
+                        }
+                    }
+                    if (bClash)
+                        continue;
+                    mecha_render_fill(s_aFrame, FRAME_W, FRAME_H,
+                                      aLabels[iPoly].iX - 2,
+                                      aLabels[iPoly].iY - 2, iW, 18, 0);
+                    mecha_render_text(s_aFrame, FRAME_W, FRAME_H,
+                                      aLabels[iPoly].iX, aLabels[iPoly].iY,
+                                      2, 255, szNum);
+                    aDrawn[iDrawn].iX = aLabels[iPoly].iX - 2;
+                    aDrawn[iDrawn].iY = aLabels[iPoly].iY - 2;
+                    aDrawn[iDrawn].iW = iW;
+                    iDrawn++;
+                }
+
+                snprintf(szLabelled, sizeof(szLabelled), "poly_%s",
+                         aOrbit[iShot].szName + strlen("arena_car_"));
+                dump_frame(szOutDir, szLabelled);
+            }
+            printf("   ZIZIN KLR 330: eight numbered shots\n");
         }
         printf("   %s: %d colours, wearing %s\n",
                mecha_def_get(iCar)->szName, distinct_colours(aiCounts),

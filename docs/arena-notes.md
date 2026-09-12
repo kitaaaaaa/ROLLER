@@ -1836,28 +1836,57 @@ the drop is 260 m over 10 m of ground: a cliff, not a slope.
 
 ## ARENA-16 — FACING WORLDS
 
-After the Unreal Tournament map, from the layout the player supplied: two keeps
-at the ends and two inclined causeways between them with a hole down the middle
-of the run.
+After the Unreal Tournament map, built from a model of it the player supplied.
+Two keeps at the ends of two causeways, with a hole between the causeways on
+each side of the middle.
 
-- Three hundred metres end to end, the bases standing 15 m above the middle, so
-  leaving a base is downhill and coming back is a climb.
-- Two lanes, one either side of the hole, 28 m of usable width each. Widening
-  them was tried and is worse: it pinches the hole into a slot that is easier to
-  stumble into than to see, and the machines lost over the side went up rather
-  than down.
-- A keep on each base: four walls with the causeway-facing one split either side
-  of a gateway, so it is a building a machine drives into. Open to the sky,
-  because a box here is solid from the ground up and a roof would be a lid with
-  nothing able to get under it. What it gives instead is a courtyard and a wall
-  top.
-- One block on each lane, out where the ground is lowest, for the only cover
-  between the keeps.
+- Five hundred metres end to end, the bases at the low ends and the middle 25 m
+  above them, so leaving a base is uphill and falling back to it is downhill.
+- Two lanes, 22 m wide, one either side of the hole. They touch only at the top
+  of the climb, where a platform joins them: that crossing is the one way from
+  one lane to the other without going back to a base. The hole is 28 m across,
+  which no machine on the roster clears from a standing lane -- measured, and
+  left that way. It is a hazard, not a shortcut.
+- A keep on each base: four walls with a pier in the middle of the one facing
+  the causeway, so there are two doorways and each opens onto a lane. A single
+  gate on the centreline opened onto the hole between them, and the machines
+  walked straight out into it -- half the field was gone inside ten seconds.
+  Open to the sky, because a box here is solid from the ground up and a roof
+  would be a lid with nothing able to get under it.
+- One block partway up each climb, on opposite lanes, for the only cover on the
+  run.
 
-The walls wear `MECHA_TILE_RUST`, which is the one face in the building bank
-that reads as masonry. `MECHA_TILE_BRICK` is a floral decoration in the retail
-data and `MECHA_TILE_CONCRETE` is the same index as one of the glazed facades,
-so neither does what its name suggests.
+Machines start inside the keeps, which is how the original starts a match.
+Across eight duels not one machine went over the edge; in a sixteen-way one or
+two do, and the rest are shot.
+
+## ARENA-17 — reading the model
+
+The model is Z-up, and the first reading of it took Y for up. Everything
+followed from that: the causeway came out as one bowed strip rather than two,
+the climb came out as a W, and the plan was measured across the map's height
+instead of its width.
+
+What settles it is the area of the flat faces. Sorting every triangle by which
+axis its normal points along and totalling the area: +Z has the most of it and
+-Z the least, which is a model with floors facing up and its underside cut away.
+Y-up would have put nearly equal area on +Y and -Y, which is what walls do, not
+floors.
+
+Read the right way up, at 4.5 cm to the unit:
+
+- two lanes, each 480 to 540 units wide, centred about 500 units either side of
+  the axis
+- the hole between them, widest about a third of the way in from each base and
+  closing to nothing at the middle, where the lanes meet
+- the floor of a base at about -1030, the middle of the causeway at -465: the
+  climb is 570 units, and it is a climb from both ends
+- bases about 2800 by 3400 units, centres 8000 apart
+
+The arena keeps the proportions and rounds the shapes: the lanes are straight
+rather than bowed and the holes rectangular rather than lens shaped, which reads
+the same from inside a cockpit and costs a table of measurements nobody would be
+able to check.
 
 ## SIM-24 — a spawn stands on the ground, not under it
 

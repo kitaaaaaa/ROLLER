@@ -30,7 +30,7 @@
  * per cell. Coarse on purpose. [ARENA-04] */
 /* The array size, not any arena's own division -- each carries its own
  * count in iTerrainCells, and a bigger arena needs more. */
-#define MECHA_TERRAIN_CELLS 40
+#define MECHA_TERRAIN_CELLS 64
 #define MECHA_TERRAIN_NODES (MECHA_TERRAIN_CELLS + 1)
 /* What an arena gets when it does not ask for anything else. */
 #define MECHA_TERRAIN_CELLS_DEFAULT 12
@@ -582,7 +582,7 @@ typedef struct
 typedef enum
 {
   MECHA_SPAWN_RING  = 0,    /* a circle inside the boundary */
-  MECHA_SPAWN_LANES = 1     /* spread along two lanes, alternating sides */
+  MECHA_SPAWN_BASES = 1     /* in the two strongholds, alternating ends */
 } eMechaSpawnShape;
 
 typedef enum

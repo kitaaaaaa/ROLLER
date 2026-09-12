@@ -6545,35 +6545,41 @@ static int test_the_causeway_map_is_a_causeway(void)
     CHECK(strcmp(arena.szName, "FACING WORLDS") == 0);
     CHECK(arena.byShape == MECHA_ARENA_OPEN);
 
-    /* Both lanes run the length of the map, and both of them slope: the
-     * bases stand above the middle, so leaving one is downhill. */
+    /* Both lanes run the length of the map, and both of them climb: the
+     * middle stands above the bases, so leaving a base is uphill and
+     * falling back to it is downhill. [ARENA-17] */
     {
-        float fMid = mecha_arena_ground_height(&arena, 0.0f, MECHA_M(26.0f),
+        float fMid = mecha_arena_ground_height(&arena, 0.0f, MECHA_M(25.0f),
                                                fHigh);
-        float fEnd = mecha_arena_ground_height(&arena, MECHA_M(150.0f),
-                                               MECHA_M(26.0f), fHigh);
+        float fEnd = mecha_arena_ground_height(&arena, MECHA_M(110.0f),
+                                               MECHA_M(25.0f), fHigh);
 
-        CHECK(fEnd > fMid + MECHA_M(8.0f));
-        for (fX = -MECHA_M(140.0f); fX <= MECHA_M(140.0f); fX += MECHA_M(10.0f)) {
-            CHECK(mecha_arena_ground_height(&arena, fX, MECHA_M(26.0f), fHigh)
+        printf("   the lane climbs %.0f m from the base to the crest\n",
+               (fMid - fEnd) / MECHA_METRE);
+        CHECK(fMid > fEnd + MECHA_M(15.0f));
+        for (fX = -MECHA_M(110.0f); fX <= MECHA_M(110.0f); fX += MECHA_M(10.0f)) {
+            CHECK(mecha_arena_ground_height(&arena, fX, MECHA_M(25.0f), fHigh)
                   > -MECHA_M(1.0f));
-            CHECK(mecha_arena_ground_height(&arena, fX, -MECHA_M(26.0f), fHigh)
+            CHECK(mecha_arena_ground_height(&arena, fX, -MECHA_M(25.0f), fHigh)
                   > -MECHA_M(1.0f));
         }
     }
 
     /*
-     * And there is nothing down the middle of the run between them. Not a
-     * pit flag -- a pit kills a machine standing on it, which is being
+     * And there is a hole between the lanes on each side of the middle. Not
+     * a pit flag -- a pit kills a machine standing on one, which is being
      * deleted rather than falling -- but ground far below the kill plane, so
      * a machine that goes in falls. [ARENA-15]
      */
-    for (fX = -MECHA_M(90.0f); fX <= MECHA_M(90.0f); fX += MECHA_M(10.0f)) {
+    for (fX = MECHA_M(30.0f); fX <= MECHA_M(95.0f); fX += MECHA_M(5.0f)) {
         CHECK(mecha_arena_ground_height(&arena, fX, 0.0f, fHigh) < arena.fKillY);
+        CHECK(mecha_arena_ground_height(&arena, -fX, 0.0f, fHigh) < arena.fKillY);
         CHECK((mecha_arena_surface(&arena, fX, 0.0f) & MECHA_SURF_PIT) == 0);
     }
-    /* Nor anything off the outer sides of either lane. */
-    for (fZ = MECHA_M(60.0f); fZ <= MECHA_M(190.0f); fZ += MECHA_M(10.0f)) {
+    /* The two lanes meet at the top of the climb, and nowhere else. */
+    CHECK(mecha_arena_ground_height(&arena, 0.0f, 0.0f, fHigh) > MECHA_M(20.0f));
+    /* Nor is there anything off the outer side of either lane. */
+    for (fZ = MECHA_M(60.0f); fZ <= MECHA_M(200.0f); fZ += MECHA_M(10.0f)) {
         CHECK(mecha_arena_ground_height(&arena, 0.0f, fZ, fHigh) < arena.fKillY);
         CHECK(mecha_arena_ground_height(&arena, 0.0f, -fZ, fHigh) < arena.fKillY);
     }
@@ -6583,17 +6589,24 @@ static int test_the_causeway_map_is_a_causeway(void)
      * wall facing the causeway, and solid wall everywhere else.
      */
     {
-        const float fKeep = MECHA_M(150.0f);
-        const float fEye = MECHA_M(23.0f);   /* head height on a raised base */
+        const float fKeep = MECHA_M(180.0f);
+        const float fEye = MECHA_M(8.0f);    /* head height in the courtyard */
 
         CHECK(mecha_arena_ground_height(&arena, -fKeep, 0.0f, fHigh)
-              > MECHA_M(10.0f));
+              > -MECHA_M(1.0f));
         CHECK(mecha_arena_ground_height(&arena, fKeep, 0.0f, fHigh)
-              > MECHA_M(10.0f));
-        CHECK(!mecha_arena_trace_segment(&arena, -MECHA_M(110.0f), fEye, 0.0f,
-                                         -fKeep, fEye, 0.0f, NULL, NULL, NULL));
-        CHECK(!mecha_arena_trace_segment(&arena, MECHA_M(110.0f), fEye, 0.0f,
-                                         fKeep, fEye, 0.0f, NULL, NULL, NULL));
+              > -MECHA_M(1.0f));
+        /* In through a doorway, which is where a lane arrives... */
+        CHECK(!mecha_arena_trace_segment(&arena, -MECHA_M(140.0f), fEye,
+                                         -MECHA_M(25.0f), -fKeep, fEye,
+                                         -MECHA_M(25.0f), NULL, NULL, NULL));
+        CHECK(!mecha_arena_trace_segment(&arena, MECHA_M(140.0f), fEye,
+                                         MECHA_M(25.0f), fKeep, fEye,
+                                         MECHA_M(25.0f), NULL, NULL, NULL));
+        /* ...and not through the pier between them, which is what stops a
+         * machine walking out of the gate into the hole. [ARENA-16] */
+        CHECK(mecha_arena_trace_segment(&arena, -MECHA_M(140.0f), fEye, 0.0f,
+                                        -fKeep, fEye, 0.0f, NULL, NULL, NULL));
         CHECK(mecha_arena_trace_segment(&arena, -fKeep, fEye, MECHA_M(60.0f),
                                         -fKeep, fEye, 0.0f, NULL, NULL, NULL));
         CHECK(mecha_arena_trace_segment(&arena, fKeep, fEye, -MECHA_M(60.0f),
@@ -6623,8 +6636,9 @@ static int test_the_causeway_map_is_a_causeway(void)
                mecha_length2(fX1 - fX0, fZ1 - fZ0) / MECHA_METRE,
                fX0 / MECHA_METRE, fZ0 / MECHA_METRE,
                fX1 / MECHA_METRE, fZ1 / MECHA_METRE);
-        CHECK(mecha_length2(fX1 - fX0, fZ1 - fZ0) > MECHA_M(200.0f));
-        CHECK(fZ0 * fZ1 < 0.0f);
+        /* One in each keep. */
+        CHECK(mecha_length2(fX1 - fX0, fZ1 - fZ0) > MECHA_M(300.0f));
+        CHECK(fX0 * fX1 < 0.0f);
     }
 
     /*
@@ -6640,8 +6654,8 @@ static int test_the_causeway_map_is_a_causeway(void)
 
         start_duel(&world, iIdx, 0, 0, 0x5A1Du, 1);
         memset(aInputs, 0, sizeof(aInputs));
-        world.aMechs[0].fX = 0.0f;
-        world.aMechs[0].fZ = 0.0f;                /* straight over the hole */
+        world.aMechs[0].fX = MECHA_M(60.0f);      /* straight over a hole */
+        world.aMechs[0].fZ = 0.0f;
         world.aMechs[0].fY = MECHA_M(2.0f);
         world.aMechs[0].fVelY = 0.0f;
         fWas = world.aMechs[0].fY;

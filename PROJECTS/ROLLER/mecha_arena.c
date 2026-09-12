@@ -584,29 +584,38 @@ void mecha_arena_init(tMechaArena *pArena, int iArenaIdx)
      * each of them sixty-odd metres square -- a building our machines can
      * drive into rather than one they would wear.
      */
-    const float fRun = 150.0f * m;      /* base centre to the middle */
-    const float fBase = 46.0f * m;      /* half a base, which carries a keep */
-    const float fLaneZ = 26.0f * m;     /* how far out each lane runs */
-    const float fLaneW = 14.0f * m;     /* and how wide it is */
-    const float fHigh = 15.0f * m;      /* the bases stand above the middle */
-    const float fKeep = 31.0f * m;      /* half a keep, wall to wall */
+    /*
+     * Measured off the model the player supplied, at 4.5 cm to the unit.
+     * Two lanes run the length of the map, one either side of a hole, and
+     * they touch only at the very middle. The bases sit at the low ends and
+     * the lanes climb the whole way in, so leaving a base is uphill and
+     * falling back to it is downhill. [ARENA-17]
+     */
+    const float fRun = 180.0f * m;      /* base centre to the middle */
+    const float fBaseX = 63.0f * m;     /* and half a base, each way */
+    const float fBaseZ = 76.0f * m;
+    const float fNeck = 117.0f * m;     /* where the causeway leaves a base */
+    const float fLaneZ = 25.0f * m;     /* how far out each lane runs */
+    const float fLaneW = 11.0f * m;     /* and half its width */
+    const float fCrest = 25.0f * m;     /* the middle stands above the bases */
+    const float fJoin = 20.0f * m;      /* half the platform joining them */
+    const float fKeep = 34.0f * m;      /* half a keep, wall to wall */
     const float fSkin = 2.5f * m;       /* half the thickness of a wall */
-    const float fTall = 30.0f * m;      /* how high they stand above the pad */
-    const float fGate = 9.0f * m;       /* half the doorway */
-    /* Walls meet at the corners without touching. Sharing a face plane with
-     * the wall beside it would leave two quads in the same place and nothing
-     * to decide which is in front. [MESH-11] */
+    const float fTall = 30.0f * m;      /* how high the walls stand */
+    const float fGate = 14.0f * m;      /* half the pier the doors flank */
+    /* Walls meet at the corners without touching: two quads in one place
+     * have nothing to decide which is in front. [MESH-11] */
     const float fJoint = 0.5f * m;
     int iEnd;
-    int iLane;
+    int iStep;
 
     pArena->byShape = MECHA_ARENA_OPEN;
-    pArena->fHalfExtent = 200.0f * m;
+    pArena->fHalfExtent = 250.0f * m;
     pArena->fWallHeight = 0.0f;
-    pArena->iTerrainCells = 40;
-    pArena->iFloorTiles = 40;
-    pArena->fSkirt = 220.0f * m;
-    pArena->fKillY = -34.0f * m;
+    pArena->iTerrainCells = 64;
+    pArena->iFloorTiles = 48;
+    pArena->fSkirt = 240.0f * m;
+    pArena->fKillY = -30.0f * m;
     pArena->byFloorPalette = MECHA_PAL_FLOOR_B;
     pArena->byGridPalette = MECHA_PAL_GRID;
     pArena->byFloorTile = MECHA_TILE_PLATE_A;
@@ -614,29 +623,32 @@ void mecha_arena_init(tMechaArena *pArena, int iArenaIdx)
     pArena->byWallTile = MECHA_TILE_CONCRETE;
 
     /*
-     * Nothing, and then the map painted onto it: a base at each end and two
-     * lanes between them. The lanes are apart, so what is left down the
-     * middle of the map is a hole the length of the run -- the shape of the
-     * thing, and the reason a fight here is fought along one side or the
-     * other. The lanes fall away from the bases, so leaving one is downhill
-     * and getting back in is a climb. [ARENA-16]
+     * Nothing, and then the map painted back onto it: a base at each end,
+     * two lanes between them, and a platform where they meet in the middle.
+     * What is left between the lanes is the hole -- one on each side of that
+     * platform, which is the shape of the original and the reason a fight
+     * here is fought along one side or the other. [ARENA-16]
      */
     mecha_arena_void(pArena, 260.0f * m);
-    mecha_arena_pad(pArena, -fRun, 0.0f, fBase, fBase, fHigh);
-    mecha_arena_pad(pArena, fRun, 0.0f, fBase, fBase, fHigh);
-    for (iLane = 0; iLane < 2; iLane++) {
-      float fZ = iLane ? fLaneZ : -fLaneZ;
+    mecha_arena_pad(pArena, -fRun, 0.0f, fBaseX, fBaseZ, 0.0f);
+    mecha_arena_pad(pArena, fRun, 0.0f, fBaseX, fBaseZ, 0.0f);
+    for (iStep = 0; iStep < 16; iStep++) {
+      float fX0 = -fNeck + 2.0f * fNeck * (float)iStep / 16.0f;
+      float fX1 = -fNeck + 2.0f * fNeck * (float)(iStep + 1) / 16.0f;
+      float fY0 = fCrest * (1.0f - fabsf(fX0) / fNeck);
+      float fY1 = fCrest * (1.0f - fabsf(fX1) / fNeck);
 
-      mecha_arena_lane(pArena, -fRun + fBase * 0.5f, 0.0f, fZ, fLaneW,
-                       fHigh, 0.0f);
-      mecha_arena_lane(pArena, 0.0f, fRun - fBase * 0.5f, fZ, fLaneW,
-                       0.0f, fHigh);
+      mecha_arena_lane(pArena, fX0, fX1, -fLaneZ, fLaneW, fY0, fY1);
+      mecha_arena_lane(pArena, fX0, fX1, fLaneZ, fLaneW, fY0, fY1);
     }
+    /* And the crossing at the top of the climb, the only way from one lane
+     * to the other without jumping the hole. */
+    mecha_arena_pad(pArena, 0.0f, 0.0f, fJoin, fLaneZ + fLaneW, fCrest);
 
     /*
-     * And the keeps, one to a base. Four walls apiece with the one facing
-     * the causeway split either side of a gateway, so each is a hollow
-     * building a machine drives into rather than a block it drives round.
+     * The keeps, one to a base. Four walls apiece with the one facing the
+     * causeway split either side of a gateway, so each is a hollow building
+     * a machine drives into rather than a block it drives round.
      *
      * Open to the sky, because a box here is solid from the ground up: a
      * roof would be a lid with no way under it. What the walls give instead
@@ -645,49 +657,50 @@ void mecha_arena_init(tMechaArena *pArena, int iArenaIdx)
     for (iEnd = 0; iEnd < 2; iEnd++) {
       float fCentre = iEnd ? fRun : -fRun;
       float fSign = iEnd ? 1.0f : -1.0f;
-      /* The gate faces the middle of the map, the back wall away from it. */
       float fBack = fCentre + fSign * (fKeep - fSkin);
       float fFront = fCentre - fSign * (fKeep - fSkin);
-      /* A flank runs between the two and stops short at each end. */
       float fFlank = fKeep - 2.0f * fSkin - fJoint;
-      /* And each half of the gate wall runs from the doorway to the flank. */
-      float fPiece = (fFlank - fJoint - fGate) * 0.5f;
       int iSide;
 
-      /* Heights are absolute, and the keep stands on a raised base. */
-      mecha_arena_add_box(pArena, fBack, 0.0f, fSkin, fKeep, fHigh + fTall,
+      mecha_arena_add_box(pArena, fBack, 0.0f, fSkin, fKeep, fTall,
                           MECHA_PAL_BLOCK, MECHA_PAL_BLOCK_TOP);
       mecha_arena_face_stone(pArena);
       for (iSide = 0; iSide < 2; iSide++) {
-        float fAcross = iSide ? 1.0f : -1.0f;
-
-        mecha_arena_add_box(pArena, fCentre, fAcross * (fKeep - fSkin),
-                            fFlank, fSkin, fHigh + fTall,
-                            MECHA_PAL_BLOCK, MECHA_PAL_BLOCK_TOP);
-        mecha_arena_face_stone(pArena);
-        mecha_arena_add_box(pArena, fFront, fAcross * (fGate + fJoint + fPiece),
-                            fSkin, fPiece, fHigh + fTall,
+        mecha_arena_add_box(pArena, fCentre,
+                            (iSide ? 1.0f : -1.0f) * (fKeep - fSkin),
+                            fFlank, fSkin, fTall,
                             MECHA_PAL_BLOCK, MECHA_PAL_BLOCK_TOP);
         mecha_arena_face_stone(pArena);
       }
-    }
-
-    /* One block on each lane, out where the ground is lowest: the only cover
-     * between the keeps. */
-    for (iLane = 0; iLane < 2; iLane++) {
-      float fZ = iLane ? fLaneZ : -fLaneZ;
-
-      mecha_arena_add_box(pArena, iLane ? -46.0f * m : 46.0f * m, fZ,
-                          6.0f * m, 6.0f * m, 10.0f * m,
+      /*
+       * One pier in the middle of the wall facing the causeway, which leaves
+       * a doorway either side of it -- and the doorways come out where the
+       * lanes are. A single gate on the centreline would have opened onto
+       * the hole between them, which is where the machines went. [ARENA-16]
+       */
+      mecha_arena_add_box(pArena, fFront, 0.0f, fSkin, fGate, fTall,
                           MECHA_PAL_BLOCK, MECHA_PAL_BLOCK_TOP);
       mecha_arena_face_stone(pArena);
     }
 
-    /* The ring has to lie along the causeway rather than across it.
-     * [ARENA-14] */
-    pArena->bySpawnShape = MECHA_SPAWN_LANES;
-    pArena->fSpawnHalfX = 104.0f * m;
-    pArena->fSpawnHalfZ = fLaneZ;
+    /* One block partway up each climb, on opposite lanes, for the only cover
+     * on the run. Box heights are absolute, so a block on a slope carries
+     * the ground under it as well as its own height. */
+    for (iEnd = 0; iEnd < 2; iEnd++) {
+      float fAt = iEnd ? 68.0f * m : -68.0f * m;
+      float fZ = iEnd ? -fLaneZ : fLaneZ;
+      float fUnder = mecha_arena_terrain_height(pArena, fAt, fZ);
+
+      mecha_arena_add_box(pArena, fAt, fZ, 4.5f * m, 4.5f * m,
+                          fUnder + 9.0f * m,
+                          MECHA_PAL_BLOCK, MECHA_PAL_BLOCK_TOP);
+      mecha_arena_face_stone(pArena);
+    }
+
+    /* Inside the keeps, which is where this map starts a match. */
+    pArena->bySpawnShape = MECHA_SPAWN_BASES;
+    pArena->fSpawnHalfX = fRun;
+    pArena->fSpawnHalfZ = 17.0f * m;
     break;
   }
 
@@ -1274,23 +1287,27 @@ void mecha_arena_spawn_point(const tMechaArena *pArena, int iSlot, int iCount,
   iAngle = mecha_angle_wrap((MECHA_ANGLE_FULL * (iSlot % iCount)) / iCount);
 
   /*
-   * Two lanes with a hole between them: the machines go along the lanes,
-   * alternating sides and spread from one end to the other, so a duel opens
-   * with one at each end on opposite sides and a free-for-all fills both
-   * lanes rather than the hole. [ARENA-14]
+   * A stronghold at each end: the machines start inside them, alternating
+   * ends and spread across the width of a base, so a duel opens with one in
+   * each keep and a free-for-all fills both courtyards. Which is also how
+   * the map it is taken from starts a match. [ARENA-14]
    */
-  if (pArena->bySpawnShape == MECHA_SPAWN_LANES) {
-    float fAlong = iCount > 1
-                     ? 1.0f - 2.0f * (float)(iSlot % iCount)
-                              / (float)(iCount - 1)
-                     : 0.0f;
-    float fX = fAlong * pArena->fSpawnHalfX;
-    float fZ = (iSlot & 1) ? pArena->fSpawnHalfZ : -pArena->fSpawnHalfZ;
+  if (pArena->bySpawnShape == MECHA_SPAWN_BASES) {
+    int iPerEnd = (iCount + 1) / 2;
+    int iPair = (iSlot % iCount) / 2;
+    /* One a side stands off the middle rather than on it, or it starts
+     * facing the pier between the two doorways instead of a way out. */
+    float fSpread = iPerEnd > 1
+                      ? 2.0f * (float)iPair / (float)(iPerEnd - 1) - 1.0f
+                      : ((iSlot & 1) ? 1.0f : -1.0f);
+    float fX = (iSlot & 1) ? pArena->fSpawnHalfX : -pArena->fSpawnHalfX;
+    float fZ = fSpread * pArena->fSpawnHalfZ;
 
     if (pfX) *pfX = fX;
     if (pfZ) *pfZ = fZ;
-    /* Facing the middle of the map, worked out from where it ended up. */
-    if (piFacing) *piFacing = mecha_atan2_angle(-fX, -fZ);
+    /* Facing out of the gate, down the causeway. */
+    if (piFacing)
+      *piFacing = fX > 0.0f ? MECHA_ANGLE_QUARTER * 3 : MECHA_ANGLE_QUARTER;
     return;
   }
 

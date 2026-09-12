@@ -9,13 +9,9 @@
 
 //-------------------------------------------------------------------------------------------------
 /*
- * The computer pilot.
- *
- * It holds no state of its own. Everything it decides comes out of the world
- * it is handed plus the shared RNG, which keeps the whole tick deterministic
- * and means a recorded match replays exactly. Where it needs something that
- * looks like memory -- which way it is currently circling, say -- it derives
- * it from the tick counter instead of storing it.
+ * The computer pilot. Holds no state: every decision comes from the world it
+ * is handed plus the shared RNG, so a match replays exactly from its seed.
+ * Anything resembling memory is derived from the tick counter.
  */
 //-------------------------------------------------------------------------------------------------
 
@@ -24,56 +20,15 @@
 
 #define MECHA_AI_DODGE_LOOKAHEAD 0.9f
 
-/*
- * A shot this close to passing through us is worth spending boost to avoid.
- *
- * The same at every skill level, and deliberately so: scaling it with skill
- * was tried and made the ladder run backwards. A pilot that dodges more
- * dashes more, a dash changes its stance and swings it off the firing cone,
- * and the boost it burns eventually locks out -- at which point it cannot
- * dodge at all. Measured over five duels the wide-margin pilot both dealt
- * less and absorbed more than the middle rung. Reaction time is the honest
- * lever here; how near a miss has to be to be worth answering is not.
- */
+/* A shot this close to passing through us is worth boost to avoid. The same
+ * at every skill level; scaling it ran the ladder backwards. [AI-01] */
 #define MECHA_AI_DODGE_MARGIN (4.0f * MECHA_METRE)
 
 //-------------------------------------------------------------------------------------------------
 /*
- * What separates the skill levels.
- *
- * The pilot reads the same world struct the simulation ticks, so it cannot
- * be made worse by hiding things from it -- only by putting human limits
- * back in. The numbers below were picked by measuring, not by taste, and
- * what the measurements say is worth recording because it is not what the
- * obvious design would predict.
- *
- * iAimError is the lever that works. Every weapon aims itself at whatever is
- * locked, so with no error term the pilot fires a perfect solution every
- * time; adding one makes it miss, and over twelve duels the damage it lands
- * falls off cleanly once the error clears the target's own width -- about
- * 23400 at zero, 19100 at nine degrees, 15500 at fourteen. Below roughly
- * four degrees nothing happens at all: the shot radius and the target radius
- * swallow the error. Past about fourteen the curve flattens again.
- *
- * iReactionTicks is not a strength lever, however much it looks like one.
- * Sweeping it from zero to six tenths of a second moved the totals around
- * inside the run-to-run variance and never in a consistent direction: a
- * pilot that answers every shot the instant it is fired also dashes
- * constantly, and dashing swings it off its own firing cone and drains the
- * boost it needs to dodge with. It is kept because it changes how the pilot
- * reads -- a rookie visibly flinches late -- not because it is what makes
- * one harder to beat than another.
- *
- * iTriggerOdds barely touches the damage the pilot deals, but hesitating
- * measurably raises what it absorbs, which is the half a losing player
- * actually feels.
- *
- * iTurnPercent arrived with the auto-turn being confined to knife range.
- * Before that a locked machine squared itself up for free at any distance,
- * so how well a pilot steered did not exist as a quality and the levels did
- * not need to model it. Once pointing the machine became the pilot's job,
- * all three steered it perfectly and the ladder stopped meaning anything on
- * the damage-taken half.
+ * What separates the skill levels. Measured, not chosen by taste: aim error
+ * is the lever that works, reaction time is presentation rather than
+ * strength. [AI-02]
  */
 typedef struct
 {
@@ -120,19 +75,9 @@ static float mecha_ai_weapon_range(const tMechaWeaponDef *pWeapon)
 //-------------------------------------------------------------------------------------------------
 
 /*
- * How far ahead a machine has to look, which is how far it takes to stop.
- *
- * This was a linear guess -- a stride plus a fixed fraction of the speed --
- * and it undershot badly at the top end. A machine at seventy metres a
- * second checked forty-one metres ahead and needed eighty-six to stop,
- * so by the time the edge was inside its look-ahead it was already past
- * saving. Braking distance is v squared over twice the deceleration, and
- * the machine's own grip is what that deceleration is, so the number is
- * available rather than guessable.
- *
- * The stride on the front is reaction: a machine standing still still has
- * to not step off, and the multiplier is how much of the slide the state
- * in question can actually steer out of.
+ * How far ahead a machine has to look, which is how far it takes to stop:
+ * braking distance v^2/2a off its own grip, or a linear guess, whichever is
+ * further, plus a stride of reaction. [AI-03]
  */
 static float mecha_ai_stopping_look(const tMechaMechDef *pDef, float fSpeed,
                                     float fScale)
@@ -141,24 +86,13 @@ static float mecha_ai_stopping_look(const tMechaMechDef *pDef, float fSpeed,
   float fStop = fSpeed * fSpeed / (2.0f * fBrake);
   float fGuess = fScale * fSpeed;
 
-  /*
-   * Whichever is further. The old linear guess is the better number for a
-   * machine that stops hard -- a walker's grip is three times a car's, so
-   * its braking distance at a walking pace is shorter than its own
-   * reaction -- and the braking distance is the better number at the top
-   * end, where the guess undershoots by half. Taking the larger means
-   * this can only ever look further ahead than it used to.
-   */
   return MECHA_AI_FOOTING_WALK + (fStop > fGuess ? fStop : fGuess);
 }
 
 //-------------------------------------------------------------------------------------------------
 
-/*
- * Is there still an arena that way? fLook out along a direction that need
- * not be normalised; a zero-length direction is going nowhere and so is
- * always fine.
- */
+/* Is there still an arena fLook metres that way? The direction need not be
+ * normalised; a zero-length one is going nowhere and so is always fine. */
 static bool mecha_ai_footing_clear(const tMechaWorld *pWorld,
                                    const tMechaMech *pSelf, float fDirX,
                                    float fDirZ, float fLook, bool bEdgeKills)
@@ -182,12 +116,10 @@ static bool mecha_ai_footing_clear(const tMechaWorld *pWorld,
 //-------------------------------------------------------------------------------------------------
 
 /*
- * Somewhere to go instead. Turn away from the direction that ends in
- * nothing, widening the turn until the ground comes back -- on a roof with
- * a hole in the middle, straight back the way you came is as likely to be
- * the pit as the edge was, so "away" has to actually be looked at. Returns
- * false when every way out is as bad as the one in, and leaves the caller
- * to simply reverse.
+ * Somewhere to go instead: turn away, widening until the ground comes back.
+ * On a roof with a hole in it, straight back the way you came is as likely
+ * to be the pit as the edge was, so "away" has to be looked at. False when
+ * every way out is as bad as the way in; the caller then reverses.
  */
 static bool mecha_ai_footing_escape(const tMechaWorld *pWorld,
                                     const tMechaMech *pSelf, float fDirX,
@@ -349,16 +281,8 @@ static int mecha_ai_choose_weapon(const tMechaWorld *pWorld, int iMechIdx,
       continue;
 
     /*
-     * Damage per second, discounted by how far the shot is from the range
-     * it wants to be taken at -- and by how much of a spread will actually
-     * arrive.
-     *
-     * Counting every pellet of a scattergun as a hit at any distance is
-     * what made the gun car fire buckshot across the whole arena and never
-     * once reach for its rifle: seven pellets of twenty-four scored as a
-     * hundred and sixty-eight whether the target was fifteen metres away
-     * or a hundred and fifty. A cone that wide only lands as a cone up
-     * close, so what is scored is the share of it the target still covers.
+     * Damage per second, discounted by distance from the weapon's preferred
+     * range and by the share of a spread that actually arrives. [AI-04]
      */
     fWant = mecha_ai_weapon_range(pWeapon);
     fHits = (float)pWeapon->byCount;
@@ -442,11 +366,9 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
   /* --- driving, for the one machine that does ---------------------------- */
 
   /*
-   * A car is a different problem and gets a different pilot. There is no
-   * footwork to think about, no gauge to spend and no dodging worth the
-   * name: it can only point where it is going, so lining the gun up and
-   * closing the distance are the same act, and the answer to almost
-   * everything is to keep the throttle down and steer.
+   * A car gets a different pilot: no footwork, no gauge, no dodging worth
+   * the name. It can only point where it is going, so aiming and closing are
+   * the same act and the answer to most things is throttle and steering.
    */
   if (pDef->bWheeled) {
     int iDriveBearing = mecha_atan2_angle(pTarget->fX - pSelf->fX,
@@ -463,11 +385,8 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
         && iDriveOff > -MECHA_AI_DRIVE_STRAIGHT)
       pOut->iTurn = 0;
 
-    /*
-     * Where this is going, and whether there is any arena there. A car
-     * cannot step back, so the only thing it can do about an edge is get
-     * off the throttle and turn -- which is what a driver does.
-     */
+    /* A car cannot step back, so all it can do about an edge is lift off
+     * and turn. */
     if (fSpeed > 0.01f) {
       bClear = mecha_ai_footing_clear(
           pWorld, pSelf, pSelf->fVelX, pSelf->fVelZ,
@@ -481,11 +400,8 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
       pOut->bGuard = true;
       pOut->iTurn = iDriveOff >= 0 ? 100 : -100;
     } else {
-      /*
-       * Otherwise: drive at them. Backing off the throttle a little when
-       * the nose is well off line is the only steering aid it has, since
-       * the wheels bite hardest below the top speed.
-       */
+      /* Drive at them. Lifting when the nose is off line is its only
+       * steering aid: the wheels bite hardest below top speed. */
       pOut->bDash = iDriveOff < MECHA_AI_DRIVE_LIFT
                     && iDriveOff > -MECHA_AI_DRIVE_LIFT;
       /* Too slow to steer at all is worse than any of it: get moving. */
@@ -563,30 +479,19 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
     iOff = -iOff;
 
   /*
-   * The pilot plays by the same lock rules the player does, which it has to:
-   * a computer pilot exempt from them would be tracking through a mechanic
-   * the player is fighting, and the skill levels would stop meaning
-   * anything. The lock does the turning while it is live, so the manual
-   * stick is only reached for once it has gone -- and with the auto-turn no
-   * longer following, that stick is the only way back.
+   * The pilot plays by the player's lock rules. The machine turns itself
+   * only at knife range, so anywhere else the pilot steers for its lock
+   * exactly as the player does.
    */
-  /* The machine only turns itself at knife range now, so anywhere else the
-   * pilot has to steer -- exactly as the player does. Without this it would
-   * hold a lock it never has to work for while the player fights for
-   * theirs. */
   if (pSelf->byLock != MECHA_LOCK_HELD
       || fDistance > MECHA_CLOSE_QUARTERS) {
     int iSign = mecha_angle_delta(pSelf->iFacing, iBearing) >= 0 ? 1 : -1;
 
-    /* How decisively it points the machine is part of being good at this
-     * now. The machine only turns itself at knife range, so everywhere else
-     * a pilot that steers limply keeps losing the enemy off the edge of its
-     * cone -- which is the same thing that happens to a player who is bad
-     * at it. */
+    /* How hard it pushes the stick is part of being good at this: a limp
+     * steer keeps losing the enemy off the edge of the cone. [AI-02] */
     pOut->iTurn = iSign * pProfile->iTurnPercent;
-    /* Well off the nose, boosting is faster than turning: it snaps the lock
-     * on from any angle. Worth the gauge; grinding the machine around is
-     * not. */
+    /* Well off the nose, a boost snaps the lock on faster than turning
+     * does, and is worth the gauge. */
     if (iOff > MECHA_LOCK_CONE && fBoost > 0.35f && !pOut->bGuard)
       pOut->bDash = true;
   }
@@ -594,24 +499,14 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
   /* --- watching where it puts its feet ---------------------------------- */
 
   /*
-   * An arena can have nothing underneath it. On a roof with a hole through
-   * the middle, a pilot that only ever thought about the fight would walk
-   * into the pit and the round would be a farce.
-   *
-   * There is no path-finding here. There is only: do not step off, do not
-   * spend a burst that ends off, and if you are already going off, cancel.
-   *
-   * This is the last word on where the machine goes, after the dodging and
-   * after the lock has had its say about boosting round to face someone,
-   * because any of those will happily spend a burst over the edge.
+   * The last word on where the machine goes, after the dodging and the lock,
+   * because either will happily spend a burst over an edge. No path-finding:
+   * do not step off, do not spend a burst that ends off, cancel one that is
+   * already going off. [AI-05]
    */
   {
-    /*
-     * A wall is not a hazard. Only an arena you can leave has an edge worth
-     * avoiding, and a pit is worth avoiding anywhere -- checking the
-     * boundary on a walled arena would have the pilot backing away from
-     * walls it is entitled to fight against, which is a different game.
-     */
+    /* A wall is not a hazard: only an arena you can leave has an edge worth
+     * avoiding. A pit is worth avoiding anywhere. [AI-05] */
     bool bEdgeKills = pWorld->arena.byShape == MECHA_ARENA_OPEN;
     bool bCommitted = pSelf->byMove == MECHA_MOVE_DASH
                       || pSelf->iCoastTicks > 0;
@@ -652,12 +547,8 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
       bFooting = true;
     }
 
-    /*
-     * Letting go of the stick is not stopping. A machine that has just come
-     * out of a burst is still travelling, and a pilot standing there
-     * thinking about its next shot will ride that straight off the roof, so
-     * what it is carrying gets checked whether it asked for it or not.
-     */
+    /* Letting go of the stick is not stopping, so what the machine is still
+     * carrying gets checked whether it asked for it or not. [AI-05] */
     if (!bCommitted && pSelf->byMove != MECHA_MOVE_JUMP
         && pSelf->byMove != MECHA_MOVE_CANCEL
         && !mecha_ai_footing_clear(pWorld, pSelf, pSelf->fVelX, pSelf->fVelZ,
@@ -678,12 +569,8 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
       bFooting = true;
     }
 
-    /*
-     * In the air there is no stepping back and nothing to brake against.
-     * All a machine can do with the thrust it has left is lean towards the
-     * middle of the arena and hope it is enough, so that is what it does
-     * rather than pretending it can stop.
-     */
+    /* Airborne there is nothing to brake against, so it leans towards the
+     * middle of the arena rather than pretending it can stop. [AI-05] */
     if (pSelf->byMove == MECHA_MOVE_JUMP
         || pSelf->byMove == MECHA_MOVE_CANCEL) {
       float fLook = mecha_ai_stopping_look(pDef, fSpeed,
@@ -705,13 +592,8 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
       }
     }
 
-    /*
-     * And a burst already in flight is a different problem: it is
-     * committed, so wanting to stop is not enough. The way out is the way
-     * the player has -- push back against it and boost again -- so that is
-     * what the pilot does, aimed squarely at the edge it is about to go
-     * over.
-     */
+    /* A burst in flight is committed, so the way out is the player's: push
+     * back against it and boost again. [AI-05] */
     if (bCommitted) {
       float fCarryX = pSelf->byMove == MECHA_MOVE_DASH ? pSelf->fDashDirX
                                                        : pSelf->fVelX;
@@ -739,12 +621,8 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
                              * 100.0f);
         pOut->iMoveX = (int)((fOutX * fForwardZ - fOutZ * fForwardX)
                              * 100.0f);
-        /*
-         * The button, not the holding of it: a burst is started by the
-         * press and a cancel needs another one, so a pilot that simply
-         * leans on boost cancels nothing and rides the burst it wanted to
-         * throw away straight off the edge. Let it up, then press again.
-         */
+        /* The press, not the holding: a cancel needs a fresh one. Let the
+         * button up, then press again. [AI-06] */
         pOut->bDash = !pSelf->bDashHeld;
         pOut->bGuard = false;
         bFooting = true;
@@ -757,18 +635,10 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
 shooting:
 
   /*
-   * Held fire is a debug switch, and it is applied here rather than at the
-   * weapon: everything above this line has already run, so the pilot goes on
-   * closing, circling and dodging exactly as it would. It simply never pulls
-   * a trigger, which is the point -- a machine that stopped fighting would
-   * not show you anything about how the fighting looks.
-   */
-  /*
-   * And a pilot that is busy not falling off the world does not take the
-   * shot. Firing locks a machine out of acting for the recovery, and a
-   * machine that cannot act cannot steer -- so a shot taken while sliding
-   * towards an edge is a shot that spends the only ticks it had to stop
-   * itself. It was the last way the computer pilots were leaving the roof.
+   * Held fire is applied at the trigger, so a pilot with it set still closes,
+   * circles and dodges. A pilot saving its footing does not shoot at all:
+   * firing locks it out of acting, and it cannot steer while it cannot act.
+   * [AI-07]
    */
   iSlot = (pWorld->bAiHoldFire || bFooting)
               ? -1
@@ -782,11 +652,10 @@ shooting:
        * down the instant the solution is good. */
       && mecha_rng_range(&pWorld->rng, pProfile->iTriggerOdds) == 0) {
     /*
-     * How badly this pilot is about to shoot. Rolled once per shot, on the
-     * shared RNG so the match still replays from its seed, and read by
-     * mecha_sim_fire after it has worked out where the target will be --
-     * every weapon aims itself at the lock, so this is the only thing that
-     * makes a computer pilot miss.
+     * How badly this pilot is about to shoot. Rolled once per shot on the
+     * shared RNG, and read by mecha_sim_fire after it has worked out the
+     * lead. Every weapon aims itself, so this is the only source of misses.
+     * [AI-02]
      */
     pWorld->aMechs[iMechIdx].iAimError =
         pProfile->iAimError > 0

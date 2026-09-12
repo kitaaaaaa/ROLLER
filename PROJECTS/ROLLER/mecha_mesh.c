@@ -35,7 +35,12 @@ static bool s_bCarSkin = false;
 /* The gun: how far it swings off the nose, how it is held, what firing does
  * to it. */
 #define MECHA_GUN_YAW_LIMIT   MECHA_DEG(40)
-#define MECHA_GUN_ROLL        MECHA_DEG(84)
+/* Where the mount sits on the car -- out over the right wing, forward of
+ * the screen -- and how long the gun is against the car's own length. */
+#define MECHA_GUN_MOUNT_X     1.02f
+#define MECHA_GUN_MOUNT_Y     0.66f
+#define MECHA_GUN_MOUNT_Z     0.85f
+#define MECHA_GUN_LENGTH      0.27f
 /* How far across the bonnet it points on top of wherever it is aiming. */
 #define MECHA_GUN_ACROSS      MECHA_DEG(9)
 #define MECHA_GUN_GRIP_RAKE   MECHA_DEG(22)
@@ -1205,50 +1210,77 @@ static void mecha_add_zizin_gun(tMechaQuadList *pList,
   int iYaw = mecha_clampi(mecha_angle_delta(pMech->iFacing, iAimYaw),
                           -MECHA_GUN_YAW_LIMIT, MECHA_GUN_YAW_LIMIT);
   tMechaPose gun;
-  float fBarrel = fLength * 0.52f;
-  float fThick = fLength * 0.11f;
+  /* The whole weapon, nose to backplate. A heavy machine gun is a little
+   * over a quarter the length of the car it is bolted to. */
+  float fGun = fLength * MECHA_GUN_LENGTH;
+  float fBore = fGun * 0.055f;
+  float fMount = pDef->fHeight * MECHA_GUN_MOUNT_Y;
 
   /*
-   * Beside the front right wheel, and turned over only to shoot: at rest it
-   * is carried upright like a pistol at the ready, and it rolls flat as the
-   * shot goes off so the slide works across the bonnet. The roll rides the
-   * same recovery clock the kick does, so it turns over with the shot and
-   * comes back up as the next round is chambered. [MESH-13]
+   * A heavy machine gun on a pylon over the front right wing, not a pistol
+   * held out beside the car. The pylon runs down into the bodywork on
+   * purpose -- it is a mount, and a mount that stops short of what it is
+   * bolted to reads as a prop floating beside the car. Firing shoves the
+   * whole thing back and tips the muzzle up as the recovery runs down.
+   * [MESH-13]
    */
   mecha_pose_child(&gun, pCar,
-                   pDef->fRadius * (1.45f + 0.12f * fKick),
-                   pDef->fHeight * (0.42f + 0.42f * fKick),
-                   pDef->fRadius * (1.25f - 0.80f * fKick),
+                   pDef->fRadius * MECHA_GUN_MOUNT_X,
+                   fMount,
+                   pDef->fRadius * MECHA_GUN_MOUNT_Z - fGun * 0.18f * fKick,
                    iYaw - MECHA_GUN_ACROSS,
                    -iAimPitch + (int)((float)MECHA_GUN_KICK_PITCH * fKick),
-                   (int)((float)MECHA_GUN_ROLL * fKick));
+                   0);
 
-  /* Slide and barrel, out along the line of fire. */
-  mecha_add_box(pList, &gun, 0.0f, 0.0f, fBarrel * 0.5f,
-                fThick * 0.85f, fThick, fBarrel * 0.5f, byBody, byTrim, 0);
-  /* The muzzle, which is the only part of it anybody looks at. */
-  mecha_add_box(pList, &gun, 0.0f, 0.0f, fBarrel,
-                fThick * 0.5f, fThick * 0.5f, fThick * 0.35f,
-                byGlow, byGlow, MECHA_QUAD_GLOW);
   /*
-   * Frame under the slide, and the grip hanging off the back of it at the
-   * angle a pistol grip sits at. The frame deliberately does not start
-   * where the slide does: two boxes that share a back face share a plane,
-   * and two coplanar quads that overlap have no answer to which is in
-   * front.
+   * No two of these boxes share a face plane, and none comes within a
+   * centimetre of doing so. Two coplanar quads that overlap have no answer
+   * to which is in front and there is no depth buffer to settle it, so the
+   * extents below are deliberately odd rather than tidy. [MESH-11]
    */
-  mecha_add_box(pList, &gun, 0.0f, -fThick * 1.3f, fBarrel * 0.36f,
-                fThick * 0.7f, fThick * 0.32f, fBarrel * 0.30f,
-                byTrim, byTrim, 0);
-  {
-    tMechaPose grip;
 
-    mecha_pose_child(&grip, &gun, 0.0f, -fThick * 0.8f, -fThick * 0.2f,
-                     0, MECHA_GUN_GRIP_RAKE, 0);
-    mecha_add_box(pList, &grip, 0.0f, -fLength * 0.17f, 0.0f,
-                  fThick * 0.62f, fLength * 0.17f, fThick * 0.9f,
+  /* The pylon, down into the wing. It stops inside the bodywork rather
+   * than under it: a mount that reaches past the floor hangs below the car
+   * and catches the ground. */
+  {
+    float fDrop = fMount - MECHA_M(0.55f);
+
+    if (fDrop < fBore)
+      fDrop = fBore;
+    mecha_add_box(pList, &gun, 0.0f, -fDrop * 0.5f, -fGun * 0.04f,
+                  fBore * 0.90f, fDrop * 0.5f, fBore * 1.30f,
                   byTrim, byTrim, 0);
   }
+
+  /* Receiver: the square body of it, which is most of what reads at
+   * distance. */
+  mecha_add_box(pList, &gun, 0.0f, 0.0f, -fGun * 0.16f,
+                fBore * 1.50f, fBore * 1.70f, fGun * 0.26f,
+                byBody, byTrim, 0);
+
+  /* Backplate and spade grips. */
+  mecha_add_box(pList, &gun, 0.0f, -fBore * 0.17f, -fGun * 0.445f,
+                fBore * 1.62f, fBore * 1.28f, fBore * 0.66f,
+                byTrim, byTrim, 0);
+
+  /* Jacket over the rear of the barrel, then the barrel running out past
+   * it. */
+  mecha_add_box(pList, &gun, 0.0f, 0.0f, fGun * 0.225f,
+                fBore * 1.02f, fBore * 1.02f, fGun * 0.175f,
+                byTrim, byBody, 0);
+  mecha_add_box(pList, &gun, 0.0f, 0.0f, fGun * 0.475f,
+                fBore * 0.56f, fBore * 0.56f, fGun * 0.165f,
+                byBody, byTrim, 0);
+
+  /* The muzzle, which is the only part of it anybody looks at. */
+  mecha_add_box(pList, &gun, 0.0f, 0.0f, fGun * 0.625f,
+                fBore * 0.78f, fBore * 0.78f, fBore * 0.52f,
+                byGlow, byGlow, MECHA_QUAD_GLOW);
+
+  /* Ammunition box on the feed side, which is what says heavy. */
+  mecha_add_box(pList, &gun, -fBore * 2.24f, -fBore * 0.60f, -fGun * 0.30f,
+                fBore * 0.98f, fBore * 1.00f, fBore * 1.36f,
+                byTrim, byBody, 0);
 }
 
 //-------------------------------------------------------------------------------------------------

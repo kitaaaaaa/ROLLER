@@ -21,7 +21,7 @@
 #define MECHA_TICK_HZ          60
 #define MECHA_TICK_SECONDS     (1.0f / (float)MECHA_TICK_HZ)
 
-#define MECHA_MAX_MECHS         8
+#define MECHA_MAX_MECHS         16
 #define MECHA_MAX_PROJECTILES 192
 #define MECHA_MAX_EFFECTS      96
 #define MECHA_MAX_OBSTACLES    24

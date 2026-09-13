@@ -3122,6 +3122,8 @@ static void mecha_reset_mech_for_round(tMechaWorld *pWorld, int iMechIdx,
   pMech->iFreeTurnTicks = 0;
   pMech->iRecentreTicks = 0;
   pMech->iStickYaw = pMech->iFacing;
+  pMech->iSkirtYaw = 0;
+  pMech->iSkirtTicks = 0;
 
   for (i = 0; i < MECHA_WEAPON_SLOTS; i++) {
     /* Magazines are per slot, not per stance: the standing loadout is what a
@@ -3469,6 +3471,10 @@ int mecha_sim_add_mech(tMechaWorld *pWorld, int iDefIdx,
                                 : (iDefIdx % mecha_def_count()));
     pMech->byController = byController;
     pMech->byTeam = byTeam;
+    /* One of the four lines across a way, so a side that has to file down a
+     * causeway does not file down the middle of it. Whiplash picks a
+     * driver's line at random when it puts the car on the track. [AI-13] */
+    pMech->byAiLine = (uint8_t)(i & 3);
     if (byController != MECHA_CONTROL_HUMAN) {
       /*
        * A colour each, so a crowded arena is not sixteen machines in the
@@ -3488,6 +3494,8 @@ int mecha_sim_add_mech(tMechaWorld *pWorld, int iDefIdx,
   pMech->iFreeTurnTicks = 0;
   pMech->iRecentreTicks = 0;
   pMech->iStickYaw = pMech->iFacing;
+  pMech->iSkirtYaw = 0;
+  pMech->iSkirtTicks = 0;
     pMech->iLastFiredSlot = -1;
     pMech->fArmour = mecha_def_get(pMech->byDefIdx)->fArmour;
     pWorld->iMechCount++;

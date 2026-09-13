@@ -25,6 +25,11 @@
 #define MECHA_MAX_PROJECTILES 192
 #define MECHA_MAX_EFFECTS      96
 #define MECHA_MAX_OBSTACLES    32
+/* Ways across an arena, and stations on one. Two is a causeway apiece; the
+ * stations are the ones the map was measured at, with an end on each base.
+ * [AI-13] */
+#define MECHA_MAX_WAYS         2
+#define MECHA_WAY_POINTS       24
 
 /* Terrain: a grid of square cells, a height per corner and a surface word
  * per cell. Coarse on purpose. [ARENA-04] */
@@ -456,6 +461,18 @@ typedef struct
    * computer pilot rolls it per shot and the player leaves it at zero. */
   int   iAimError;
 
+  /* The way round a gap the computer pilot has settled on, as a heading in
+   * the shared circle, and how long it holds it for. Without the hold it
+   * re-picks every tick and walks on the spot; the player never sets
+   * either. [AI-12] */
+  int   iSkirtYaw;
+  int   iSkirtTicks;
+
+  /* Which of the four lines across a way this pilot walks, the way a
+   * Whiplash driver picks one of its four AI lines: sixteen machines down
+   * one line is a queue rather than a fight. [AI-13] */
+  uint8_t byAiLine;
+
   /* The tick the machine went down on: the grace is the tick rather than
    * the hit, so a whole volley still counts. [SIM-04] */
   int   iDownTick;
@@ -579,6 +596,28 @@ typedef struct
 
 //-------------------------------------------------------------------------------------------------
 
+/* One station on a way across the arena: where the middle of it is, and how
+ * far either side of that there is still ground. [AI-13] */
+typedef struct
+{
+  float fX;
+  float fZ;
+  float fHalf;
+} tMechaWayPoint;
+
+typedef struct
+{
+  int             iCount;
+  tMechaWayPoint  aPoints[MECHA_WAY_POINTS];
+  /* Where this way comes closest to each of the others: the station to walk
+   * to when the enemy is on one of them. Two lanes either side of a hole
+   * are joined by exactly one crossing, and this is how a pilot finds it.
+   * [AI-13] */
+  int             aiLink[MECHA_MAX_WAYS];
+} tMechaWay;
+
+//-------------------------------------------------------------------------------------------------
+
 /*
  * What the boundary is. A square arena is walled on four sides, an octagon
  * on eight, and an open one is not walled at all -- its floor simply stops,
@@ -614,6 +653,18 @@ typedef struct
   uint8_t byWallTile;
   int   iObstacleCount;
   tMechaObstacle aObstacles[MECHA_MAX_OBSTACLES];
+
+  /*
+   * The ways across, for arenas whose ground does not join up. Whiplash
+   * gives its computer drivers four AI lines a chunk and has them aim at a
+   * point interpolated along the one they are on; a causeway is the same
+   * thing with the track taken away, so an arena that has one publishes it
+   * as a chain of stations and the pilots read it the same way. An arena
+   * whose floor is one piece publishes none, and nothing changes for it.
+   * [AI-13]
+   */
+  int       iWayCount;
+  tMechaWay aWays[MECHA_MAX_WAYS];
 
   /*
    * The ground itself. afNode holds a height per grid corner and auiSurface

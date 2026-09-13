@@ -181,6 +181,22 @@ static void mecha_arena_lane(tMechaArena *pArena, float fX0, float fX1,
 
 //-------------------------------------------------------------------------------------------------
 
+/* One more station on the way being built. Silently full is better than
+ * half a way: a chain that stops in the middle of a causeway leads pilots
+ * to the edge of it. [AI-13] */
+static void mecha_arena_way_point(tMechaWay *pWay, float fX, float fZ,
+                                  float fHalf)
+{
+  if (!pWay || pWay->iCount >= MECHA_WAY_POINTS)
+    return;
+  pWay->aPoints[pWay->iCount].fX = fX;
+  pWay->aPoints[pWay->iCount].fZ = fZ;
+  pWay->aPoints[pWay->iCount].fHalf = fHalf;
+  pWay->iCount++;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 /*
  * The last box added is masonry rather than a glazed facade. Cover defaults
  * to the retail building art, which is right for a city and wrong for a
@@ -621,6 +637,16 @@ void mecha_arena_init(tMechaArena *pArena, int iArenaIdx)
       { -34.8f, 14.4f,  33.6f, 14.4f,  4.8f },
       { -31.8f, 15.0f,  36.6f, 24.6f,  2.1f },   /* +120 m, onto the base */
     };
+    /*
+     * How much wider the causeways are built than they were measured. The
+     * original is walked by a man; this is driven by something eight metres
+     * across, on ground made of eight-metre cells whose outermost one is a
+     * ramp into the void rather than floor. At the measured width there is
+     * about a machine and a half of usable lane, which is not a causeway to
+     * fight along -- it is a tightrope. The shape, the bow and the pinch are
+     * the measurements' own; only the width is ours. [ARENA-19]
+     */
+    const float fWide = 1.6f;
     const float fStation = 15.0f * m;   /* how far apart those stations are */
     const float fRun = 252.0f * m;      /* base centre to the middle */
     const float fBaseX = 108.0f * m;    /* and half a base, each way */
@@ -665,11 +691,11 @@ void mecha_arena_init(tMechaArena *pArena, int iArenaIdx)
       float fX1 = (-7.0f + (float)iStep) * fStation;
 
       mecha_arena_lane(pArena, fX0, fX1,
-                       pA[0] * m, pA[1] * m, pA[4] * m,
-                       pB[0] * m, pB[1] * m, pB[4] * m);
+                       pA[0] * m, pA[1] * m * fWide, pA[4] * m,
+                       pB[0] * m, pB[1] * m * fWide, pB[4] * m);
       mecha_arena_lane(pArena, fX0, fX1,
-                       pA[2] * m, pA[3] * m, pA[4] * m,
-                       pB[2] * m, pB[3] * m, pB[4] * m);
+                       pA[2] * m, pA[3] * m * fWide, pA[4] * m,
+                       pB[2] * m, pB[3] * m * fWide, pB[4] * m);
     }
 
     /*
@@ -683,17 +709,48 @@ void mecha_arena_init(tMechaArena *pArena, int iArenaIdx)
       float fEdge = fRun - fBaseX;
 
       mecha_arena_lane(pArena, -fEdge, -8.0f * fStation,
-                       pIn[0] * m, pIn[1] * m, 0.0f,
-                       pIn[0] * m, pIn[1] * m, pIn[4] * m);
+                       pIn[0] * m, pIn[1] * m * fWide, 0.0f,
+                       pIn[0] * m, pIn[1] * m * fWide, pIn[4] * m);
       mecha_arena_lane(pArena, -fEdge, -8.0f * fStation,
-                       pIn[2] * m, pIn[3] * m, 0.0f,
-                       pIn[2] * m, pIn[3] * m, pIn[4] * m);
+                       pIn[2] * m, pIn[3] * m * fWide, 0.0f,
+                       pIn[2] * m, pIn[3] * m * fWide, pIn[4] * m);
       mecha_arena_lane(pArena, 8.0f * fStation, fEdge,
-                       pOut[0] * m, pOut[1] * m, pOut[4] * m,
-                       pOut[0] * m, pOut[1] * m, 0.0f);
+                       pOut[0] * m, pOut[1] * m * fWide, pOut[4] * m,
+                       pOut[0] * m, pOut[1] * m * fWide, 0.0f);
       mecha_arena_lane(pArena, 8.0f * fStation, fEdge,
-                       pOut[2] * m, pOut[3] * m, pOut[4] * m,
-                       pOut[2] * m, pOut[3] * m, 0.0f);
+                       pOut[2] * m, pOut[3] * m * fWide, pOut[4] * m,
+                       pOut[2] * m, pOut[3] * m * fWide, 0.0f);
+    }
+
+    /*
+     * And the same two lanes published as ways, station for station, so the
+     * computer pilots have something to follow when the ground between them
+     * and the enemy is not there. The chain is the measurement table again
+     * -- centre and half-width per station -- with an end on each base so a
+     * machine in a keep is led out of a doorway rather than at the hole.
+     * [AI-13]
+     */
+    {
+      int iLane;
+
+      pArena->iWayCount = 2;
+      for (iLane = 0; iLane < 2; iLane++) {
+        tMechaWay *pWay = &pArena->aWays[iLane];
+        int iCol = iLane * 2;
+        float fEdge = fRun - fBaseX;
+
+        pWay->iCount = 0;
+        mecha_arena_way_point(pWay, -fRun, aafLane[0][iCol] * m, fBaseZ);
+        mecha_arena_way_point(pWay, -fEdge, aafLane[0][iCol] * m,
+                              aafLane[0][iCol + 1] * m * fWide);
+        for (iStep = 0; iStep <= 16; iStep++)
+          mecha_arena_way_point(pWay, (-8.0f + (float)iStep) * fStation,
+                                aafLane[iStep][iCol] * m,
+                                aafLane[iStep][iCol + 1] * m * fWide);
+        mecha_arena_way_point(pWay, fEdge, aafLane[16][iCol] * m,
+                              aafLane[16][iCol + 1] * m * fWide);
+        mecha_arena_way_point(pWay, fRun, aafLane[16][iCol] * m, fBaseZ);
+      }
     }
 
     /*
@@ -814,6 +871,48 @@ void mecha_arena_init(tMechaArena *pArena, int iArenaIdx)
       tMechaObstacle *pBox = &pArena->aObstacles[iBox];
 
       pBox->fBaseY = mecha_arena_terrain_height(pArena, pBox->fX, pBox->fZ);
+    }
+  }
+
+  /*
+   * And every way learns where it comes closest to each of the others. Two
+   * lanes either side of a hole are one route only at the crossing, and a
+   * pilot chasing someone on the far lane has to be told where that is --
+   * otherwise it walks its own lane abreast of the enemy for the whole
+   * round, which is what it did. Once, here, rather than every tick.
+   * [AI-13]
+   */
+  {
+    int iWay;
+    int iOther;
+
+    for (iWay = 0; iWay < pArena->iWayCount; iWay++) {
+      for (iOther = 0; iOther < MECHA_MAX_WAYS; iOther++) {
+        const tMechaWay *pThem;
+        float fBest = 0.0f;
+        int iBest = 0;
+        int i;
+        int j;
+
+        pArena->aWays[iWay].aiLink[iOther] = 0;
+        if (iOther == iWay || iOther >= pArena->iWayCount)
+          continue;
+        pThem = &pArena->aWays[iOther];
+        for (i = 0; i < pArena->aWays[iWay].iCount; i++) {
+          const tMechaWayPoint *pAt = &pArena->aWays[iWay].aPoints[i];
+
+          for (j = 0; j < pThem->iCount; j++) {
+            float fGap = mecha_length2(pThem->aPoints[j].fX - pAt->fX,
+                                       pThem->aPoints[j].fZ - pAt->fZ);
+
+            if (i == 0 || fGap < fBest) {
+              fBest = fGap;
+              iBest = i;
+            }
+          }
+        }
+        pArena->aWays[iWay].aiLink[iOther] = iBest;
+      }
     }
   }
 }
@@ -1327,6 +1426,152 @@ bool mecha_arena_trace_segment(const tMechaArena *pArena,
   if (pfHitX) *pfHitX = fX0 + fDx * fBest;
   if (pfHitY) *pfHitY = fY0 + fDy * fBest;
   if (pfHitZ) *pfHitZ = fZ0 + fDz * fBest;
+  return true;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/* Which station of a way is nearest a point, and how far off it that is. */
+static int mecha_arena_way_nearest(const tMechaWay *pWay, float fX, float fZ,
+                                   float *pfDist)
+{
+  float fBest = 0.0f;
+  int iBest = -1;
+  int i;
+
+  for (i = 0; i < pWay->iCount; i++) {
+    float fDx = pWay->aPoints[i].fX - fX;
+    float fDz = pWay->aPoints[i].fZ - fZ;
+    float fDist = mecha_length2(fDx, fDz);
+
+    if (iBest < 0 || fDist < fBest) {
+      fBest = fDist;
+      iBest = i;
+    }
+  }
+  if (pfDist)
+    *pfDist = fBest;
+  return iBest;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+bool mecha_arena_way_aim(const tMechaArena *pArena, float fX, float fZ,
+                         float fToX, float fToZ, float fLook, int iLine,
+                         float *pfAimX, float *pfAimZ)
+{
+  /* Four lines across the way, the way a Whiplash chunk carries four.
+   * Sixteen machines walking one line is a queue. [AI-13] */
+  static const float afLine[4] = { -0.75f, -0.25f, 0.25f, 0.75f };
+  const tMechaWay *pWay = NULL;
+  float fBest = 0.0f;
+  float fWalked = 0.0f;
+  float fAtX = fX;
+  float fAtZ = fZ;
+  float fDirX = 0.0f;
+  float fDirZ = 0.0f;
+  float fHalf = 0.0f;
+  float fOff;
+  int iNear = -1;
+  int iGoal = -1;
+  int iStep;
+  int i;
+
+  if (!pArena || pArena->iWayCount <= 0 || fLook <= 0.0f)
+    return false;
+
+  /*
+   * The way this machine is on, and the way the enemy is on. Where they are
+   * the same, the goal is the station by the enemy; where they differ, it is
+   * the crossing between the two -- walking abreast of someone on the far
+   * side of a hole gets nobody anywhere. [AI-13]
+   */
+  {
+    const tMechaWay *pTheirs = NULL;
+    float fTheirs = 0.0f;
+    int iMine = -1;
+    int iTheirs = -1;
+
+    for (i = 0; i < pArena->iWayCount; i++) {
+      const tMechaWay *pTry = &pArena->aWays[i];
+      float fHere = 0.0f;
+      float fThere = 0.0f;
+      int iHere = mecha_arena_way_nearest(pTry, fX, fZ, &fHere);
+      int iThere = mecha_arena_way_nearest(pTry, fToX, fToZ, &fThere);
+
+      if (iHere < 0 || iThere < 0)
+        continue;
+      if (!pWay || fHere < fBest) {
+        fBest = fHere;
+        pWay = pTry;
+        iNear = iHere;
+        iMine = i;
+      }
+      if (!pTheirs || fThere < fTheirs) {
+        fTheirs = fThere;
+        pTheirs = pTry;
+        iTheirs = i;
+      }
+    }
+    if (!pWay || iMine < 0 || iTheirs < 0)
+      return false;
+    iGoal = iMine == iTheirs
+              ? mecha_arena_way_nearest(pWay, fToX, fToZ, NULL)
+              : pWay->aiLink[iTheirs];
+  }
+  if (iNear == iGoal)
+    return false;
+
+  iStep = iGoal > iNear ? 1 : -1;
+
+  /*
+   * Then the aim point, which is Whiplash's: walk the chain from here by the
+   * look-ahead and interpolate where that lands, rather than pointing at a
+   * station and turning on the spot when it arrives.
+   */
+  for (i = iNear; i != iGoal; i += iStep) {
+    const tMechaWayPoint *pNext = &pWay->aPoints[i + iStep];
+    float fDx = pNext->fX - fAtX;
+    float fDz = pNext->fZ - fAtZ;
+    float fLeg = mecha_length2(fDx, fDz);
+
+    if (fLeg < 0.01f)
+      continue;
+    fDirX = fDx / fLeg;
+    fDirZ = fDz / fLeg;
+    fHalf = pNext->fHalf;
+    if (fWalked + fLeg >= fLook) {
+      float fRest = fLook - fWalked;
+
+      fAtX += fDirX * fRest;
+      fAtZ += fDirZ * fRest;
+      fWalked = fLook;
+      break;
+    }
+    fWalked += fLeg;
+    fAtX = pNext->fX;
+    fAtZ = pNext->fZ;
+  }
+  if (fWalked <= 0.0f)
+    return false;
+
+  /*
+   * And the line across it. The station says how wide the way was measured,
+   * but the ground is a grid of cells with the heights interpolated between
+   * them, so the outermost cell of any edge is a ramp into the void rather
+   * than floor: a machine standing on it is already on its way down. The
+   * line is laid out on what is left after that. [AI-13]
+   */
+  if (iLine < 0 || iLine > 3)
+    iLine = 0;
+  fHalf -= pArena->fHalfExtent * 2.0f / (float)mecha_arena_cells(pArena);
+  if (fHalf < 0.0f)
+    fHalf = 0.0f;
+  fOff = afLine[iLine] * fHalf;
+  if (pfAimX)
+    *pfAimX = fAtX + fDirZ * fOff;
+  if (pfAimZ)
+    *pfAimZ = fAtZ - fDirX * fOff;
   return true;
 }
 

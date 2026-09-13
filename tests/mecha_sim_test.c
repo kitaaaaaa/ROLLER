@@ -6605,6 +6605,155 @@ static int test_the_pilot_turns_a_dash_it_is_already_in(void)
  * the middle of the run, and a fall that is a fall rather than a deletion.
  * [TEST-14]
  */
+/*
+ * The way spine, which is the arena's half of the pilots being able to walk
+ * a causeway: a chain of stations down each lane, an aim point along it, and
+ * ground under every one of them. [AI-13]
+ */
+static int test_a_causeway_publishes_a_way_along_it(void)
+{
+    tMechaArena arena;
+    int iFace = arena_by_name("FACING WORLDS");
+    const float fHigh = MECHA_M(40.0f);
+    float fAimX = 0.0f;
+    float fAimZ = 0.0f;
+    float fFrom;
+    int iWay;
+    int i;
+
+    CHECK(iFace >= 0);
+    mecha_arena_init(&arena, iFace);
+    CHECK(arena.iWayCount == 2);
+
+    /* Every station of every way stands on something, end to end. */
+    for (iWay = 0; iWay < arena.iWayCount; iWay++) {
+        const tMechaWay *pWay = &arena.aWays[iWay];
+
+        CHECK(pWay->iCount >= 18);
+        for (i = 0; i < pWay->iCount; i++) {
+            const tMechaWayPoint *pAt = &pWay->aPoints[i];
+
+            CHECK(mecha_arena_ground_height(&arena, pAt->fX, pAt->fZ, fHigh)
+                  > arena.fKillY);
+            /* And is wide enough to fight along rather than file down:
+             * two machines abreast, with the soft outer cell to spare.
+             * [ARENA-19] */
+            CHECK(pAt->fHalf > MECHA_M(20.0f));
+        }
+        /* The chain runs the length of the map, base to base. */
+        CHECK(pWay->aPoints[0].fX < -MECHA_M(200.0f));
+        CHECK(pWay->aPoints[pWay->iCount - 1].fX > MECHA_M(200.0f));
+    }
+    /* The two ways are on opposite sides of the hole. */
+    CHECK(arena.aWays[0].aPoints[1].fZ < 0.0f);
+    CHECK(arena.aWays[1].aPoints[1].fZ > 0.0f);
+
+    /*
+     * And the aim a pilot reads off it: from one base towards the other, a
+     * point ahead along a lane, on ground, and further on than the machine
+     * asking. Walked in steps the way a machine would walk it, the whole
+     * line stays out of the hole -- which is the entire point of it.
+     */
+    for (fFrom = -MECHA_M(240.0f); fFrom < MECHA_M(200.0f);
+         fFrom += MECHA_M(20.0f)) {
+        float fZ = fFrom < -MECHA_M(150.0f) ? 0.0f : -MECHA_M(40.0f);
+        float fWasX = fAimX;
+
+        CHECK(mecha_arena_way_aim(&arena, fFrom, fZ, MECHA_M(252.0f), 0.0f,
+                                  MECHA_M(64.0f), 1, &fAimX, &fAimZ));
+        CHECK(fAimX > fFrom);
+        CHECK(mecha_arena_ground_height(&arena, fAimX, fAimZ, fHigh)
+              > arena.fKillY);
+        (void)fWasX;
+    }
+
+    /* An arena whose floor is one piece publishes none, and its pilots go on
+     * walking straight at each other. */
+    for (i = 0; i < mecha_arena_count(); i++) {
+        tMechaArena other;
+
+        if (i == iFace)
+            continue;
+        mecha_arena_init(&other, i);
+        CHECK(other.iWayCount == 0);
+        CHECK(!mecha_arena_way_aim(&other, 0.0f, 0.0f, MECHA_M(100.0f),
+                                   0.0f, MECHA_M(64.0f), 0, &fAimX,
+                                   &fAimZ));
+    }
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
+/*
+ * And the pilots' half of it: on a map that is two causeways and a hole,
+ * both sides leave home and close on each other. Before the way spine they
+ * paced their own bases for the whole round, four hundred metres apart, and
+ * a fight between them was two machines shooting at a skyline. [AI-13]
+ */
+static int test_pilots_walk_a_causeway_to_close(void)
+{
+    tMechaWorld world;
+    tMechaInput aInputs[MECHA_MAX_MECHS];
+    int iFace = arena_by_name("FACING WORLDS");
+    float fFar0 = -MECHA_M(400.0f);
+    float fFar1 = MECHA_M(400.0f);
+    float fNearest = MECHA_M(9999.0f);
+    int i;
+    int t;
+
+    CHECK(iFace >= 0);
+    mecha_sim_init(&world, iFace, 0x0FACEu, 1);
+    /* No clock, so nothing ends the round but machines finding each other. */
+    mecha_sim_set_round_seconds(&world, 0);
+    for (i = 0; i < MECHA_MAX_MECHS; i++)
+        CHECK(mecha_sim_add_mech(&world, i % mecha_def_count(),
+                                 MECHA_CONTROL_AI, (uint8_t)(i & 1)) >= 0);
+    mecha_sim_begin_match(&world);
+
+    memset(aInputs, 0, sizeof(aInputs));
+    for (t = 0; t < MECHA_TICK_HZ * 180; t++) {
+        mecha_sim_tick(&world, aInputs, MECHA_MAX_MECHS);
+        for (i = 0; i < MECHA_MAX_MECHS; i++) {
+            const tMechaMech *pMech = &world.aMechs[i];
+            int j;
+
+            if (!mecha_mech_alive(pMech))
+                continue;
+            if (pMech->byTeam == 0 && pMech->fX > fFar0)
+                fFar0 = pMech->fX;
+            if (pMech->byTeam == 1 && pMech->fX < fFar1)
+                fFar1 = pMech->fX;
+            for (j = 0; j < MECHA_MAX_MECHS; j++) {
+                const tMechaMech *pFoe = &world.aMechs[j];
+                float fGap;
+
+                if (!mecha_mech_alive(pFoe) || pFoe->byTeam == pMech->byTeam)
+                    continue;
+                fGap = mecha_length2(pFoe->fX - pMech->fX,
+                                     pFoe->fZ - pMech->fZ);
+                if (fGap < fNearest)
+                    fNearest = fGap;
+            }
+        }
+        if (world.match.byPhase == MECHA_PHASE_MATCH_OVER)
+            break;
+    }
+    printf("   sides advanced to %.0f m and %.0f m, closing to %.0f m\n",
+           fFar0 / MECHA_METRE, fFar1 / MECHA_METRE,
+           fNearest / MECHA_METRE);
+    /* Both sides are out of their keeps and well down a causeway -- the
+     * lanes start at 144 m and the bases sit behind that. */
+    CHECK(fFar0 > -MECHA_M(140.0f));
+    CHECK(fFar1 < MECHA_M(140.0f));
+    /* And they are fighting at a range a weapon can do something about,
+     * rather than across the whole map. */
+    CHECK(fNearest < MECHA_M(260.0f));
+    return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 static int test_the_causeway_map_is_a_causeway(void)
 {
     tMechaArena arena;
@@ -7302,6 +7451,10 @@ int main(void)
           test_the_pilot_turns_a_dash_it_is_already_in },
         { "the causeway map is a causeway",
           test_the_causeway_map_is_a_causeway },
+        { "a causeway publishes a way along it",
+          test_a_causeway_publishes_a_way_along_it },
+        { "pilots walk a causeway to close",
+          test_pilots_walk_a_causeway_to_close },
     };
     size_t i;
 

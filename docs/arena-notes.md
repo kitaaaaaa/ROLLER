@@ -1952,3 +1952,111 @@ WORLDS does not finish at all — the last few machines sit in their own halves
 trading long-range shots, which a free-for-all on that map does too, so it is
 the map's size rather than the mode. With the round clock on (the briefing's
 default) it is decided on armour like any other round.
+
+## AI-12 — three things that stopped a pilot leaving its own half
+
+Measured on FACING WORLDS with computer pilots on both sides and no round clock:
+sixteen machines, ten minutes, nobody past their own base. Three separate
+faults, none of them the one it looked like.
+
+**A burst that cannot be taken is not a reason to walk home.** The footing rules
+checked the whole length of a boost burst along the wanted heading and, when it
+failed, cancelled the boost *and reversed the stick*. With an enemy a
+burst-and-a-bit away across a hole that fails every tick, so the pilot walked
+backwards out of every approach it started. The burst check now only refuses the
+burst; backing off is what the walking check is for.
+
+**A gap narrower than a stride read as solid ground.** `mecha_ai_footing_clear`
+sampled one point at the far end of the look-ahead. The far lip of a hole is
+ground, so the hole was invisible. It samples the whole way now, a step of
+`MECHA_AI_FOOTING_STEP` at a time, and `mecha_ai_footing_run` returns how far it
+got — which is what the fan below needs anyway.
+
+**Standing still, a machine has no heading.** The carry check looks along the
+machine's own velocity. At a standstill that is a couple of centimetres a second
+of noise pointing anywhere, so a pilot loitering near an edge threw itself into
+an escape sixty times a second and never went anywhere. `MECHA_AI_CARRY_MIN` is
+the floor below which there is nothing being carried.
+
+With those three fixed a pilot gets round a gap rather than backing away from
+one: the fan in `mecha_ai_skirt` turns off the wanted heading a step at a time
+and takes the bearing that gets *furthest* before the ground runs out — not the
+first that is clear, because every bearing over a hole is clear somewhere past
+the far lip. The choice is held for `MECHA_AI_SKIRT_HOLD` ticks, the way the
+strafe direction is held: re-picking on a causeway barely wider than the
+look-ahead gives a different answer every tick, and a machine that changes its
+mind sixty times a second walks on the spot.
+
+That was worth going from nought fights in five finishing to three, and it is as
+far as looking at the ground in front of you can get: the rest is AI-13.
+
+## AI-13 — the way spine, which is Whiplash's racing line
+
+The race game's computer drivers do not look at the road in front of them. Each
+track chunk carries four AI lines (`localdata[].fAILine1..4`), the driver holds
+an index into them (`iAICurrentLine`, swapped by `changeline` when `linevalid`
+says the one it is on has run out), and `findnearcarsforce` walks the chunks
+ahead by a strategy distance scaled by speed, interpolates the line offset
+between two chunks, and hands back a world-space point. The whole of the
+steering is then `atan2` to that point, clamped by the engine's steering
+sensitivity.
+
+The arena has no track, so the arena publishes the line: `tMechaWay` is a chain
+of stations, each a centre and how far either side of it there is still ground,
+and an arena that needs one fills it in as it builds itself. FACING WORLDS
+publishes two, one per causeway, straight out of the same measured table the
+lanes are painted from [ARENA-17], with an end on each base so a machine in a
+keep is led out of a doorway rather than at the hole. Every other arena
+publishes none and nothing about them changes.
+
+`mecha_arena_way_aim` is `findnearcarsforce`: the way the machine is nearest,
+the station it is nearest on it, the station to head for, then walk the chain by
+the look-ahead and interpolate where that lands. Four lines across the way,
+picked per machine at spawn as Whiplash picks its driver's, so eight a side do
+not file down the middle of one. Two details the race game does not need:
+
+- **The link.** Where the enemy is on the *other* way, the goal is not the
+  station beside them -- that is straight across the hole -- but the station
+  where the two ways come closest, which on this map is the crossing at the
+  pinch. Each way stores that index per other way, worked out once when the
+  arena finishes building.
+- **The soft edge.** The ground is a grid of cells with heights interpolated
+  between them, so the outermost cell of any edge is a ramp into the void rather
+  than floor. The lines are laid out on the station's width less one cell, or a
+  machine on the outside line is already sliding.
+
+A pilot follows a way only while the straight line to the enemy has nothing to
+walk on, and only as far as its own feet can see: the way is the arena's own
+ground, but getting onto one from wherever the machine is standing is not, and a
+walker that trusted the line from the far side of the hole walked into it. What
+cannot be walked goes to the fan in AI-12, which now has the way to aim off
+instead of the enemy.
+
+The car gets it too, and needed it most -- it cannot step sideways off a
+causeway it has driven onto the edge of. Its one extra rule is the moment of
+committing: nose already on the way, way clear ahead, wheels still carrying the
+turn that put it there. A driver that lifted through that moment never joined a
+lane at all and sat at the mouth of one for the whole round.
+
+Measured over twelve sixteen-machine fights, no clock, ten-minute cap:
+
+|                               | before  | with the spine |
+| ----------------------------- | ------- | -------------- |
+| fights decided                | 0 of 12 | 9 of 12        |
+| both sides out of their bases | never   | every fight    |
+| closest the two sides come    | 400 m+  | 175 m          |
+| machines lost to the hole     | —       | 1.2 a fight    |
+
+## ARENA-19 — the causeways are built wider than they were measured
+
+CTF-Face is walked by a man. This is driven by something eight metres across, on
+ground whose cells are eight and three quarter metres and whose outermost cell
+at any edge is a ramp rather than floor. At the measured width that leaves about
+a machine and a half of usable lane -- a tightrope, not a causeway to fight
+along, and it showed: pilots spent more of a fight falling off the map than
+fighting on it.
+
+The station table keeps the measurements. The builder scales their half-widths
+by `fWide` (1.6) and nothing else: the bow, the pinch, the climb and the hole
+between the lanes are all the map's own. Falls on FACING WORLDS went from 3.4
+machines a fight to 1.0.

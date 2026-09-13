@@ -102,6 +102,17 @@ bool mecha_arena_trace_segment(const tMechaArena *pArena,
 void mecha_arena_spawn_point(const tMechaArena *pArena, int iSlot, int iCount,
                              float *pfX, float *pfZ, int *piFacing);
 
+/*
+ * Where to head next to get from (fX,fZ) towards (fToX,fToZ) along one of
+ * the arena's ways, or false when there is no way worth joining -- no ways
+ * at all, none within reach, or one that leads the wrong way. fLook is how
+ * far ahead along the way to aim, and iLine picks one of the four lines
+ * across it. Writes the aim point in world terms. [AI-13]
+ */
+bool mecha_arena_way_aim(const tMechaArena *pArena, float fX, float fZ,
+                         float fToX, float fToZ, float fLook, int iLine,
+                         float *pfAimX, float *pfAimZ);
+
 //-------------------------------------------------------------------------------------------------
 /* The tallest lip a walking mech steps straight up onto. */
 #define MECHA_ARENA_STEP_UP (1.5f * MECHA_METRE)

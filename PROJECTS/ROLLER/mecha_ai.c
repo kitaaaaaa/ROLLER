@@ -91,36 +91,58 @@ static float mecha_ai_stopping_look(const tMechaMechDef *pDef, float fSpeed,
 
 //-------------------------------------------------------------------------------------------------
 
+/* How far that way the machine gets before there is nothing to stand on,
+ * sampling the whole way rather than the far end of it: the far lip of a gap
+ * is ground too. Returns fLook when the way is clear. [AI-12] */
+static float mecha_ai_footing_run(const tMechaWorld *pWorld,
+                                  const tMechaMech *pSelf, float fDirX,
+                                  float fDirZ, float fLook, bool bEdgeKills)
+{
+  float fLen = mecha_length2(fDirX, fDirZ);
+  int iSteps;
+  int i;
+
+  if (fLen <= 0.01f || fLook <= 0.0f)
+    return fLook;
+
+  iSteps = (int)(fLook / MECHA_AI_FOOTING_STEP) + 1;
+
+  for (i = 1; i <= iSteps; i++) {
+    float fAt = fLook * (float)i / (float)iSteps;
+    float fX = pSelf->fX + fDirX / fLen * fAt;
+    float fZ = pSelf->fZ + fDirZ / fLen * fAt;
+    bool bClear;
+
+    /*
+     * A drop is a drop however the arena makes one. A pit is a flag and the
+     * edge of an open arena is its boundary, but ground that simply falls
+     * away -- the sides of a causeway, the far side of a roof -- is
+     * neither, and a pilot that only knew about the other two walked off
+     * it. [AI-11]
+     */
+    bClear = (mecha_arena_surface(&pWorld->arena, fX, fZ) & MECHA_SURF_PIT)
+                 == 0
+             && mecha_arena_ground_height(&pWorld->arena, fX, fZ, pSelf->fY)
+                  >= pSelf->fGroundY - MECHA_AI_FOOTING_DROP
+             && (!bEdgeKills || mecha_arena_contains(&pWorld->arena, fX, fZ));
+
+    if (!bClear)
+      return fLook * (float)(i - 1) / (float)iSteps;
+  }
+
+  return fLook;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 /* Is there still an arena fLook metres that way? The direction need not be
  * normalised; a zero-length one is going nowhere and so is always fine. */
 static bool mecha_ai_footing_clear(const tMechaWorld *pWorld,
                                    const tMechaMech *pSelf, float fDirX,
                                    float fDirZ, float fLook, bool bEdgeKills)
 {
-  float fLen = mecha_length2(fDirX, fDirZ);
-  float fX;
-  float fZ;
-
-  if (fLen <= 0.01f)
-    return true;
-
-  fX = pSelf->fX + fDirX / fLen * fLook;
-  fZ = pSelf->fZ + fDirZ / fLen * fLook;
-
-  if ((mecha_arena_surface(&pWorld->arena, fX, fZ) & MECHA_SURF_PIT) != 0)
-    return false;
-
-  /*
-   * And a drop is a drop however the arena makes one. A pit is a flag and
-   * the edge of an open arena is its boundary, but ground that simply falls
-   * away -- the sides of a causeway, the far side of a roof -- is neither,
-   * and a pilot that only knew about the other two walked off it. [AI-11]
-   */
-  if (mecha_arena_ground_height(&pWorld->arena, fX, fZ, pSelf->fY)
-      < pSelf->fGroundY - MECHA_AI_FOOTING_DROP)
-    return false;
-
-  return !bEdgeKills || mecha_arena_contains(&pWorld->arena, fX, fZ);
+  return mecha_ai_footing_run(pWorld, pSelf, fDirX, fDirZ, fLook, bEdgeKills)
+         >= fLook - 0.01f;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -313,6 +335,67 @@ static bool mecha_ai_has_line(const tMechaWorld *pWorld, int iMechIdx,
 
 //-------------------------------------------------------------------------------------------------
 
+/*
+ * A way round a gap: the bearing off the wanted one that gets furthest
+ * before the ground runs out. Not the first that is clear, the way the
+ * detour past a building works [AI-09] -- every bearing over a hole is clear
+ * somewhere past the far lip. Ties go to the smaller turn and then to the
+ * side the machine is already drifting. Overwrites the direction. [AI-12]
+ */
+static bool mecha_ai_skirt(const tMechaWorld *pWorld, const tMechaMech *pSelf,
+                           float fLook, bool bEdgeKills, float *pfDirX,
+                           float *pfDirZ)
+{
+  float fLen = mecha_length2(*pfDirX, *pfDirZ);
+  float fWantX;
+  float fWantZ;
+  float fBest;
+  float fBestX = 0.0f;
+  float fBestZ = 0.0f;
+  int iDrift;
+  int iFan;
+
+  if (fLen <= 0.01f)
+    return false;
+  fWantX = *pfDirX / fLen;
+  fWantZ = *pfDirZ / fLen;
+
+  /* Which way it is already going, in the same terms as the fan: the side
+   * the velocity leans is the side tried first. */
+  iDrift = (pSelf->fVelX * fWantZ - pSelf->fVelZ * fWantX) >= 0.0f ? 1 : -1;
+
+  fBest = mecha_ai_footing_run(pWorld, pSelf, fWantX, fWantZ, fLook,
+                               bEdgeKills);
+
+  for (iFan = 1; iFan <= MECHA_AI_SKIRT_FANS; iFan++) {
+    int iSide;
+
+    for (iSide = 0; iSide < 2; iSide++) {
+      int iTurn = iFan * MECHA_AI_SKIRT_STEP * (iSide ? -iDrift : iDrift);
+      float fCos = mecha_cos(iTurn);
+      float fSin = mecha_sin(iTurn);
+      float fTryX = fWantX * fCos - fWantZ * fSin;
+      float fTryZ = fWantX * fSin + fWantZ * fCos;
+      float fRun = mecha_ai_footing_run(pWorld, pSelf, fTryX, fTryZ, fLook,
+                                        bEdgeKills);
+
+      if (fRun <= fBest)
+        continue;
+      fBest = fRun;
+      fBestX = fTryX;
+      fBestZ = fTryZ;
+    }
+  }
+
+  if (fBestX == 0.0f && fBestZ == 0.0f)
+    return false;
+  *pfDirX = fBestX;
+  *pfDirZ = fBestZ;
+  return true;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 /* Is anything hostile about to pass through us? Returns the sign of the
  * evasive strafe (-1 left, +1 right), or 0 when nothing needs dodging. */
 static int mecha_ai_incoming(const tMechaWorld *pWorld, int iMechIdx,
@@ -461,6 +544,9 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
   /* Set when the pilot has found a way past whatever is between it and the
    * enemy, which is also a reason not to give up and guard. [AI-09] */
   bool bDetour = false;
+  /* Set when the pilot is steering for a point on one of the arena's own
+   * ways rather than at the enemy. [AI-13] */
+  bool bWay = false;
   const tMechaAiProfile *pProfile;
   float fDistance;
   float fPreferred;
@@ -477,6 +563,10 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
   pSelf = &pWorld->aMechs[iMechIdx];
   if (!mecha_mech_alive(pSelf))
     return;
+  /* The way round a gap goes stale on its own, whether or not the pilot
+   * needs one this tick. [AI-12] */
+  if (pWorld->aMechs[iMechIdx].iSkirtTicks > 0)
+    pWorld->aMechs[iMechIdx].iSkirtTicks--;
   pDef = mecha_def_get((int)pSelf->byDefIdx);
   pProfile = mecha_ai_profile(pWorld);
 
@@ -513,8 +603,28 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
     int iDriveOff;
     float fSpeed = mecha_length2(pSelf->fVelX, pSelf->fVelZ);
     bool bClear = true;
+    /* Set once the driver is steering for a point on one of the arena's own
+     * ways rather than straight at the enemy. [AI-13] */
+    bool bOnWay = false;
     float fWayX = pTarget->fX - pSelf->fX;
     float fWayZ = pTarget->fZ - pSelf->fZ;
+    float fWayLook = MECHA_AI_WAY_LOOK + fSpeed * MECHA_AI_WAY_LEAD;
+    float fAimX;
+    float fAimZ;
+
+    /* The race game's own driver, near enough: when the ground straight at
+     * the enemy runs out, aim along the arena's way instead. A car needs it
+     * most -- it cannot step sideways off a lane. [AI-13] */
+    if (!mecha_ai_footing_clear(pWorld, pSelf, fWayX, fWayZ, fWayLook,
+                                pWorld->arena.byShape == MECHA_ARENA_OPEN)
+        && mecha_arena_way_aim(&pWorld->arena, pSelf->fX, pSelf->fZ,
+                               pTarget->fX, pTarget->fZ, fWayLook,
+                               (int)pSelf->byAiLine, &fAimX, &fAimZ)) {
+      fWayX = fAimX - pSelf->fX;
+      fWayZ = fAimZ - pSelf->fZ;
+      iDriveBearing = mecha_atan2_angle(fWayX, fWayZ);
+      bOnWay = true;
+    }
 
     /*
      * Steer for the enemy, but not through the building in front of the
@@ -538,13 +648,24 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
         && iDriveOff > -MECHA_AI_DRIVE_STRAIGHT)
       pOut->iTurn = 0;
 
-    /* A car cannot step back, so all it can do about an edge is lift off
-     * and turn. */
+    /*
+     * A car cannot step back, so all it can do about an edge is lift off and
+     * turn, watching its own momentum as far ahead as it takes to stop. The
+     * exception is the moment of joining a way -- nose on it, way clear,
+     * wheels still carrying the turn -- without which no car ever commits to
+     * a lane. [AI-13]
+     */
     if (fSpeed > 0.01f) {
-      bClear = mecha_ai_footing_clear(
-          pWorld, pSelf, pSelf->fVelX, pSelf->fVelZ,
-          mecha_ai_stopping_look(pDef, fSpeed, MECHA_AI_FOOTING_CANCEL),
-          pWorld->arena.byShape == MECHA_ARENA_OPEN);
+      bool bEdge = pWorld->arena.byShape == MECHA_ARENA_OPEN;
+      float fStop = mecha_ai_stopping_look(pDef, fSpeed,
+                                           MECHA_AI_FOOTING_CANCEL);
+
+      bClear = mecha_ai_footing_clear(pWorld, pSelf, pSelf->fVelX,
+                                      pSelf->fVelZ, fStop, bEdge);
+      if (!bClear && bOnWay && iDriveOff < MECHA_AI_DRIVE_LIFT
+          && iDriveOff > -MECHA_AI_DRIVE_LIFT)
+        bClear = mecha_ai_footing_clear(pWorld, pSelf, fWayX, fWayZ, fStop,
+                                        bEdge);
     }
 
     if (!bClear) {
@@ -714,6 +835,43 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
       pOut->bDash = true;
   }
 
+  /* --- following a way across ------------------------------------------- */
+
+  /*
+   * A Whiplash driver follows its AI line the whole way round a track; a
+   * pilot here follows one of the arena's ways only while the straight line
+   * to the enemy has nothing to walk on -- never, on an arena that publishes
+   * no way. Aiming at a point along it is the whole of it. [AI-13]
+   */
+  if (!pOut->bGuard && !pDef->bWheeled) {
+    bool bEdge = pWorld->arena.byShape == MECHA_ARENA_OPEN;
+    float fSpeed = mecha_length2(pSelf->fVelX, pSelf->fVelZ);
+    float fLook = MECHA_AI_WAY_LOOK + fSpeed * MECHA_AI_WAY_LEAD;
+    float fToX = pTarget->fX - pSelf->fX;
+    float fToZ = pTarget->fZ - pSelf->fZ;
+    float fAimX;
+    float fAimZ;
+
+    if (!mecha_ai_footing_clear(pWorld, pSelf, fToX, fToZ, fLook, bEdge)
+        && mecha_arena_way_aim(&pWorld->arena, pSelf->fX, pSelf->fZ,
+                               pTarget->fX, pTarget->fZ, fLook,
+                               (int)pSelf->byAiLine, &fAimX, &fAimZ)) {
+      float fAimToX = fAimX - pSelf->fX;
+      float fAimToZ = fAimZ - pSelf->fZ;
+
+      mecha_ai_stick_for(pSelf, fAimToX, fAimToZ, &pOut->iMoveX,
+                         &pOut->iMoveZ);
+      /* A way is ground the arena vouches for; getting onto one from where
+       * the machine stands is not. So it is walked only as far as the feet
+       * can see, and the rest is left to the footing rules below -- which
+       * now have the way to aim off instead of the enemy. */
+      bWay = mecha_ai_footing_clear(pWorld, pSelf, fAimToX, fAimToZ,
+                                    mecha_ai_stopping_look(
+                                      pDef, fSpeed, MECHA_AI_FOOTING_LEAD),
+                                    bEdge);
+    }
+  }
+
   /* --- watching where it puts its feet ---------------------------------- */
 
   /*
@@ -735,28 +893,57 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
     float fMoveZ = (float)pOut->iMoveZ / 100.0f;
     float fWantX = fForwardX * fMoveZ + fForwardZ * fMoveX;
     float fWantZ = fForwardZ * fMoveZ - fForwardX * fMoveX;
+    float fBurst = pDef->fDashSpeed
+                   * (float)(pDef->iDashTicks + MECHA_DASH_COAST_TICKS)
+                   * MECHA_TICK_SECONDS;
+    float fStride = mecha_ai_stopping_look(pDef, fSpeed,
+                                           MECHA_AI_FOOTING_LEAD);
     bool bBack = false;
 
-    /* Pressing boost buys the whole burst, coast and all, in one press. */
+    /* A burst that would end over nothing is simply not taken. The feet are
+     * still where they were, so there is nothing to back away from. [AI-12] */
     if (pOut->bDash && !bCommitted
-        && !mecha_ai_footing_clear(
-               pWorld, pSelf, fWantX, fWantZ,
-               pDef->fDashSpeed
-                   * (float)(pDef->iDashTicks + MECHA_DASH_COAST_TICKS)
-                   * MECHA_TICK_SECONDS,
-               bEdgeKills)) {
+        && !mecha_ai_footing_clear(pWorld, pSelf, fWantX, fWantZ, fBurst,
+                                   bEdgeKills))
       pOut->bDash = false;
-      bBack = true;
-    }
 
-    /* On foot, a stride of reaction and whatever it is still carrying. */
+    /*
+     * On foot, a stride of reaction and whatever it is still carrying. This
+     * one is about the ground under the next step, so when it fails the
+     * pilot looks for a way round before it gives up and backs off: turning
+     * off the line until there is ground again is what walks a causeway,
+     * and it is the same move as going round a building [AI-09].
+     */
     if (!bCommitted
-        && !mecha_ai_footing_clear(pWorld, pSelf, fWantX, fWantZ,
-                                   mecha_ai_stopping_look(
-                                       pDef, fSpeed, MECHA_AI_FOOTING_LEAD),
+        && !mecha_ai_footing_clear(pWorld, pSelf, fWantX, fWantZ, fStride,
                                    bEdgeKills)) {
+      tMechaMech *pMe = &pWorld->aMechs[iMechIdx];
+      float fHeldX = mecha_sin(pMe->iSkirtYaw);
+      float fHeldZ = mecha_cos(pMe->iSkirtYaw);
+
       pOut->bDash = false;
-      bBack = true;
+      /* The way round it settled on a moment ago, while that still has
+       * ground under it: picking again every tick on a narrow causeway is
+       * how a machine walks on the spot. [AI-12] */
+      if (pMe->iSkirtTicks > 0
+          && mecha_ai_footing_clear(pWorld, pSelf, fHeldX, fHeldZ, fStride,
+                                    bEdgeKills)) {
+        fWantX = fHeldX;
+        fWantZ = fHeldZ;
+      } else if (mecha_ai_skirt(pWorld, pSelf, fStride, bEdgeKills, &fWantX,
+                                &fWantZ)) {
+        pMe->iSkirtYaw = mecha_atan2_angle(fWantX, fWantZ);
+        pMe->iSkirtTicks = MECHA_AI_SKIRT_HOLD;
+      } else {
+        pMe->iSkirtTicks = 0;
+        bBack = true;
+      }
+
+      /* Walked, not boosted: a burst cannot be taken back, and this heading
+       * is only good for the stride that was looked at. */
+      if (!bBack)
+        mecha_ai_stick_for(pSelf, fWantX, fWantZ, &pOut->iMoveX,
+                           &pOut->iMoveZ);
     }
 
     if (bBack) {
@@ -767,7 +954,11 @@ void mecha_ai_think(tMechaWorld *pWorld, int iMechIdx, tMechaInput *pOut)
 
     /* Letting go of the stick is not stopping, so what the machine is still
      * carrying gets checked whether it asked for it or not. [AI-05] */
-    if (!bCommitted && pSelf->byMove != MECHA_MOVE_JUMP
+    /* What it is already carrying, which the stick cannot take back. Not
+     * while it walks a way: that ground is the arena's own, and second-
+     * guessing it reversed pilots out of causeways. [AI-13] */
+    if (!bCommitted && !bWay && fSpeed > MECHA_AI_CARRY_MIN
+        && pSelf->byMove != MECHA_MOVE_JUMP
         && pSelf->byMove != MECHA_MOVE_CANCEL
         && !mecha_ai_footing_clear(pWorld, pSelf, pSelf->fVelX, pSelf->fVelZ,
                                    mecha_ai_stopping_look(
